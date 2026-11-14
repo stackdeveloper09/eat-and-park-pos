@@ -83,12 +83,11 @@ export default function DeliveryApp() {
       const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       
       // Strict Filter: Sirf valid delivery orders (No Walk-ins, No missing address/phone)
-      const validOrders = all.filter(o => 
+            const validOrders = all.filter(o =>
         o.status !== "cancelled" &&
-        o.customer?.name && o.customer.name !== "Walk-in" &&
-        o.customer?.phone && o.customer?.phone.length >= 10 &&
         (o.customer?.exactAddress || o.customer?.address)
       );
+
 
       const active = validOrders
         .filter(o => o.status !== "served")
@@ -115,9 +114,13 @@ export default function DeliveryApp() {
         .filter(o => o.status === "served" && (!o.deliveredBy || o.deliveredBy === user.email || o.deliveredBy === user.uid))
         .sort((a, b) => b.createdAt - a.createdAt)
         .slice(0, 50);
-      setHistoryOrders(hist);
+            setHistoryOrders(hist);
+    }, (err) => {
+      console.error("Delivery orders listener:", err.code, err.message);
+      alert("Orders load nahi ho rahe: " + (err.code || err.message));
     });
     return () => unsub();
+
   }, [user]);
 
   // Stats for Dashboard
@@ -319,7 +322,8 @@ export default function DeliveryApp() {
               <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 5 }}>{selectedOrder.customer?.name}</div>
               <div style={{ color: "#8B9BB4", marginBottom: 10, fontWeight: 700 }}>📞 {selectedOrder.customer?.phone}</div>
               <div style={{ color: "#fff", marginBottom: 15, lineHeight: 1.4, fontSize: 14 }}>
-                📍 {selectedOrder.customer?.exactAddress} {selectedOrder.customer?.pincode ? "(PIN: " + selectedOrder.customer.pincode + ")" : ""}
+                📍 {selectedOrder.customer?.exactAddress || selectedOrder.customer?.address} {selectedOrder.customer?.pincode
+?.pincode ? "(PIN: " + selectedOrder.customer.pincode + ")" : ""}
               </div>
               
               <div style={{ display: "flex", gap: 10 }}>
