@@ -1322,7 +1322,8 @@ function ParcelView({ C, isMobile, orders, onNew, onBill, onAdd }) {
         <button
           onClick={(e) => {
             e.stopPropagation();
-            const match = o.customer.address.match(/Lat: ([d.-]+), Lng: ([d.-]+)/);
+            const match = o.customer.address.match(/Lat: ([\d.-]+), Lng: ([\d.-]+)/
+
             if (match) window.open(`https://www.google.com/maps/search/?api=1&query=${match[1]},${match[2]}`, "_blank");
           }}
           style={{ marginTop: 6, padding: "6px 12px", background: C.blue, color: "#fff", border: "none", borderRadius: 6, fontWeight: 800, fontSize: 11, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4, width: "100%", justifyContent: "center" }}
