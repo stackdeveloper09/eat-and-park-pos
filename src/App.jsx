@@ -3283,45 +3283,26 @@ const handleWaiterPinSubmitOld = () => {
     if (submitLockRef.current) return;
     
     // ✅ FIX: Har return se pehle button reset karo
-    if (isScheduled && (!scheduleDate || !scheduleTime)) { 
-      showToast("⚠️ Schedule ki date aur time dono daalo", 'error'); 
-      setIsProcessingPayment(false); // Button reset
-      return; 
-    }
-    
-    if (orderType === "parcel" && !parcelOpenNow()) { 
-      showToast(PARCEL_MSG, 'error'); 
-      setIsProcessingPayment(false); // Button reset
-      return; 
-    }
-    
+    if (isScheduled && (!scheduleDate || !scheduleTime)) { showToast("⚠️ Schedule ki date aur time dono daalo", 'error'); setIsProcessingPayment(false); return; }
+    if (orderType === "parcel" && !parcelOpenNow()) { showToast(PARCEL_MSG, 'error'); setIsProcessingPayment(false); return; }
     const _gone = cartItems.filter(([id]) => !menu.some((m) => m.id === id && m.available));
-    if (_gone.length > 0) { 
-      showToast("⚠️ " + _gone.map(([id]) => (menu.find((m) => m.id === id) || {}).name || "Item").join(", ") + " ab available nahi hai — cart se hata do", 'error'); 
-      setIsProcessingPayment(false); // Button reset
+    if (_gone.length > 0) { showToast("⚠️ " + _gone.map(([id]) => (menu.find((m) => m.id === id) || {}).name || "Item").join(", ") + " ab available nahi hai — cart se hata do", 'error'); setIsProcessingPayment(false); return; }
+    if (cartItems.length === 0) { setIsProcessingPayment(false); return; }
+
+    // ✅ FIX: Guest mode me Name aur Phone optional hain
+    if (!guestMode && !custName.trim()) { showToast("⚠️ Enter Name", 'error'); setIsProcessingPayment(false); return; }
+    if (!guestMode && (!custPhone.trim() || custPhone.length < 10)) { showToast("⚠️ Enter valid Phone", 'error'); setIsProcessingPayment(false); return; }
+
+    // ✅ SMART LOGIC: Agar table select hai (QR scan), toh address nahi maangega
+    const isTakeawayFromTable = orderType === "parcel" && table > 0;
+    
+    if (orderType === "parcel" && !isTakeawayFromTable && (!custAddress.trim() || !custPinCode || custPinCode.length !== 6)) { 
+      showToast("⚠️ Delivery ke liye Address aur 6-digit Pincode zaroori hai!", 'error'); 
+      setIsProcessingPayment(false); 
       return; 
     }
-    
-    if (cartItems.length === 0) {
-      setIsProcessingPayment(false); // Button reset
-      return;
-    }
-    
-    if (!custName.trim()) { 
-      showToast("⚠️ Enter Name", 'error'); 
-      setIsProcessingPayment(false); // Button reset
-      return; 
-    }
-    
-    if (guestMode ? (custPhone.trim() && custPhone.trim().length < 10) : (!custPhone.trim() || custPhone.length < 10)) { 
-      showToast(guestMode ? "⚠️ Phone 10 digit ka daalo ya khali chhod do" : "⚠️ Enter valid Phone", 'error'); 
-      setIsProcessingPayment(false); // Button reset
-      return; 
-    }
-    
-    if (orderType === "parcel" && !guestMode && (!custAddress.trim() || !custExactAddress.trim() || !custPinCode || custPinCode.length !== 6)) { 
-      showToast("⚠️ Location, Exact Address aur 6-digit Pincode zaroori hai!", 'error'); 
-      setIsProcessingPayment(false); // Button reset
+
+    setIsProcessingPayment(true); // Button reset
       return; 
     }
 
@@ -3354,7 +3335,13 @@ const handleWaiterPinSubmitOld = () => {
 
       const order = {
         id: orderId, table, orderType,
-        customer: { name: custName, phone: custPhone.trim() || "WALK-IN", address: orderType === "parcel" ? custAddress : "", exactAddress: custExactAddress, pincode: custPinCode },
+customer: { 
+          name: custName.trim() || "Guest", 
+          phone: custPhone.trim() || "WALK-IN", 
+          address: isTakeawayFromTable ? "TAKEAWAY (At Table)" : (orderType === "parcel" ? custAddress : ""), 
+          exactAddress: custExactAddress, 
+          pincode: custPinCode 
+        },
         items: initialItems,
         claimedReward: claimedReward ? claimedReward.item : null,
         rewardUsedCoins: claimedReward ? claimedReward.cost : 0,
@@ -3363,7 +3350,8 @@ const handleWaiterPinSubmitOld = () => {
         couponDiscountAmount: discountAmount,
         loyaltyDiscount, loyaltyTier: loyaltyTier.name,
         deliveryFee, subtotal, finalTotal,
-        notes, payment: paymentMethod,
+notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
+        payment: paymentMethod,
         paymentStatus: paymentInfo.status, paymentId: paymentInfo.paymentId,
         status: "new", paid: false,
         createdAt: Date.now(),
@@ -4101,7 +4089,7 @@ const handleWaiterPinSubmitOld = () => {
                   {appliedDiscount > 0 && (<div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, color: COLORS.success }}><span>Coupon ({appliedDiscount}%)</span><span>-{inr(discountAmount)}</span></div>)}
                   {loyaltyDiscount > 0 && (<div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, color: COLORS.gold }}><span>Loyalty</span><span>-{inr(loyaltyDiscount)}</span></div>)}
                   {vipDiscount > 0 && (<div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, color: COLORS.gold }}><span>👑 VIP Elite (20%)</span><span>-{inr(vipDiscount)}</span></div>)}
-                  {orderType === "parcel" && !guestMode && (<div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, color: COLORS.copper }}><span>Delivery</span><span>+{inr(deliveryFee)}</span></div>)}
+                  {orderType === "parcel" && (!table || table === 0) && (<div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, color: COLORS.copper }}><span>Delivery</span><span>+{inr(deliveryFee)}</span></div>)}
                   <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 800, fontSize: 18, borderTop: `1px solid ${COLORS.line}`, paddingTop: 8, marginTop: 4 }}>
                     <span>Total</span><span style={{ color: COLORS.copper, fontFamily: "'JetBrains Mono', monospace" }}>{inr(finalTotal)}</span>
                   </div>
