@@ -856,7 +856,7 @@ const isOwner = ["owner", "admin", "manager"].includes(String(staffData?.role ||
     // 🔍 DEBUG: Auth state log karo
 
 			console.log("🔐 AUTH STATE:", user ? `Logged in as ${user.uid}` : "NOT LOGGED IN");
-		});
+
 
 		const unsubMenu = onSnapshot(doc(db, "settings", "menu"), (snap) => {
   if (snap.exists() && Array.isArray(snap.data().items) && snap.data().items.length > 0) {
