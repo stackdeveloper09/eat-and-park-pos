@@ -45,9 +45,7 @@ export const buildPaidPatch = (order, mode, by) => {
     if (!isDelivery && order.status !== "cancelled" && order.status !== "served") {
     patch.status = "served";
     patch.servedAt = Date.now();
-    if (Array.isArray(order.kots) && order.kots.length) {
-      patch.kots = order.kots.map((k) => ({ ...k, status: "served" }));
-    }
+    
   }
   return patch;
 
