@@ -1324,7 +1324,7 @@ function ParcelView({ C, isMobile, orders, onNew, onBill, onAdd }) {
         <button
           onClick={(e) => {
             e.stopPropagation();
-            const match = o.customer.address.match(/Lat: ([\d.-]+), Lng: ([\d.-]+)/
+            const match = o.customer.address.match(/Lat: ([\d.-]+), Lng: ([\d.-]+)/);
 
             if (match) window.open(`https://www.google.com/maps/search/?api=1&query=${match[1]},${match[2]}`, "_blank");
           }}
