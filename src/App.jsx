@@ -3280,17 +3280,52 @@ const handleWaiterPinSubmitOld = () => {
   }, [flashSaleItems]);
 
   const handlePlaceOrder = useCallback(async () => {
-if (submitLockRef.current) return;
-  
-    if (isScheduled && (!scheduleDate || !scheduleTime)) { showToast("⚠️ Schedule ki date aur time dono daalo", 'error'); return; }
-    if (orderType === "parcel" && !parcelOpenNow()) { showToast(PARCEL_MSG, 'error'); return; }
+    if (submitLockRef.current) return;
+    
+    // ✅ FIX: Har return se pehle button reset karo
+    if (isScheduled && (!scheduleDate || !scheduleTime)) { 
+      showToast("⚠️ Schedule ki date aur time dono daalo", 'error'); 
+      setIsProcessingPayment(false); // Button reset
+      return; 
+    }
+    
+    if (orderType === "parcel" && !parcelOpenNow()) { 
+      showToast(PARCEL_MSG, 'error'); 
+      setIsProcessingPayment(false); // Button reset
+      return; 
+    }
+    
     const _gone = cartItems.filter(([id]) => !menu.some((m) => m.id === id && m.available));
-    if (_gone.length > 0) { showToast("⚠️ " + _gone.map(([id]) => (menu.find((m) => m.id === id) || {}).name || "Item").join(", ") + " ab available nahi hai — cart se hata do", 'error'); return; }
-    if (cartItems.length === 0) return;
-    if (!custName.trim()) { showToast("⚠️ Enter Name", 'error'); return; }
-   if (guestMode ? (custPhone.trim() && custPhone.trim().length < 10) : (!custPhone.trim() || custPhone.length < 10)) { showToast(guestMode ? "⚠️ Phone 10 digit ka daalo ya khali chhod do" : "⚠️ Enter valid Phone", 'error'); return; }
-    if (orderType === "parcel" && !guestMode && (!custAddress.trim() || !custExactAddress.trim() || !custPinCode || custPinCode.length !== 6)) { showToast("⚠️ Location, Exact Address aur 6-digit Pincode zaroori hai!", 'error'); return; }
+    if (_gone.length > 0) { 
+      showToast("⚠️ " + _gone.map(([id]) => (menu.find((m) => m.id === id) || {}).name || "Item").join(", ") + " ab available nahi hai — cart se hata do", 'error'); 
+      setIsProcessingPayment(false); // Button reset
+      return; 
+    }
+    
+    if (cartItems.length === 0) {
+      setIsProcessingPayment(false); // Button reset
+      return;
+    }
+    
+    if (!custName.trim()) { 
+      showToast("⚠️ Enter Name", 'error'); 
+      setIsProcessingPayment(false); // Button reset
+      return; 
+    }
+    
+    if (guestMode ? (custPhone.trim() && custPhone.trim().length < 10) : (!custPhone.trim() || custPhone.length < 10)) { 
+      showToast(guestMode ? "⚠️ Phone 10 digit ka daalo ya khali chhod do" : "⚠️ Enter valid Phone", 'error'); 
+      setIsProcessingPayment(false); // Button reset
+      return; 
+    }
+    
+    if (orderType === "parcel" && !guestMode && (!custAddress.trim() || !custExactAddress.trim() || !custPinCode || custPinCode.length !== 6)) { 
+      showToast("⚠️ Location, Exact Address aur 6-digit Pincode zaroori hai!", 'error'); 
+      setIsProcessingPayment(false); // Button reset
+      return; 
+    }
 
+    // Yahan se asli processing start hoti hai
     setIsProcessingPayment(true);
     try {
       submitLockRef.current = true;
@@ -3384,102 +3419,13 @@ if (submitLockRef.current) return;
       if (payIdRef.current) alert("⚠️ Payment ho gaya hai par order save nahi hua.\nPayment ID: " + payIdRef.current + "\nYe ID staff ko dikhao.");
       else showToast("⚠️ " + authMsg(e), 'error');
     } finally {
+      // ✅ Ye block har haal me chalega (Success ya Error), button reset ho jayega
       setIsProcessingPayment(false);
       submitLockRef.current = false;
     }
   }, [isProcessingPayment, cartItems, custName, custPhone, custAddress, orderType, table, paymentMethod, finalTotal, subtotal, discountAmount, deliveryFee, claimedReward, newEarnedCoins, isScheduled, scheduleDate, scheduleTime, appliedDiscount, loyaltyDiscount, loyaltyTier, notes, menu, placeOrder, sendPushNotification, consumeFlashStock, showToast]);
 
-  const handlePlaceOrderOld = useCallback(async () => {
-    if (cartItems.length === 0) return;
-    if (!custName.trim()) { showToast("⚠️ Enter Name", 'error'); return; }
-    if (!custPhone.trim() || custPhone.length < 10) { showToast("⚠️ Enter valid Phone", 'error'); return; }
-    if (orderType === "parcel" && !custAddress.trim()) { showToast("⚠️ Enter Address", 'error'); return; }
-
-    setIsProcessingPayment(true);
-    try {
-      if (paymentMethod === "razorpay") {
-        const success = await processRazorpayPayment(finalTotal, uid("o"), custName, custPhone);
-        if (!success) { setIsProcessingPayment(false); return; }
-      } else if (paymentMethod === "phonepe") {
-        showToast("📱 Redirecting to PhonePe...", 'info');
-        await new Promise(resolve => setTimeout(resolve, 1500));
-      }
-
-      const orderId = uid("o");
-      const itemStrings = cartItems.map(([id, entry]) => {
-  const m = menu.find((mi) => mi.id === id);
-  return `${getCartQty(entry)}x ${m.name}`;
-}).join(", ");
-      const claimedText = claimedReward ? `\n🎁 *Free Reward:* ${claimedReward.item}` : "";
-      const scheduleText = isScheduled && scheduleDate && scheduleTime ? `\n📅 *Scheduled:* ${scheduleDate} at ${scheduleTime}` : "";
-      const waText = `🚨 *NEW ORDER* (#${orderId.slice(1, 5).toUpperCase()})\n\n*Type:* ${orderType === 'parcel' ? '🛍️ Parcel' : `🍽️ Table ${table}`}\n*Customer:* ${custName} (${custPhone})\n` + (orderType === 'parcel' ? `*Address:* ${custAddress}\n\n` : `\n`) + `*Items:* ${itemStrings}${claimedText}\n` + (appliedDiscount > 0 ? `*Coupon:* ${appliedDiscount}%\n` : ``) + (loyaltyDiscount > 0 ? `*Loyalty:* ${loyaltyTier.name}\n` : ``) + `*Total:* ₹${finalTotal}\n*Payment:* ${paymentMethod}\n` + scheduleText + (notes ? `*Notes:* ${notes}` : ``);
-
-      const link = document.createElement('a');
-      link.href = `https://wa.me/${RESTAURANT.whatsapp}?text=${encodeURIComponent(waText)}`;
-      link.target = '_blank'; document.body.appendChild(link); link.click(); document.body.removeChild(link);
-
-      const initialItems = cartItems.map(([id, entry]) => {
-  const m = menu.find((mi) => mi.id === id);
-  const qty = getCartQty(entry);
-  const finalPrice = entry.priceOverride ?? m.price;
-  return {
-    itemId: id,
-    name: m.name,
-    portion: m.portion || "",
-    price: finalPrice,
-    originalPrice: m.price,
-    qty,
-    kotNumber: 1
-  };
-});
-
-      const order = {
-        id: orderId, table, orderType,
-        customer: { name: custName, phone: custPhone, address: orderType === "parcel" ? custAddress : "" },
-        items: initialItems,
-        claimedReward: claimedReward ? claimedReward.item : null,
-        rewardUsedCoins: claimedReward ? claimedReward.cost : 0,
-        earnedCoins: newEarnedCoins,
-        discount: appliedDiscount,
-        loyaltyDiscount, loyaltyTier: loyaltyTier.name,
-        deliveryFee, notes, payment: paymentMethod,
-        paymentStatus: paymentMethod === "cash" ? "pending" : "paid",
-        status: "new", paid: paymentMethod !== "cash",
-        createdAt: Date.now(),
-        scheduledDate: isScheduled ? scheduleDate : null,
-        scheduledTime: isScheduled ? scheduleTime : null,
-        isScheduled,
-        coinsClaimed: false,
-        kots: [{ id: uid("kot"), kotNumber: 1, items: initialItems, createdAt: Date.now(), status: "new", isRunning: false }]
-      };
-
-      const orderHistory = JSON.parse(localStorage.getItem('eatpark_orders') || '[]');
-      orderHistory.push(order);
-      localStorage.setItem('eatpark_orders', JSON.stringify(orderHistory));
-
-      const customerData = JSON.parse(localStorage.getItem('eatpark_customer') || '{}');
-      customerData.totalOrders = (customerData.totalOrders || 0) + 1;
-      customerData.totalSpent = (customerData.totalSpent || 0) + finalTotal;
-      customerData.lastOrderDate = Date.now();
-      localStorage.setItem('eatpark_customer', JSON.stringify(customerData));
-
-      await placeOrder(order, claimedReward ? claimedReward.cost : 0);
-      try { await updateDoc(doc(db, "customers", custPhone), { totalOrders: customerData.totalOrders, totalSpent: customerData.totalSpent, lastOrderDate: Date.now() }); } catch (e) { }
-
-      playNotificationSound();
-      sendPushNotification("🛎️ New Order", `Order #${orderId.slice(1, 5)} - ₹${finalTotal}`);
-      setMyOrderIds([...myOrderIds, (o && o.id)]);
-      setCart({});
-      localStorage.removeItem('eatpark_cart');
-      setNotes(""); setClaimedReward(null); setCartOpen(false); setActiveModal('track');
-      setIsScheduled(false); setScheduleDate(""); setScheduleTime("");
-      showToast("🎉 Order Placed!", 'success');
-    } catch (e) {
-      console.error("Order error:", e);
-      showToast("⚠️ Failed. Try again.", 'error');
-    } finally { setIsProcessingPayment(false); }
-  }, [cartItems, custName, custPhone, custAddress, orderType, table, paymentMethod, finalTotal, claimedReward, isScheduled, scheduleDate, scheduleTime, appliedDiscount, loyaltyDiscount, loyaltyTier, notes, menu, placeOrder, sendPushNotification, myOrderIds, showToast]);
-
+  
  const handleBooking = async () => {
   if (!bookData.name || !bookData.phone || !bookData.date || !bookData.time || !bookData.guests) { 
     showToast("⚠️ Fill all fields", 'error'); 
