@@ -4753,7 +4753,8 @@ function BillPOSScreenInner(p) {
           </>
         ) : (
           <div style={{ fontWeight: 800, fontSize: 13 }}>
-            {(o && o.orderType) === "parcel" ? "🛍️ Parcel" : `🍽️ Table ${(o && o.table)}`} · #{(order && order.id).slice(1, 9).toUpperCase()}{order.waiter ? ` · 🧑‍🍳 ${order.waiter}` : ""}
+{order.orderType === "parcel" ? "🛍️ Parcel" : `🍽️ Table ${order.table}`} · #{String(order.id || "").slice(1, 9).toUpperCase()}
+{order.waiter ? ` · 🧑‍🍳 ${order.waiter}` : ""}
           </div>
         )}
       </div>
@@ -5007,6 +5008,7 @@ function StaffView({ menu = [], orders, advanceStatus, requestPinPrompt, calls, 
   }, [selectedOrderId, active, advanceStatus, billOrder]);
 
   const handlePrintReceipt = (order) => {
+    const o = order;
     const w = window.open('', '_blank', 'width=300,height=600');
     if (!w) return;
     const kots = order.kots?.length ? order.kots : [{ kotNumber: 1, items: order.items }];
@@ -5027,6 +5029,7 @@ function StaffView({ menu = [], orders, advanceStatus, requestPinPrompt, calls, 
 
   // 🧾 OPEN BILL EDITOR
   const openBillEditor = (order) => {
+const o = order;
     console.log("CUSTOMER:", order.customer);
     setBillOrder(order);
     setBillEditItems(
@@ -5071,6 +5074,7 @@ function StaffView({ menu = [], orders, advanceStatus, requestPinPrompt, calls, 
 
   // mode: "save" | "print" | "paid"
   const printKotSlip = (order, onDone) => {
+    const o = order;
   let fired = false;
   const next = () => { if (fired) return; fired = true; if (onDone) onDone(); };
     try {
@@ -5214,6 +5218,7 @@ setTimeout(() => { try { w.focus(); w.print(); } catch (e) { alert("⚠️ KOT p
 
   // 🖨️ PRINT FINAL BILL
   const printFinalBill = (order, items) => {
+    const o = order;
     if (!order) return;
     const { sub, gstRate, gst, discPctAmt, discAmt, total } = billCalc;
     const payLabel = {
