@@ -825,27 +825,12 @@ const isOwner = ["owner", "admin", "manager"].includes(String(staffData?.role ||
       if (u && !u.isAnonymous) {
         try {
           const s = await getDoc(doc(db, "staff", u.uid));
-          if (s.exists() && s.data().active !== false) {
-            setUser(u); setStaffData(s.data()); setWaiterName(s.data().name || "Staff");
-          } else if (!s.exists()) {
-            // 🔧 AUTO-FIX: staff doc missing hai — auto-create karo
-            console.warn("⚠️ staff/{uid} doc missing — auto-create kar rahe hain");
-            try {
-              await setDoc(doc(db, "staff", u.uid), {
-                name: u.email ? u.email.split("@")[0] : "Staff",
-                role: "owner",
-                active: true,
-                createdAt: Date.now(),
-                autoCreated: true,
-              });
-              // Naya doc load karo
-              const s2 = await getDoc(doc(db, "staff", u.uid));
-              if (s2.exists()) {
-                setUser(u); setStaffData(s2.data()); setWaiterName(s2.data().name || "Staff");
-                console.log("✅ staff doc auto-create ho gaya");
-              } else {
-                await signOut(auth);
-              }
+if (s.exists() && s.data().active !== false) {
+  setUser(u); setStaffData(s.data()); setWaiterName(s.data().name || "Staff");
+} else {
+  await signOut(auth);
+}
+
             } catch (createErr) {
               console.error("❌ staff doc auto-create fail:", createErr);
               await signOut(auth);
