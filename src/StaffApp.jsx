@@ -825,28 +825,30 @@ const isOwner = ["owner", "admin", "manager"].includes(String(staffData?.role ||
       if (u && !u.isAnonymous) {
         try {
           const s = await getDoc(doc(db, "staff", u.uid));
-if (s.exists() && s.data().active !== false) {
-  setUser(u); setStaffData(s.data()); setWaiterName(s.data().name || "Staff");
-} else {
-  await signOut(auth);
-}
-
-            } catch (createErr) {
-              console.error("❌ staff doc auto-create fail:", createErr);
-              await signOut(auth);
-            }
+          if (s.exists() && s.data().active !== false) {
+            setUser(u);
+            setStaffData(s.data());
+            setWaiterName(s.data().name || "Staff");
           } else {
-            // active: false
-            console.warn("⚠️ staff account inactive hai");
+            console.warn("⚠️ staff account inactive or missing");
             await signOut(auth);
+            setUser(null);
+            setStaffData(null);
           }
-        } catch (e) { console.error("Auth check error:", e); }
-      } else { setUser(null); setStaffData(null); }
+        } catch (e) {
+          console.error("Auth check error:", e);
+          await signOut(auth);
+          setUser(null);
+          setStaffData(null);
+        }
+      } else {
+        setUser(null);
+        setStaffData(null);
+      }
       setLoading(false);
     });
     return () => unsub();
   }, []);
-
   // Data
   useEffect(() => {
     if (!user) return;
