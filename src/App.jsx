@@ -2702,7 +2702,8 @@ const loyaltyDiscount = activeUser && appliedDiscount === 0 ? Math.round(loyalty
 // Final Total (isme vipDiscount minus ho raha hai)
 const finalTotal = Math.max(0, subtotal - discountAmount - loyaltyDiscount - vipDiscount) + deliveryFee;
 const newEarnedCoins = Math.floor(finalTotal / (Number(loyaltyRules?.rate) || 10));
-  const myActiveOrders = orders.filter(o => myOrderIds.includes(o.id) && o.status !== "served" && o.status !== "cancelled");
+const myActiveOrders = orders.filter(o => myOrderIds.includes(o.id) && o.status !== "served" && o.status !== "cancelled" && Date.now() - (o.createdAt || 0) < 12 * 3600000);
+
   const [pastOrders, setPastOrders] = useState([]);
   useEffect(() => {
     if (activeModal !== "orderHistory") return;
@@ -7906,14 +7907,17 @@ const unsubBookings = !staffRole ? () => {} : onSnapshot(collection(db, "booking
   };
 
   const advanceStatus = async (orderId, currentStatus) => {
-    const order = orders.find(o => order.id === orderId);
-    if (order && (o && o.orderType) === "parcel" && currentStatus === "ready") {
+const order = orders.find(o => o.id === orderId);
+    if (order && order.orderType === "parcel" && currentStatus === "ready") {
+
       alert("Parcel order delivery boy handle karega. Aap ise 'Delivered' mark nahi kar sakte.");
       return;
     }
     const idx = STATUS_FLOW.indexOf(currentStatus);
-    const nextStatus = STATUS_FLOW[Math.min(idx + 1, STATUS_FLOW.length - 1)];
+    let nextStatus = STATUS_FLOW[Math.min(idx + 1, STATUS_FLOW.length - 1)];
+    if (nextStatus === "out_for_delivery" && order && order.orderType !== "parcel") nextStatus = "served";
     if (nextStatus === currentStatus) return;
+
     const updateData = { status: nextStatus, ...(nextStatus === "served" ? { servedAt: Date.now() } : {}) };
     if (order?.kots?.length) {
       updateData.kots = order.kots.map(k => (k.status === currentStatus ? { ...k, status: nextStatus } : k));
@@ -7933,7 +7937,8 @@ const unsubBookings = !staffRole ? () => {} : onSnapshot(collection(db, "booking
       });
     } catch (e) {
       console.error(e);
-      setOrdersState(prev => prev.map(o => (order.id === orderId ? { ...o, status: currentStatus, ...(order?.kots ? { kots: order.kots } : {}) } : o)));
+      setOrdersState(prev => prev.map(o => (o.id === orderId ? { ...o, status: currentStatus,
+ ...(order?.kots ? { kots: order.kots } : {}) } : o)));
       alert(String(e && e.message).includes("STALE_STATUS") ? "⚠️ Ye order kisi aur screen se pehle hi aage badh chuka hai." : "⚠️ Status update fail hua. Dobara try karo.");
     }
   };
