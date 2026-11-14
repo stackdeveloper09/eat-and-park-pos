@@ -1322,12 +1322,11 @@ function ParcelView({ C, isMobile, orders, onNew, onBill, onAdd }) {
 
       {o.customer?.address && o.customer.address.includes("Lat:") && (
         <button
-          onClick={(e) => {
-            e.stopPropagation();
-            const match = o.customer.address.match(/Lat: ([\d.-]+), Lng: ([\d.-]+)/);
-
-            if (match) window.open(`https://www.google.com/maps/search/?api=1&query=${match[1]},${match[2]}`, "_blank");
-          }}
+          onClick={() => {
+  const addr = o.customer?.address || "";
+  const match = addr.match(/Lat:\s*([\d.-]+),\s*Lng:\s*([\d.-]+)/);
+  if (match) window.open(`https://www.google.com/maps/search/?api=1&query=${match[1]},${match[2]}`, "_blank");
+}}
           style={{ marginTop: 6, padding: "6px 12px", background: C.blue, color: "#fff", border: "none", borderRadius: 6, fontWeight: 800, fontSize: 11, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4, width: "100%", justifyContent: "center" }}
         >
           🗺️ Open Location in Google Maps
