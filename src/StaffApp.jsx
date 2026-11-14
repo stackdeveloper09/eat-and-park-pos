@@ -854,7 +854,7 @@ const isOwner = ["owner", "admin", "manager"].includes(String(staffData?.role ||
     if (!user) return;
     const startToday = new Date(); startToday.setHours(0,0,0,0);
     // 🔍 DEBUG: Auth state log karo
-		const unsubAuth = onAuthStateChanged(auth, (user) => {
+
 			console.log("🔐 AUTH STATE:", user ? `Logged in as ${user.uid}` : "NOT LOGGED IN");
 		});
 
