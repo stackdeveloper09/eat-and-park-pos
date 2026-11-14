@@ -2702,7 +2702,8 @@ const loyaltyDiscount = activeUser && appliedDiscount === 0 ? Math.round(loyalty
 // Final Total (isme vipDiscount minus ho raha hai)
 const finalTotal = Math.max(0, subtotal - discountAmount - loyaltyDiscount - vipDiscount) + deliveryFee;
 const newEarnedCoins = Math.floor(finalTotal / (Number(loyaltyRules?.rate) || 10));
-const myActiveOrders = orders.filter(o => myOrderIds.includes(o.id) && o.status !== "served" && o.status !== "cancelled" && Date.now() - (o.createdAt || 0) < 12 * 3600000);
+const myActiveOrders = orders.filter(o => myOrderIds.includes(o.id) && !o.waiter && !o.takenBy && o.status !== "served" && o.status !== "cancelled" && !(o.paid && o.orderType !== "parcel") && Date.now() - (o.createdAt || 0) < 12 * 3600000);
+
 
   const [pastOrders, setPastOrders] = useState([]);
   useEffect(() => {
@@ -2790,7 +2791,8 @@ if (savedCart) {
     if (!isLoggedIn) return;
     const uid = auth.currentUser && auth.currentUser.uid;
     if (!uid) return;
-    const mine = orders.filter((o) => o.createdBy === uid).map((o) => o.id);
+const mine = orders.filter((o) => o.createdBy === uid && !o.waiter && !o.takenBy).map((o) => o.id);
+
     if (mine.length === 0) return;
     setMyOrderIds((prev) => {
       const next = Array.from(new Set([...prev, ...mine]));
