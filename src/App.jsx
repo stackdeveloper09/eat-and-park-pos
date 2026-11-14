@@ -3302,9 +3302,6 @@ const handleWaiterPinSubmitOld = () => {
       return; 
     }
 
-    setIsProcessingPayment(true); // Button reset
-      return; 
-    }
 
     // Yahan se asli processing start hoti hai
     setIsProcessingPayment(true);
