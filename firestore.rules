@@ -12,6 +12,10 @@ service cloud.firestore {
     }
     function isStaff() { return hasStaffDoc() && staffRole() in ['admin', 'owner', 'manager', 'staff', 'waiter']; }
     function isAdmin() { return hasStaffDoc() && staffRole() in ['admin', 'owner', 'manager']; }
+
+    // 🔥 NEW — delivery boy
+    function isDelivery() { return hasStaffDoc() && staffRole() == 'delivery'; }
+
     function ownsOrder(orderId) {
       return signedIn()
         && exists(/databases/$(db)/documents/orders/$(orderId))
@@ -57,24 +61,41 @@ service cloud.firestore {
                   || (isStaff() && docId in ['menu', 'availability', 'favourites', 'expenseCats']);
     }
 
+    // ============================================================
+    // ✅ FIXED — Delivery + customer cancel
+    // ============================================================
     match /orders/{id} {
       allow create: if signedIn()
         && id.matches('^o[a-z0-9]{6,40}$')
         && request.resource.data.createdBy == request.auth.uid
         && ((isStaff() && (isAdmin() || staffCreateOk())) || validCustomerOrder());
-      allow read: if isStaff() || (signedIn() && resource.data.createdBy == request.auth.uid);
+
+      allow read: if isStaff()
+        || (isDelivery() && resource.data.orderType == 'parcel')
+        || (signedIn() && resource.data.createdBy == request.auth.uid);
+
       allow update: if (isStaff() && (isAdmin() || staffEditOk()))
+        || (isDelivery() && resource.data.orderType == 'parcel'
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['status', 'paid', 'paymentStatus', 'deliveredAt', 'deliveredBy'])
+            && request.resource.data.status in ['out_for_delivery', 'served'])
         || (signedIn() && resource.data.createdBy == request.auth.uid
             && resource.data.status == 'new' && resource.data.paid == false
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'cancelledAt'])
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['status', 'cancelledAt', 'cancelledBy'])
             && request.resource.data.status == 'cancelled');
+
       allow delete: if isAdmin();
     }
 
+    // ============================================================
+    // ✅ FIXED — Customer khud apna doc padh/bana/update kar sake
+    // ============================================================
     match /customers/{phone} {
-      allow read: if isStaff();
-      allow create: if signedIn() && request.resource.data.uid == request.auth.uid;
-      allow update: if isStaff() || (signedIn() && resource.data.uid == request.auth.uid);
+      allow read: if isStaff()
+        || (signedIn() && request.auth.token.phone_number == '+91' + phone);
+      allow create, update: if isStaff()
+        || (signedIn() && request.auth.token.phone_number == '+91' + phone);
     }
 
     match /loyaltyUsers/{phone} {
