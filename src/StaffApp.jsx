@@ -1604,7 +1604,12 @@ function OrdersView({ C, isMobile, orders, menu, waiterName, isOwner, filter, se
                 </div>
               </div>
               <div style={{ fontSize: 12, color: C.gray, marginBottom: 10, display: "flex", gap: 12, flexWrap: "wrap" }}>
-                <span>#{o.id?.slice(1,5).toUpperCase()}</span><span>{timeAgo(o.createdAt)} ago</span>{o.waiter && <span>{o.waiter}</span>}{custLabel(o) && <span style={{ color: C.ink, fontWeight: 800 }}>👤 {custLabel(o)}</span>}{custLabel(o) && <span style={{ color: C.ink, fontWeight: 800 }}>👤 {custLabel(o)}</span>}{custLabel(o) && <span style={{ color: C.ink, fontWeight: 800 }}>👤 {custLabel(o)}</span>}
+<span>#{o.id?.slice(1, 5).toUpperCase()}</span>
+<span>{timeAgo(o.createdAt)} ago</span>
+{o.waiter && <span>{o.waiter}</span>}
+{custLabel(o) && (
+  <span style={{ color: C.ink, fontWeight: 800 }}>👤 {custLabel(o)}</span>
+)}
               </div>
               {isCancelled && (
                 <div style={{ background: C.amberLight, color: C.amber, padding: "8px 10px", borderRadius: 6, fontSize: 11, fontWeight: 700, marginBottom: 10 }}>
