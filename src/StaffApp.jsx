@@ -140,7 +140,9 @@ const STATUS = {
   new: { label: "New", color: "red", emoji: "🆕" },
   preparing: { label: "Cooking", color: "amber", emoji: "👨‍🍳" },
   ready: { label: "Ready", color: "green", emoji: "✅" },
-  served: { label: "Served", color: "gray", emoji: "🍽️" },
+served: { label: "Served", color: "gray", emoji: "🍽️" },
+  out_for_delivery: { label: "Out for Delivery", color: "blue", emoji: "🛵" },
+
 };
 const STATUS_FLOW = ["new", "preparing", "ready", "served"];
 
