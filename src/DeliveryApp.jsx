@@ -80,7 +80,8 @@ export default function DeliveryApp() {
     if (!user) return;
     const q = query(collection(db, "orders"), where("orderType", "==", "parcel"));
     const unsub = onSnapshot(q, (snap) => {
-      const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    console.log("DELIVERY DEBUG:", snap.size, all.map(o => ({ id: o.id, status: o.status, addr: o.customer?.exactAddress || o.customer?.address || null })));
+
       
       // Strict Filter: Sirf valid delivery orders (No Walk-ins, No missing address/phone)
             const validOrders = all.filter(o =>
@@ -123,7 +124,16 @@ export default function DeliveryApp() {
 
   }, [user]);
 
+  // Keep open modal in sync with live order data
+  useEffect(() => {
+    if (!selectedOrder) return;
+    const fresh = [...activeOrders, ...historyOrders].find(o => o.id === selectedOrder.id);
+    if (fresh) setSelectedOrder(fresh);
+    // eslint-disable-next-line
+  }, [activeOrders, historyOrders]);
+
   // Stats for Dashboard
+
   const stats = useMemo(() => {
     const today = new Date().setHours(0,0,0,0);
     const myHist = historyOrders.filter(o => o.deliveredAt >= today);
@@ -360,7 +370,8 @@ export default function DeliveryApp() {
             {selectedOrder.status !== "served" ? (
               <>
                 {/* STATUS: READY - Pickup Button */}
-                {selectedOrder.status === "ready" && (
+{!["new", "preparing", "out_for_delivery", "served"].includes(selectedOrder.status) && (
+
                   <button onClick={() => markOutForDelivery(selectedOrder.id)} style={{ width: "100%", padding: 16, background: "#F59E0B", color: "#fff", border: "none", borderRadius: 12, fontWeight: 900, fontSize: 16, cursor: "pointer", marginBottom: 10, boxShadow: "0 4px 12px rgba(245,158,11,0.3)" }}>
                     🛵 Mark Out for Delivery
                   </button>
