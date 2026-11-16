@@ -2515,7 +2515,7 @@ const openUpiApp = (amount, ref) => {
   window.location.href = url;
 };
 
-function CustomerView({ menu, orders, placeOrder, bookEvent, gallery, offersList, table, setTable, requestPinPrompt, settings, isDark, setIsDark, requestWaiter, loyaltyRules, loyaltyUsers, coinHistory, setOrdersState, categories, flashSaleItems, comboOffers, setMenuState, setLoyaltyRules, advanceStatus }) {
+function CustomerView({ menu, orders, placeOrder, bookEvent, gallery, offersList, table, setTable, requestPinPrompt, settings, isDark, setIsDark, requestWaiter, loyaltyRules, loyaltyUsers, coinHistory, setOrdersState, categories, flashSaleItems, comboOffers, setMenuState, setLoyaltyRules, advanceStatus, coupons = [] }) {
   const [category, setCategory] = useState(categories[0] || "Thali");
   /* ENP-CAT-FIRST */ const [catPickerOpen, setCatPickerOpen] = useState(true);
   const [viewMode, setViewMode] = useViewMode();
@@ -3245,19 +3245,14 @@ const handleWaiterPinSubmitOld = () => {
 
   const handleApplyCoupon = () => {
     const code = couponCode.toUpperCase().trim();
-    const coupons = {
-      "EAT20": { discount: 20, min: 0, ok: () => true, msg: "🎉 20% Applied!" },
-      "EATS10": { discount: 10, min: 0, ok: () => true, msg: "🎉 10% Applied!" },
-      "WELCOME20": { discount: 20, min: 0, ok: () => myOrderIds.length === 0, msg: "🎉 Welcome 20% Applied!", failMsg: "💳 First order only" },
-      "COMEBACK15": { discount: 15, min: 199, ok: () => true, msg: "🎉 15% Applied!" },
-      "LOYALTY50": { discount: 50, min: 0, ok: () => currentCoins >= 500, msg: "👑 VIP 50% Applied!", failMsg: "👑 Requires 500+ coins" }
-    };
-    const coupon = coupons[code];
-    if (!coupon) { showToast("❌ Invalid coupon", 'error'); return; }
-    if (!coupon.ok()) { showToast(coupon.failMsg || "⚠️ Conditions not met", 'warning'); return; }
-    if (subtotal < coupon.min) { showToast(`⚠️ Min ₹${coupon.min} required`, 'warning'); return; }
-    setAppliedDiscount(coupon.discount); setCouponMin(coupon.min || 0);
-    showToast(coupon.msg, 'success');
+    const c = (coupons || []).find((x) => String(x.code).toUpperCase() === code);
+    if (!c || !c.active) { showToast("❌ Invalid coupon", 'error'); return; }
+    if (c.firstOrderOnly && myOrderIds.length > 0) { showToast("💳 First order only", 'warning'); return; }
+    if (Number(c.minCoins) > 0 && currentCoins < Number(c.minCoins)) { showToast(`👑 Requires ${c.minCoins}+ coins`, 'warning'); return; }
+    const min = Number(c.min) || 0;
+    if (subtotal < min) { showToast(`⚠️ Min ₹${min} required`, 'warning'); return; }
+    setAppliedDiscount(Number(c.discount) || 0); setCouponMin(min);
+    showToast(`🎉 ${c.discount}% Applied!`, 'success');
   };
 
   const consumeFlashStock = useCallback(async (lines) => {
@@ -4042,8 +4037,8 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
                   )}
                 </div>
 
-                <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-                  <input type="text" placeholder="Coupon (EAT20)" value={couponCode} onChange={(e) => setCouponCode(e.target.value)} style={inputStyle} />
+                <div style={{ display: (coupons || []).some((c) => c.active) ? "flex" : "none", gap: 8, marginBottom: 16 }}>
+                  <input type="text" placeholder="Coupon code" value={couponCode} onChange={(e) => setCouponCode(e.target.value)} style={inputStyle} />
                   <button onClick={handleApplyCoupon} style={{ background: COLORS.gold, color: COLORS.ink, border: "none", borderRadius: 12, padding: "0 16px", fontWeight: 800, cursor: "pointer" }}>Apply</button>
                 </div>
 
@@ -5907,7 +5902,111 @@ function DussehraRateEditor({ items, onSave, unavail = [], toggleAvail }) {
   );
 }
 
-function AdminView({ dussehraMenu = [], saveDussehraMenu, menu, unavail = [], toggleAvail, setMenuState, bookings, orders, markPaid, requestPinPrompt, inventory, addInventory, updateStock, deleteBooking, offersList, addOffer, removeOffer, loyaltyRules, setLoyaltyRules, loyaltyUsers, settings, setSettings, gallery, setGallery, categories, updateCategories, flashSaleItems, setFlashSaleItems, comboOffers, setComboOffers, savePromotions }) {
+function CouponsAdmin({ coupons, onSave }) {
+  const [draft, setDraft] = useState(coupons);
+  const [dirty, setDirty] = useState(false);
+  const [add, setAdd] = useState({ code: "", discount: "", min: "" });
+  useEffect(() => { if (!dirty) setDraft(coupons); }, [coupons, dirty]);
+
+  const fld = { padding: "9px 10px", border: `1.5px solid ${COLORS.line}`, borderRadius: 8, fontSize: 14, boxSizing: "border-box", fontFamily: "inherit" };
+  const lbl = { fontSize: 10, fontWeight: 800, color: COLORS.textLight, textTransform: "uppercase", display: "block", marginBottom: 3 };
+  const clean = (list) => list.map((x) => ({
+    ...x,
+    code: String(x.code || "").toUpperCase().replace(/\s+/g, ""),
+    discount: Number(x.discount) || 0,
+    min: Number(x.min) || 0,
+    minCoins: Number(x.minCoins) || 0
+  }));
+  const check = (list) => {
+    const codes = list.map((x) => x.code);
+    if (list.some((x) => !x.code)) return "Coupon code khali nahi ho sakta";
+    if (list.some((x) => x.discount <= 0 || x.discount > 100)) return "Discount 1 se 100% ke beech hona chahiye";
+    if (new Set(codes).size !== codes.length) return "Ek code do baar hai";
+    return "";
+  };
+
+  const edit = (i, patch) => { setDraft((d) => d.map((x, k) => (k === i ? { ...x, ...patch } : x))); setDirty(true); };
+  const toggle = (i) => {
+    const next = clean(draft.map((x, k) => (k === i ? { ...x, active: !x.active } : x)));
+    const err = check(next);
+    if (err) { alert("⚠️ " + err + " — pehle Save se theek karo"); return; }
+    setDraft(next); setDirty(false); onSave(next);
+  };
+  const save = () => {
+    const next = clean(draft);
+    const err = check(next);
+    if (err) { alert("⚠️ " + err); return; }
+    setDraft(next); setDirty(false); onSave(next);
+  };
+  const remove = (i) => {
+    if (!window.confirm(`"${draft[i].code}" delete karna hai?`)) return;
+    const next = clean(draft.filter((_, k) => k !== i));
+    setDraft(next); setDirty(false); onSave(next);
+  };
+  const addCoupon = () => {
+    const next = clean([...draft, { code: add.code, discount: add.discount, min: add.min, active: true, firstOrderOnly: false, minCoins: 0 }]);
+    const err = check(next);
+    if (err) { alert("⚠️ " + err); return; }
+    setDraft(next); setDirty(false); onSave(next);
+    setAdd({ code: "", discount: "", min: "" });
+  };
+
+  return (
+    <div>
+      <div style={{ fontSize: 13, color: COLORS.textLight, marginBottom: 16, lineHeight: 1.5 }}>
+        ON/OFF turant sab customers ke liye lagta hai. Code, % ya min badalne ke baad <b>💾 Save</b> dabao.
+      </div>
+
+      {draft.length === 0 && <div style={{ color: COLORS.textLight, marginBottom: 12 }}>Abhi koi coupon nahi</div>}
+
+      {draft.map((c, i) => (
+        <div key={i} style={{ background: "#fff", border: `1.5px solid ${c.active ? COLORS.sage : COLORS.line}`, borderRadius: 14, padding: 14, marginBottom: 12, opacity: c.active ? 1 : 0.75 }}>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+            <div style={{ flex: 2, minWidth: 130 }}>
+              <label style={lbl}>Code</label>
+              <input value={c.code} onChange={(e) => edit(i, { code: e.target.value.toUpperCase() })} style={{ ...fld, width: "100%", fontWeight: 800, letterSpacing: 1 }} />
+            </div>
+            <div style={{ width: 80 }}>
+              <label style={lbl}>Discount %</label>
+              <input type="number" min={1} max={100} value={c.discount} onChange={(e) => edit(i, { discount: e.target.value })} style={{ ...fld, width: "100%", fontWeight: 800, textAlign: "center" }} />
+            </div>
+            <div style={{ width: 90 }}>
+              <label style={lbl}>Min Bill ₹</label>
+              <input type="number" min={0} value={c.min} onChange={(e) => edit(i, { min: e.target.value })} style={{ ...fld, width: "100%", textAlign: "center" }} />
+            </div>
+            <div style={{ width: 90 }}>
+              <label style={lbl}>Min Coins</label>
+              <input type="number" min={0} value={c.minCoins || 0} onChange={(e) => edit(i, { minCoins: e.target.value })} style={{ ...fld, width: "100%", textAlign: "center" }} />
+            </div>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 700, cursor: "pointer", paddingBottom: 10 }}>
+              <input type="checkbox" checked={!!c.firstOrderOnly} onChange={(e) => edit(i, { firstOrderOnly: e.target.checked })} /> Sirf pehla order
+            </label>
+            <button onClick={() => toggle(i)} style={{ ...fld, border: "none", fontWeight: 800, cursor: "pointer", background: c.active ? COLORS.sage : COLORS.error, color: "#fff" }}>
+              {c.active ? "✅ ON" : "❌ OFF"}
+            </button>
+            <button onClick={() => remove(i)} style={{ ...fld, background: "transparent", color: COLORS.error, border: `1.5px solid ${COLORS.error}`, fontWeight: 800, cursor: "pointer" }}>✕</button>
+          </div>
+        </div>
+      ))}
+
+      <button onClick={save} disabled={!dirty} style={{ width: "100%", padding: 14, border: "none", borderRadius: 12, fontWeight: 800, fontSize: 15, marginBottom: 24, cursor: dirty ? "pointer" : "not-allowed", background: dirty ? COLORS.copper : COLORS.paper2, color: dirty ? "#fff" : COLORS.textLight }}>
+        {dirty ? "💾 Save Changes" : "Koi badlav nahi"}
+      </button>
+
+      <div style={{ background: COLORS.paper, borderRadius: 14, padding: 14 }}>
+        <div style={{ fontWeight: 800, marginBottom: 10 }}>➕ Naya Coupon</div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <input placeholder="CODE" value={add.code} onChange={(e) => setAdd({ ...add, code: e.target.value.toUpperCase() })} style={{ ...fld, flex: 2, minWidth: 120 }} />
+          <input type="number" placeholder="%" value={add.discount} onChange={(e) => setAdd({ ...add, discount: e.target.value })} style={{ ...fld, width: 80 }} />
+          <input type="number" placeholder="Min ₹" value={add.min} onChange={(e) => setAdd({ ...add, min: e.target.value })} style={{ ...fld, width: 90 }} />
+          <button onClick={addCoupon} style={{ ...fld, background: COLORS.sage, color: "#fff", border: "none", fontWeight: 800, cursor: "pointer" }}>+ Add</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AdminView({ dussehraMenu = [], saveDussehraMenu, menu, unavail = [], toggleAvail, setMenuState, bookings, orders, markPaid, requestPinPrompt, inventory, addInventory, updateStock, deleteBooking, offersList, addOffer, removeOffer, loyaltyRules, setLoyaltyRules, loyaltyUsers, settings, setSettings, gallery, setGallery, categories, updateCategories, flashSaleItems, setFlashSaleItems, comboOffers, setComboOffers, savePromotions, coupons = [], saveCoupons }) {
   const [tab, setTab] = useState("overview");
   const [filterDate, setFilterDate] = useState(toLocalISODate(Date.now()));
   const [newInv, setNewInv] = useState({ name: "", stock: "", unit: "kg" });
@@ -6193,7 +6292,7 @@ function AdminView({ dussehraMenu = [], saveDussehraMenu, menu, unavail = [], to
       </div>
 
       <div style={{ display: "flex", gap: 10, marginBottom: 28, borderBottom: `2px solid ${COLORS.line}`, overflowX: "auto" }}>
-        {["overview", "menu", "tables", "presets", "gallery", "settings", "offers", "loyalty", "orders", "bookings", "promotions"].map((t) => (<button key={t} onClick={() => setTab(t)} style={{ background: "none", border: "none", padding: "14px 20px", fontWeight: 800, fontSize: 15, textTransform: "capitalize", color: tab === t ? COLORS.copper : COLORS.textLight, borderBottom: tab === t ? `3px solid ${COLORS.copper}` : "3px solid transparent", cursor: "pointer", whiteSpace: "nowrap" }}>{t}</button>))}
+        {["overview", "menu", "tables", "presets", "gallery", "settings", "offers", "loyalty", "orders", "bookings", "promotions", "coupons"].map((t) => (<button key={t} onClick={() => setTab(t)} style={{ background: "none", border: "none", padding: "14px 20px", fontWeight: 800, fontSize: 15, textTransform: "capitalize", color: tab === t ? COLORS.copper : COLORS.textLight, borderBottom: tab === t ? `3px solid ${COLORS.copper}` : "3px solid transparent", cursor: "pointer", whiteSpace: "nowrap" }}>{t}</button>))}
       </div>
       
 
@@ -6416,6 +6515,7 @@ function AdminView({ dussehraMenu = [], saveDussehraMenu, menu, unavail = [], to
         </div>
       )}
                   {tab === "presets" && <PresetsAdmin />}
+      {tab === "coupons" && <CouponsAdmin coupons={coupons} onSave={saveCoupons} />}
 
       {tab === "gallery" && (
         <>
@@ -7263,6 +7363,14 @@ const DUSSEHRA_MENU = [
 // Dussehra menu sirf Bihiya project (eat-park-r2) me, jahan VITE_BRANCH=bihiya set ho
 const DUSSEHRA_ENABLED = false; // Disabled - fully removed from app
 
+const DEFAULT_COUPONS = [
+  { code: "EAT20", discount: 20, min: 0, active: false, firstOrderOnly: false, minCoins: 0 },
+  { code: "EATS10", discount: 10, min: 0, active: true, firstOrderOnly: false, minCoins: 0 },
+  { code: "WELCOME20", discount: 20, min: 0, active: true, firstOrderOnly: true, minCoins: 0 },
+  { code: "COMEBACK15", discount: 15, min: 199, active: true, firstOrderOnly: false, minCoins: 0 },
+  { code: "LOYALTY50", discount: 50, min: 0, active: true, firstOrderOnly: false, minCoins: 500 }
+];
+
 const DEFAULT_OFFERS = [
   { id: "off1", title: "Flat 20% OFF 🍜", desc: "Enjoy 20% off on all Chinese today!" },
   { id: "off2", title: "Free Cold Drink 🥤", desc: "Free cold drink on orders above ₹499." }
@@ -7471,6 +7579,24 @@ export default function App() {
   ]);
 
   const pinLock = usePinLockout();
+
+  const [coupons, setCoupons] = useState(DEFAULT_COUPONS);
+  useEffect(() => {
+    let off = false;
+    let unsub = () => {};
+    authReady.then(() => {
+      if (off) return;
+      unsub = onSnapshot(doc(db, "settings", "coupons"), (snap) => {
+        if (snap.exists() && Array.isArray(snap.data().items)) setCoupons(snap.data().items);
+      }, (e) => console.error("coupons listener:", e));
+    }).catch(() => {});
+    return () => { off = true; unsub(); };
+  }, []);
+  const saveCoupons = async (list) => {
+    setCoupons(list);
+    try { await setDoc(doc(db, "settings", "coupons"), { items: list }); }
+    catch (e) { console.error(e); alert("⚠️ Coupons save nahi hue. Internet / Firebase rules check karo."); }
+  };
   const validComboOffers = useMemo(
     () => comboOffers.filter(c => c.items?.length && c.items.every(it => currentMenu.some(m => m.id === it.id && (!settings.vegMode || m.veg)))),
     [comboOffers, currentMenu, settings.vegMode]
@@ -7927,11 +8053,11 @@ const order = orders.find(o => o.id === orderId);
         <div className="app-content">
   
   
-  {role === "customer" && <ErrorBoundary key="cust"><CustomerView menu={currentMenu} orders={orders} placeOrder={placeOrder} bookEvent={bookEvent} gallery={gallery} offersList={offersList} table={table} setTable={setTable} requestPinPrompt={requestPinPrompt} settings={settings} isDark={isDark} setIsDark={setIsDark} requestWaiter={requestWaiter} loyaltyRules={loyaltyRules} loyaltyUsers={loyaltyUsers} coinHistory={coinHistory} setOrdersState={setOrdersState} categories={currentCategories} flashSaleItems={validFlashSaleItems} comboOffers={validComboOffers} setMenuState={setMenuState} setLoyaltyRules={saveLoyaltyRules} advanceStatus={advanceStatus} /></ErrorBoundary>}
+  {role === "customer" && <ErrorBoundary key="cust"><CustomerView menu={currentMenu} orders={orders} placeOrder={placeOrder} bookEvent={bookEvent} gallery={gallery} offersList={offersList} table={table} setTable={setTable} requestPinPrompt={requestPinPrompt} settings={settings} isDark={isDark} setIsDark={setIsDark} requestWaiter={requestWaiter} loyaltyRules={loyaltyRules} loyaltyUsers={loyaltyUsers} coinHistory={coinHistory} setOrdersState={setOrdersState} categories={currentCategories} flashSaleItems={validFlashSaleItems} comboOffers={validComboOffers} setMenuState={setMenuState} setLoyaltyRules={saveLoyaltyRules} advanceStatus={advanceStatus} coupons={coupons} /></ErrorBoundary>}
   
   {role === "staff" && <ErrorBoundary key="staff"><StaffView menu={currentMenu} orders={orders} placeOrder={placeOrder} categories={currentCategories} setMenuState={setMenuState} advanceStatus={advanceStatus} requestPinPrompt={requestPinPrompt} calls={calls} resolveCall={resolveCall} cancelOrderByStaff={cancelOrderByStaff} /></ErrorBoundary>}
   
-  {role === "admin" && <ErrorBoundary key="admin"><AdminView dussehraMenu={dussehraMenu} saveDussehraMenu={saveDussehraMenu} menu={menu} unavail={unavail} toggleAvail={toggleAvail} setMenuState={setMenuState} bookings={bookings} orders={orders} markPaid={markPaid} requestPinPrompt={requestPinPrompt} inventory={inventory} addInventory={addInventory} updateStock={updateStock} deleteBooking={deleteBooking} offersList={offersList} addOffer={addOffer} removeOffer={removeOffer} loyaltyRules={loyaltyRules} setLoyaltyRules={saveLoyaltyRules} loyaltyUsers={loyaltyUsers} settings={settings} setSettings={setSettings} gallery={gallery} setGallery={setGallery} categories={categories} updateCategories={updateCategories} flashSaleItems={flashSaleItems} setFlashSaleItems={setFlashSaleItems} comboOffers={comboOffers} setComboOffers={setComboOffers} savePromotions={savePromotions} /></ErrorBoundary>}
+  {role === "admin" && <ErrorBoundary key="admin"><AdminView dussehraMenu={dussehraMenu} saveDussehraMenu={saveDussehraMenu} menu={menu} unavail={unavail} toggleAvail={toggleAvail} setMenuState={setMenuState} bookings={bookings} orders={orders} markPaid={markPaid} requestPinPrompt={requestPinPrompt} inventory={inventory} addInventory={addInventory} updateStock={updateStock} deleteBooking={deleteBooking} offersList={offersList} addOffer={addOffer} removeOffer={removeOffer} loyaltyRules={loyaltyRules} setLoyaltyRules={saveLoyaltyRules} loyaltyUsers={loyaltyUsers} settings={settings} setSettings={setSettings} gallery={gallery} setGallery={setGallery} categories={categories} updateCategories={updateCategories} flashSaleItems={flashSaleItems} setFlashSaleItems={setFlashSaleItems} comboOffers={comboOffers} setComboOffers={setComboOffers} savePromotions={savePromotions} coupons={coupons} saveCoupons={saveCoupons} /></ErrorBoundary>}
   
   {/* (Removed unreachable fallback — role is always one of customer/staff/admin) */}
 </div>
