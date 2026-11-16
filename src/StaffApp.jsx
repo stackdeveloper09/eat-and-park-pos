@@ -1253,7 +1253,7 @@ const isOwner = ["owner", "admin", "manager"].includes(String(staffData?.role ||
       {selectedTable && (
         <BillingView C={C} isMobile={isMobile} table={selectedTable} menu={menu} orders={orders} setOrders={setOrders} cart={cart} setCart={setCart} waiterName={waiterName} existingOrder={billOrder} isOwner={isOwner} addMoreMode={addMoreMode}
           onBack={() => { setSelectedTable(null); setCart({}); setEstimatePending(false); setBillOrder(null); setAddMoreMode(false); }}
-          onSwitchAdd={() => { setCart({}); setAddMoreMode(true); }} onPaidSuccess={() => { haptic(60); setConfetti(true); setTimeout(() => setConfetti(false), 1800); }} />
+          onSwitchAdd={() => { setCart({}); setAddMoreMode(true); }} onSplit={(o) => setSplitBillOrder(o)} onPaidSuccess={() => { haptic(60); setConfetti(true); setTimeout(() => setConfetti(false), 1800); }} />
       )}
      </div> </div>
 
@@ -1425,12 +1425,12 @@ function TablesView({ C, isMobile, orders, onTableClick, onEditBill, onAddMore, 
             </button>
             {t.order ? (
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, marginTop: 8 }}>
-                <button onClick={() => onEditBill(t.order)} style={{ padding: isMobile ? "8px 4px" : "6px", border: "none", borderRadius: 6, background: C.red, color: "#fff", fontWeight: 800, fontSize: isMobile ? 10 : 11, cursor: "pointer", fontFamily: "inherit" }}>Bill</button>
-                <button onClick={() => onAddMore(t.order)} style={{ padding: isMobile ? "8px 4px" : "6px", border: "none", borderRadius: 6, background: C.green, color: "#fff", fontWeight: 800, fontSize: isMobile ? 10 : 11, cursor: "pointer", fontFamily: "inherit" }}>Add</button>
-                <button onClick={() => onMerge(t.order)} style={{ padding: isMobile ? "8px 4px" : "6px", border: `1.5px solid ${C.blue}`, borderRadius: 6, background: "transparent", color: C.blue, fontWeight: 800, fontSize: isMobile ? 10 : 11, cursor: "pointer", fontFamily: "inherit" }}>Merge</button>
-                <button onClick={() => onSplit(t.order)} style={{ padding: isMobile ? "8px 4px" : "6px", border: `1.5px solid ${C.amber}`, borderRadius: 6, background: "transparent", color: C.amber, fontWeight: 800, fontSize: isMobile ? 10 : 11, cursor: "pointer", fontFamily: "inherit" }}>Split</button>
-                <button onClick={() => onMove(t.order)} style={{ padding: isMobile ? "8px 4px" : "6px", border: `1.5px solid ${C.ink}`, borderRadius: 6, background: "transparent", color: C.ink, fontWeight: 800, fontSize: isMobile ? 10 : 11, cursor: "pointer", fontFamily: "inherit", gridColumn: "span 2" }}>Move Table</button>
-                <button onClick={() => onFeedback(t.order)} style={{ padding: isMobile ? "8px 4px" : "6px", border: `1.5px solid ${C.gray}`, borderRadius: 6, background: "transparent", color: C.gray, fontWeight: 800, fontSize: isMobile ? 10 : 11, cursor: "pointer", fontFamily: "inherit", gridColumn: "span 2" }}>Feedback</button>
+                <button onClick={() => onAddMore(t.order)} style={{ padding: '6px', border: 'none', borderRadius: 6, background: C.green, color: '#fff', fontWeight: 800, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>+Add</button>
+<button onClick={() => onEditBill(t.order)} style={{ padding: '6px', border: 'none', borderRadius: 6, background: C.red, color: '#fff', fontWeight: 800, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>Edit</button>
+<button onClick={() => printKOT(t.order)} style={{ padding: '6px', border: 'none', borderRadius: 6, background: C.blue, color: '#fff', fontWeight: 800, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>KOT</button>
+<button onClick={() => onMove(t.order)} style={{ padding: '6px', border: 'none', borderRadius: 6, background: '#8b5cf6', color: '#fff', fontWeight: 800, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>Move</button>
+<button onClick={() => whatsappBill(t.order)} style={{ padding: '6px', border: 'none', borderRadius: 6, background: '#25D366', color: '#fff', fontWeight: 800, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>WA</button>
+<button onClick={() => printBill(t.order)} style={{ padding: '6px', border: 'none', borderRadius: 6, background: C.amber, color: '#fff', fontWeight: 800, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>Bill</button>
               </div>
             ) : (
               <button onClick={() => onTableClick(t.table)} style={{ marginTop: 8, padding: isMobile ? "9px 4px" : "7px 4px", border: "none", borderRadius: 6, background: C.gold, color: "#fff", fontWeight: 800, fontSize: isMobile ? 11 : 10, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>New Order</button>
@@ -2212,7 +2212,7 @@ function QtyInput({ value, onCommit, style }) {
   );
 }
 
-function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCart, waiterName, existingOrder, addMoreMode, onBack, isOwner, onPaidSuccess, onSwitchAdd }) {
+function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCart, waiterName, existingOrder, addMoreMode, onBack, isOwner, onPaidSuccess, onSwitchAdd, onSplit }) {
   const toast = useToast();
   const haptic = useHaptic();
   const [search, setSearch] = useState("");
@@ -2828,6 +2828,9 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
                 <div style={{ display: "flex", gap: 6 }}>
                   <button onClick={handleSaveBill} disabled={placing || !!existingOrder.paid} style={{ flex: 1, padding: "9px 6px", border: "none", borderRadius: 6, background: C.blue, color: "#fff", fontWeight: 700, fontSize: 12, cursor: placing ? "not-allowed" : "pointer", fontFamily: "inherit" }}>Save</button>
                   <button onClick={handlePrintBill} disabled={placing} style={{ flex: 1, padding: "9px 6px", border: "1px solid " + C.ink, borderRadius: 6, background: "transparent", color: C.ink, fontWeight: 700, fontSize: 12, cursor: placing ? "not-allowed" : "pointer", fontFamily: "inherit" }}>Print</button>
+                  {onSplit && !existingOrder.paid && (existingOrder.items || []).length > 1 && (
+                    <button onClick={() => onSplit(existingOrder)} disabled={placing} style={{ flex: 1, padding: "9px 6px", border: "1px solid " + C.amber, borderRadius: 6, background: "transparent", color: C.amber, fontWeight: 700, fontSize: 12, cursor: placing ? "not-allowed" : "pointer", fontFamily: "inherit" }}>✂ Split</button>
+                  )}
                   {!existingOrder.paid && onSwitchAdd && (
                     <button onClick={onSwitchAdd} disabled={placing} style={{ flex: 1, padding: "9px 6px", border: "1px solid " + C.green, borderRadius: 6, background: "transparent", color: C.green, fontWeight: 700, fontSize: 12, cursor: placing ? "not-allowed" : "pointer", fontFamily: "inherit" }}>+ Add</button>
                   )}
