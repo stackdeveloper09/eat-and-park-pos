@@ -296,7 +296,8 @@ export default function DeliveryApp() {
                     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
                       <span style={{ fontWeight: 900, color: "#F59E0B", fontSize: 15 }}>#{o.id.slice(1,5).toUpperCase()}</span>
                       <span style={{ fontSize: 10, color: "#8B9BB4", background: "#273449", padding: "2px 6px", borderRadius: 4 }}>
-                        {o.status === "out_for_delivery" ? "ON THE WAY" : o.status === "ready" ? "READY TO PICK" : o.status === "preparing" ? "COOKING" : "NEW ORDER"}
+                        {o.status === "out_for_delivery" ? "ON THE WAY" : o.status === "ready" ? "READY TO PICK" : o.status === "preparing" ? "COOKING" : o.status === "served" ? "DELIVERED" : "NEW ORDER"}
+
                       </span>
                       <span style={{ fontSize: 10, color: "#8B9BB4" }}>{timeAgo(o.createdAt)}</span>
                     </div>
@@ -308,7 +309,8 @@ export default function DeliveryApp() {
                   <div style={{ textAlign: "right", marginLeft: 10 }}>
                     <div style={{ fontWeight: 900, fontSize: 18, color: o.paid ? "#10B981" : "#F59E0B" }}>₹{o.finalTotal}</div>
                     <div style={{ fontSize: 9, color: o.paid ? "#10B981" : "#F59E0B", marginTop: 2, fontWeight: 700, background: o.paid ? "rgba(16,185,129,0.15)" : "rgba(245,158,11,0.15)", padding: "2px 6px", borderRadius: 4 }}>
-                      {o.paid ? "PAID" : "COLLECT"}
+{o.paid ? "PAID" : o.status === "served" ? "DONE" : "COLLECT"}
+
                     </div>
                   </div>
                 </div>
