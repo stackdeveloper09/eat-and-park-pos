@@ -80,7 +80,8 @@ export default function DeliveryApp() {
     if (!user) return;
     const q = query(collection(db, "orders"), where("orderType", "==", "parcel"));
     const unsub = onSnapshot(q, (snap) => {
-    console.log("DELIVERY DEBUG:", snap.size, all.map(o => ({ id: o.id, status: o.status, addr: o.customer?.exactAddress || o.customer?.address || null })));
+    const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
 
       
       // Strict Filter: Sirf valid delivery orders (No Walk-ins, No missing address/phone)
@@ -332,8 +333,8 @@ export default function DeliveryApp() {
               <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 5 }}>{selectedOrder.customer?.name}</div>
               <div style={{ color: "#8B9BB4", marginBottom: 10, fontWeight: 700 }}>📞 {selectedOrder.customer?.phone}</div>
               <div style={{ color: "#fff", marginBottom: 15, lineHeight: 1.4, fontSize: 14 }}>
-                📍 {selectedOrder.customer?.exactAddress || selectedOrder.customer?.address} {selectedOrder.customer?.pincode
-?.pincode ? "(PIN: " + selectedOrder.customer.pincode + ")" : ""}
+                📍 {selectedOrder.customer?.exactAddress || selectedOrder.customer?.address} {selectedOrder.customer?.pincode ? "(PIN: "
+ + selectedOrder.customer.pincode + ")" : ""}
               </div>
               
               <div style={{ display: "flex", gap: 10 }}>
