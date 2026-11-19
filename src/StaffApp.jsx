@@ -2808,7 +2808,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
               );
             })}
           </div>
-<div style={{ borderTop: `2px solid ${C.line}`, padding: "10px 10px 170px", background: C.light, overflowY: isMobile ? "visible" : "auto", maxHeight: isMobile ? "none" : "100%", minHeight: 0 }}>
+<div style={{ borderTop: `2px solid ${C.line}`, padding: "10px", background: C.light, overflowY: isMobile ? "visible" : "auto", maxHeight: isMobile ? "none" : "50%", minHeight: 0, flex: isMobile ? "none" : "0 1 50%" }}>
             {!addMoreMode && (
               <button onClick={() => setShowAdj((v) => !v)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 10px", marginBottom: 8, border: "1px solid " + C.line, borderRadius: 8, background: C.card, color: C.ink, fontWeight: 700, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
                 <span>Disc {discount}% - GST {gstRate ? gstRate + "%" : "No"} - {String(payMode).toUpperCase()}</span>
@@ -2899,7 +2899,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
               <div><div style={{ color: "rgba(255,255,255,0.78)", fontSize: 10, fontWeight: 800, letterSpacing: 1 }}>AMOUNT DUE</div><div style={{ color: "#fff", fontSize: 12, fontWeight: 700, marginTop: 2 }}>Total</div></div>
               <span style={{ color: "#fff", fontSize: 23, fontWeight: 900, fontFamily: "monospace" }}>{inr(addMoreMode ? grossSub : totalAmount)}</span>
             </div>
-            <div style={{ position: "absolute", zIndex: 2, left: 0, right: 0, bottom: 0, padding: "8px 10px 10px", background: C.light, borderTop: `1px solid ${C.line}`, boxShadow: "0 -8px 18px rgba(0,0,0,0.12)" }}>
+            <div style={{ position: "sticky", zIndex: 2, bottom: 0, padding: "8px 0 0", background: C.light, borderTop: `1px solid ${C.line}`, boxShadow: "0 -8px 18px rgba(0,0,0,0.12)" }}>
             {!addMoreMode && (
               <>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 5, marginBottom: 6 }}>
