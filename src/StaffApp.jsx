@@ -2763,7 +2763,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
         </div>
 
         <div style={{ position: "relative", background: C.card, border: `1px solid ${C.line}`, borderRadius: 16, boxShadow: "0 12px 32px rgba(0,0,0,0.16)", display: "flex", flexDirection: "column", overflow: "hidden", flexShrink: 0, width: isMobile ? "100%" : 420, minHeight: isMobile ? 400 : 0, height: isMobile ? undefined : "100%" }}>
-          <div style={{ padding: "16px 18px", borderBottom: `1px solid ${C.line}`, background: C.cardAlt, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+          <div style={{ padding: isMobile ? "12px 14px" : "10px 12px", borderBottom: `1px solid ${C.line}`, background: C.cardAlt, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
             <div style={{ minWidth: 0 }}>
               <div style={{ fontWeight: 900, fontSize: isMobile ? 14 : 16, color: C.ink, letterSpacing: 0.1 }}>{addMoreMode ? "Add items" : existingOrder ? "Checkout" : "New order"}</div>
               <div style={{ marginTop: 3, fontSize: 11, color: C.gray, fontWeight: 700 }}>{table === "parcel" ? "Parcel" : "Table " + table} · {cartItems.length} {cartItems.length === 1 ? "item" : "items"}</div>
@@ -2773,7 +2773,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
               {isOwner && <button onClick={() => setAddMenuOpen(true)} style={{ padding: "7px 10px", border: "none", borderRadius: 8, background: C.green, color: "#fff", fontWeight: 800, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>+ Menu</button>}
             </div>
           </div>
-                    <div style={{ flex: isMobile ? "none" : 1, overflowY: isMobile ? "visible" : "auto", minHeight: isMobile ? 0 : 140 }}>
+                    <div style={{ flex: isMobile ? "none" : "0 1 28%", overflowY: isMobile ? "visible" : "auto", minHeight: isMobile ? 0 : 70, maxHeight: isMobile ? "none" : "32%" }}>
             {cartItems.length === 0 && <div style={{ textAlign: "center", padding: "40px 20px", color: C.gray, fontSize: 13, fontWeight: 700 }}><div style={{ fontSize: 40, marginBottom: 8, opacity: 0.5 }}>🧾</div>Menu se item tap karo</div>}
             {cartItems.length > 0 && (
               <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", background: C.cardAlt, borderBottom: "1px solid " + C.line, fontSize: 10, fontWeight: 800, color: C.gray, letterSpacing: 0.5, textTransform: "uppercase" }}>
@@ -2808,7 +2808,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
               );
             })}
           </div>
-<div style={{ borderTop: `2px solid ${C.line}`, padding: "10px", background: C.light, overflowY: isMobile ? "visible" : "auto", maxHeight: isMobile ? "none" : "50%", minHeight: 0, flex: isMobile ? "none" : "0 1 50%" }}>
+<div style={{ borderTop: `2px solid ${C.line}`, padding: isMobile ? 10 : 8, background: C.light, overflowY: isMobile ? "visible" : "auto", maxHeight: isMobile ? "none" : "none", minHeight: 0, flex: isMobile ? "none" : "1 1 auto" }}>
             {!addMoreMode && (
               <button onClick={() => setShowAdj((v) => !v)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 10px", marginBottom: 8, border: "1px solid " + C.line, borderRadius: 8, background: C.card, color: C.ink, fontWeight: 700, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
                 <span>Disc {discount}% - GST {gstRate ? gstRate + "%" : "No"} - {String(payMode).toUpperCase()}</span>
@@ -2830,7 +2830,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
             )}
             {!addMoreMode && (
               <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 12 }}>
-                <div style={{ padding: 12, background: C.cardAlt, border: `1px solid ${C.line}`, borderRadius: 12 }}>
+                <div style={{ padding: isMobile ? 12 : 8, background: C.cardAlt, border: `1px solid ${C.line}`, borderRadius: 10 }}>
                   <div style={{ fontSize: 10, color: C.gray, fontWeight: 900, letterSpacing: 0.8, marginBottom: 8 }}>CUSTOMER DETAILS <span style={{ fontWeight: 600, letterSpacing: 0, textTransform: "none" }}>· Optional</span></div>
                   <div style={{ display: "flex", gap: 8 }}>
                     <input aria-label="Customer name" placeholder="Customer name" value={custName} onChange={e => setCustName(e.target.value)} style={{ minWidth: 0, flex: 1, boxSizing: "border-box", padding: "10px 11px", border: `1px solid ${C.line}`, borderRadius: 8, fontSize: 12, background: C.card, color: C.ink, outline: "none" }} />
@@ -2851,9 +2851,9 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
                       <div style={{ fontSize: 10, color: C.gray, marginTop: 2 }}>Choose how the customer pays</div>
                     </div>
                   </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 7 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 5 }}>
                     {[["cash", "Cash", "₹"], ["upi", "UPI", "↗"], ["card", "Card", "▤"], ["due", "Due", "◷"], ["split", "Split", "⇄"]].map(([id, label, icon]) => (
-                      <button key={id} type="button" aria-pressed={payMode === id} onClick={() => { if (id === "split" && payMode !== "split") setSplitCash(String(totalAmount)); if (id === "cash") setCashReceived(""); setPayMode(id); }} style={{ minHeight: 48, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "8px 6px", borderRadius: 9, border: `1px solid ${payMode === id ? C.gold : C.line}`, background: payMode === id ? C.goldLight : C.card, color: payMode === id ? C.goldText : C.ink, fontWeight: 800, fontSize: 11, cursor: "pointer", fontFamily: "inherit", boxShadow: payMode === id ? `inset 0 0 0 1px ${C.gold}` : "none" }}>
+                      <button key={id} type="button" aria-pressed={payMode === id} onClick={() => { if (id === "split" && payMode !== "split") setSplitCash(String(totalAmount)); if (id === "cash") setCashReceived(""); setPayMode(id); }} style={{ minHeight: 38, display: "flex", alignItems: "center", justifyContent: "center", gap: 4, padding: "6px 4px", borderRadius: 8, border: `1px solid ${payMode === id ? C.gold : C.line}`, background: payMode === id ? C.goldLight : C.card, color: payMode === id ? C.goldText : C.ink, fontWeight: 800, fontSize: 10, cursor: "pointer", fontFamily: "inherit", boxShadow: payMode === id ? `inset 0 0 0 1px ${C.gold}` : "none" }}>
                         <span aria-hidden="true" style={{ fontSize: 14 }}>{icon}</span>{label}
                       </button>
                     ))}
