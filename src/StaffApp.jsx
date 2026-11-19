@@ -1950,7 +1950,8 @@ function printBill(order) {
   try {
     const itemsHtml = (order.items || []).map(it => `<tr><td style="text-align:left">${esc(it.name)}${it.portion ? ` (${esc(it.portion)})` : ""}</td><td style="text-align:center">${it.qty}</td><td style="text-align:right">Rs ${it.price}</td><td style="text-align:right">Rs ${it.price * it.qty}</td></tr>`).join("");
     const sub = order.subtotal || (order.items || []).reduce((s, it) => s + it.price * it.qty, 0);
-    const total = order.finalTotal || sub;
+    const total = order.finalTotal ?? sub;
+    const cashDiscount = Number(order.cashDiscount) || 0;
     const now = new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
     const billNo = esc(order.id.slice(1,9).toUpperCase());
     const iframe = document.createElement("iframe");
@@ -1961,7 +1962,7 @@ function printBill(order) {
     try { w.addEventListener("afterprint", cleanup); } catch (e) {}
     setTimeout(cleanup, 90000);
     w.document.open();
-    w.document.write(`<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="script-src 'none'; object-src 'none'"><title>Bill ${billNo}</title><style>@page{margin:0}*{color:#000!important}body{font-family:Arial,sans-serif;width:290px;margin:0 auto;padding:10px;font-weight:700}h2{text-align:center;font-size:24px;font-weight:900;margin:4px 0}.c{text-align:center;font-size:10px}.line{border-top:2px dashed #000;margin:8px 0}table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:4px 2px}th{border-bottom:2px solid #000;text-align:left;font-size:12px}.grand td{font-size:18px;font-weight:900;border-top:3px solid #000;padding-top:8px}.badge{display:inline-block;padding:3px 10px;border:2px solid #000;border-radius:10px;font-size:12px;margin:2px}</style></head><body><h2>${RESTAURANT.name}</h2><div class="c">${RESTAURANT.address}</div><div class="c">Ph: ${RESTAURANT.phones.join(" / ")}</div><div class="line"></div><div style="display:flex;justify-content:space-between;font-size:11px"><div>Bill: ${billNo}</div><div>${order.orderType === "parcel" ? "PARCEL" : "T-" + esc(order.table)}</div></div><div class="c" style="margin-top:4px">${now}</div>${custLabel(order) ? `<div class="c" style="font-size:12px">Customer: ${esc(custLabel(order))}</div>` : ""}${order.waiter ? `<div class="c">Waiter: ${esc(order.waiter)}</div>` : ""}<div class="line"></div><table><thead><tr><th>Item</th><th style="text-align:center">Qty</th><th style="text-align:right">Rate</th><th style="text-align:right">Amt</th></tr></thead><tbody>${itemsHtml}</tbody></table><div class="line"></div><table><tr><td>Subtotal</td><td style="text-align:right">Rs ${sub}</td></tr>${order.gstAmount ? `<tr><td>GST</td><td style="text-align:right">+Rs ${order.gstAmount}</td></tr>` : ""}${order.billDiscount ? `<tr><td>Discount</td><td style="text-align:right">-Rs ${order.billDiscount}</td></tr>` : ""}<tr class="grand"><td>GRAND TOTAL</td><td style="text-align:right">Rs ${total}</td></tr></table><div class="line"></div><div class="c"><span class="badge">${(order.payment || "cash").toUpperCase()}</span><span class="badge">${order.paid ? "PAID" : order.payment === "due" ? "DUE" : "PENDING"}</span></div><div class="c" style="margin-top:10px;font-size:11px">** Thank you, visit again **</div><div class="c" style="font-size:10px">Eat &amp; Park Restaurant</div></body></html>`);
+    w.document.write(`<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="script-src 'none'; object-src 'none'"><title>Bill ${billNo}</title><style>@page{margin:0}*{color:#000!important}body{font-family:Arial,sans-serif;width:290px;margin:0 auto;padding:10px;font-weight:700}h2{text-align:center;font-size:24px;font-weight:900;margin:4px 0}.c{text-align:center;font-size:10px}.line{border-top:2px dashed #000;margin:8px 0}table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:4px 2px}th{border-bottom:2px solid #000;text-align:left;font-size:12px}.grand td{font-size:18px;font-weight:900;border-top:3px solid #000;padding-top:8px}.badge{display:inline-block;padding:3px 10px;border:2px solid #000;border-radius:10px;font-size:12px;margin:2px}</style></head><body><h2>${RESTAURANT.name}</h2><div class="c">${RESTAURANT.address}</div><div class="c">Ph: ${RESTAURANT.phones.join(" / ")}</div><div class="line"></div><div style="display:flex;justify-content:space-between;font-size:11px"><div>Bill: ${billNo}</div><div>${order.orderType === "parcel" ? "PARCEL" : "T-" + esc(order.table)}</div></div><div class="c" style="margin-top:4px">${now}</div>${custLabel(order) ? `<div class="c" style="font-size:12px">Customer: ${esc(custLabel(order))}</div>` : ""}${order.waiter ? `<div class="c">Waiter: ${esc(order.waiter)}</div>` : ""}<div class="line"></div><table><thead><tr><th>Item</th><th style="text-align:center">Qty</th><th style="text-align:right">Rate</th><th style="text-align:right">Amt</th></tr></thead><tbody>${itemsHtml}</tbody></table><div class="line"></div><table><tr><td>Subtotal</td><td style="text-align:right">Rs ${sub}</td></tr>${order.gstAmount ? `<tr><td>GST</td><td style="text-align:right">+Rs ${order.gstAmount}</td></tr>` : ""}${order.billDiscount ? `<tr><td>Discount</td><td style="text-align:right">-Rs ${order.billDiscount}</td></tr>` : ""}${cashDiscount ? `<tr><td>Cash discount</td><td style="text-align:right">-Rs ${cashDiscount}</td></tr>` : ""}<tr class="grand"><td>GRAND TOTAL</td><td style="text-align:right">Rs ${total}</td></tr></table><div class="line"></div><div class="c"><span class="badge">${(order.payment || "cash").toUpperCase()}</span><span class="badge">${order.paid ? "PAID" : order.payment === "due" ? "DUE" : "PENDING"}</span></div><div class="c" style="margin-top:10px;font-size:11px">** Thank you, visit again **</div><div class="c" style="font-size:10px">Eat &amp; Park Restaurant</div></body></html>`);
     w.document.close();
     setTimeout(() => { try { w.focus(); w.print(); } catch (e) { alert("Print error: " + e.message); } }, 400);
   } catch (e) { alert("Print error: " + e.message); }
@@ -2293,7 +2294,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
     setPlacing(true);
     try {
       const applied = await applyCartChanges();
-      printBill({ ...existingOrder, items: applied.finalItems, finalTotal: applied.finalTotal, subtotal: applied.sub, gstAmount: applied.gstAmt, billDiscount: applied.discAmt, payment: payMode, paid: false });
+      printBill({ ...existingOrder, items: applied.finalItems, finalTotal: applied.finalTotal, subtotal: applied.sub, gstAmount: applied.gstAmt, billDiscount: applied.discAmt, cashDiscount: applied.cashDiscount, payment: payMode, paid: false });
       toast("Bill saved & printing", "success");
       onBack();
     } catch (e) { toast(e.message, "error"); } finally { setPlacing(false); }
@@ -2475,7 +2476,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
     });
     if (newKotItems.length) printKOT({ ...existingOrder, items: newKotItems, kots: [] });
     /*P8*/ if (removedItems.length) printKOT({ ...existingOrder, items: removedItems.map((i) => ({ ...i, name: "CANCEL >> " + i.name })), kots: [] });
-    return { finalItems, sub, discAmt: d, gstAmt: g, finalTotal };
+    return { finalItems, sub, discAmt: d, gstAmt: g, cashDiscount: Number(cashDiscount || 0), finalTotal };
   };
 
   const handlePlaceOrder = async () => {
@@ -2541,7 +2542,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
       const sub = cartSubtotal;
       const d = Math.round((sub * discount) / 100);
       const g = Math.round(((sub - d) * gstRate) / 100);
-      const finalTotal = Math.max(0, sub - d) + g;
+      const finalTotal = Math.max(0, sub - d + g - Number(cashDiscount || 0));
       const order = { id: orderId, table: table === "parcel" ? "" : table, orderType: table === "parcel" ? "parcel" : "dine_in", customer: { name: custName || "Walk-in", phone: custPhone || "", address: custAddress || "" }, cashDiscount: Number(cashDiscount || 0), paymentSplit: payMode === "split" ? { cash: Number(splitCash), online: Number(splitUpi) } : null, items, waiter: waiterName || "Staff", kots: [{ id: uid("kot"), kotNumber: 1, items, createdAt: Date.now(), status: "new", isRunning: false }], status: "new", paid: false, subtotal: sub, billDiscountPct: discount, billDiscount: d, gstRate, gstAmount: g, finalTotal, payment: payMode, createdAt: Date.now(), createdBy: auth.currentUser?.uid };
       await runTransaction(db, async (tx) => {
         const ref = doc(db, "orders", orderId);
@@ -2591,7 +2592,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
         const applied = await applyCartChanges();
         await updateDoc(doc(db, "orders", existingOrder.id), { payment: "due", paid: false, paymentStatus: "due", status: "served", dueName: dn || "Unknown", duePhone: dp, dueAt: Date.now() });
         logAudit("due_created", { orderId: existingOrder.id, total: applied.finalTotal, name: dn || "" });
-        printBill({ ...existingOrder, items: applied.finalItems, finalTotal: applied.finalTotal, subtotal: applied.sub, gstAmount: applied.gstAmt, billDiscount: applied.discAmt, payment: "due", paid: false });
+        printBill({ ...existingOrder, items: applied.finalItems, finalTotal: applied.finalTotal, subtotal: applied.sub, gstAmount: applied.gstAmt, billDiscount: applied.discAmt, cashDiscount: applied.cashDiscount, payment: "due", paid: false });
         toast("Due me save ho gaya", "success");
         onBack();
         return;
@@ -2600,7 +2601,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
       const paidPatch = buildPaidPatch(existingOrder, payMode, waiterName);
       // status "served" ka rule: buildPaidPatch (orderRules.js) - billing
       await updateDoc(doc(db, "orders", existingOrder.id), paidPatch);
-      printBill({ ...existingOrder, items: applied.finalItems, finalTotal: applied.finalTotal, subtotal: applied.sub, gstAmount: applied.gstAmt, billDiscount: applied.discAmt, payment: payMode, paid: true });
+      printBill({ ...existingOrder, items: applied.finalItems, finalTotal: applied.finalTotal, subtotal: applied.sub, gstAmount: applied.gstAmt, billDiscount: applied.discAmt, cashDiscount: applied.cashDiscount, payment: payMode, paid: true });
       haptic(80);
       logAudit("paid", { orderId: existingOrder.id, total: applied.finalTotal, mode: payMode }); toast("Payment received! Bill printing", "success");
       if (onPaidSuccess) onPaidSuccess();
@@ -2708,8 +2709,17 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
           </div>
         </div>
 
-        <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 16, boxShadow: "0 6px 24px rgba(0,0,0,0.08)", display: "flex", flexDirection: "column", overflow: "hidden", flexShrink: 0, width: isMobile ? "100%" : 400, minHeight: isMobile ? 400 : undefined }}>
-          <div style={{ padding: "12px 14px", borderBottom: `1px solid ${C.line}`, background: C.cardAlt, fontWeight: 800, fontSize: isMobile ? 13 : 15, color: C.ink, letterSpacing: 0.2 }}>{(existingOrder ? "Bill" : "New Order") + " - " + (table === "parcel" ? "Parcel" : "Table " + table) + " (" + cartItems.length + ")"}{isOwner && <button onClick={() => setAddMenuOpen(true)} style={{ float: "right", margin: "-3px 0", padding: "5px 12px", border: "none", borderRadius: 6, background: C.green, color: "#fff", fontWeight: 800, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>+ Menu</button>}{!existingOrder && cartItems.length > 0 && <button onClick={() => { if (window.confirm("Poora cart khaali karein?")) { setCart({}); try { localStorage.removeItem("staff_draft_" + table); } catch (e) {} } }} style={{ float: "right", margin: "-3px 8px -3px 0", padding: "5px 12px", border: "1.5px solid " + C.red, borderRadius: 6, background: "transparent", color: C.red, fontWeight: 800, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>Clear</button>}</div>
+        <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 16, boxShadow: "0 12px 32px rgba(0,0,0,0.16)", display: "flex", flexDirection: "column", overflow: "hidden", flexShrink: 0, width: isMobile ? "100%" : 420, minHeight: isMobile ? 400 : undefined }}>
+          <div style={{ padding: "16px 18px", borderBottom: `1px solid ${C.line}`, background: C.cardAlt, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 900, fontSize: isMobile ? 14 : 16, color: C.ink, letterSpacing: 0.1 }}>{addMoreMode ? "Add items" : existingOrder ? "Checkout" : "New order"}</div>
+              <div style={{ marginTop: 3, fontSize: 11, color: C.gray, fontWeight: 700 }}>{table === "parcel" ? "Parcel" : "Table " + table} · {cartItems.length} {cartItems.length === 1 ? "item" : "items"}</div>
+            </div>
+            <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+              {!existingOrder && cartItems.length > 0 && <button onClick={() => { if (window.confirm("Poora cart khaali karein?")) { setCart({}); try { localStorage.removeItem("staff_draft_" + table); } catch (e) {} } }} style={{ padding: "7px 10px", border: `1px solid ${C.red}55`, borderRadius: 8, background: C.redLight, color: C.red, fontWeight: 800, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>Clear</button>}
+              {isOwner && <button onClick={() => setAddMenuOpen(true)} style={{ padding: "7px 10px", border: "none", borderRadius: 8, background: C.green, color: "#fff", fontWeight: 800, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>+ Menu</button>}
+            </div>
+          </div>
                     <div style={{ flex: isMobile ? "none" : 1, overflowY: isMobile ? "visible" : "auto", minHeight: isMobile ? 0 : 140 }}>
             {cartItems.length === 0 && <div style={{ textAlign: "center", padding: "40px 20px", color: C.gray, fontSize: 13, fontWeight: 700 }}><div style={{ fontSize: 40, marginBottom: 8, opacity: 0.5 }}>🧾</div>Menu se item tap karo</div>}
             {cartItems.length > 0 && (
@@ -2766,78 +2776,79 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
               </div>
             )}
             {!addMoreMode && (
-              <div style={{ display: showAdj ? "flex" : "none", gap: 6, marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
-                <span style={{ fontSize: 10, color: C.gray, fontWeight: 800, minWidth: 38 }}>PAY</span>
-                {[["cash", "Cash"], ["upi", "UPI"], ["card", "Card"], ["due", "Due"]].map(([id, label]) => <button key={id} onClick={() => setPayMode(id)} style={{ padding: "3px 9px", borderRadius: 4, border: `1px solid ${payMode === id ? C.gold : C.line}`, background: payMode === id ? C.gold : C.card, color: payMode === id ? "#fff" : C.ink, fontWeight: 700, fontSize: 10, cursor: "pointer", fontFamily: "inherit" }}>{label}</button>)}
-              </div>
-            )}
-            
-            {!addMoreMode && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 8 }}>
-                <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: 8, background: C.cardAlt, borderRadius: 6 }}>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <input placeholder="Customer Name" value={custName} onChange={e => setCustName(e.target.value)} style={{ flex: 1, padding: "4px 6px", border: `1px solid ${C.line}`, borderRadius: 4, fontSize: 11, background: C.card, color: C.ink, outline: "none" }} />
-                    <input placeholder="Phone No." value={custPhone} onChange={e => setCustPhone(e.target.value)} type="tel" style={{ flex: 1, padding: "4px 6px", border: `1px solid ${C.line}`, borderRadius: 4, fontSize: 11, background: C.card, color: C.ink, outline: "none" }} />
+              <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 12 }}>
+                <div style={{ padding: 12, background: C.cardAlt, border: `1px solid ${C.line}`, borderRadius: 12 }}>
+                  <div style={{ fontSize: 10, color: C.gray, fontWeight: 900, letterSpacing: 0.8, marginBottom: 8 }}>CUSTOMER DETAILS <span style={{ fontWeight: 600, letterSpacing: 0, textTransform: "none" }}>· Optional</span></div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <input aria-label="Customer name" placeholder="Customer name" value={custName} onChange={e => setCustName(e.target.value)} style={{ minWidth: 0, flex: 1, boxSizing: "border-box", padding: "10px 11px", border: `1px solid ${C.line}`, borderRadius: 8, fontSize: 12, background: C.card, color: C.ink, outline: "none" }} />
+                    <input aria-label="Customer phone number" placeholder="Phone number" value={custPhone} onChange={e => setCustPhone(e.target.value)} type="tel" style={{ minWidth: 0, flex: 1, boxSizing: "border-box", padding: "10px 11px", border: `1px solid ${C.line}`, borderRadius: 8, fontSize: 12, background: C.card, color: C.ink, outline: "none" }} />
                   </div>
                   {table === "parcel" && (
-                    <input placeholder="Delivery Address" value={custAddress} onChange={e => setCustAddress(e.target.value)} style={{ width: "100%", padding: "4px 6px", border: `1px solid ${C.line}`, borderRadius: 4, fontSize: 11, background: C.card, color: C.ink, outline: "none" }} />
+                    <input aria-label="Delivery address" placeholder="Delivery address" value={custAddress} onChange={e => setCustAddress(e.target.value)} style={{ width: "100%", boxSizing: "border-box", marginTop: 8, padding: "10px 11px", border: `1px solid ${C.line}`, borderRadius: 8, fontSize: 12, background: C.card, color: C.ink, outline: "none" }} />
                   )}
                 </div>
-                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                  <span style={{ fontSize: 10, color: C.gray, fontWeight: 800, minWidth: 38 }}>CASH DISC</span>
-                  <input type="number" min={0} value={cashDiscount || ""} onChange={e => setCashDiscount(Math.max(0, Number(e.target.value) || 0))} placeholder="₹" style={{ width: 60, padding: "4px 6px", border: `1px solid ${C.line}`, borderRadius: 4, fontSize: 11, background: C.card, color: C.ink, fontWeight: 700, outline: "none" }} />
-                </div>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-                  <span style={{ fontSize: 10, color: C.gray, fontWeight: 800, minWidth: 38 }}>PAY</span>
-                  {/* FEATURE-SPLIT-PROMINENT */}
-                  {[["cash", "Cash"], ["upi", "UPI"], ["card", "Card"], ["due", "Due"], ["split", "Split ⚡"]].map(([id, label]) => (
-                    <button key={id} onClick={() => setPayMode(id)} style={{ padding: "3px 9px", borderRadius: 4, border: `1px solid ${payMode === id ? C.gold : C.line}`, background: payMode === id ? C.gold : C.card, color: payMode === id ? "#fff" : C.ink, fontWeight: 700, fontSize: 10, cursor: "pointer", fontFamily: "inherit" }}>{label}</button>
-                  ))}
-                </div>
-                {payMode === "split" && (
-                  <div style={{ display: "flex", gap: 6, alignItems: "center", background: C.cardAlt, padding: 8, borderRadius: 6 }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 9, color: C.gray, fontWeight: 700 }}>Cash</div>
-                      <input type="number" value={splitCash} onChange={e => { setSplitCash(e.target.value); setSplitUpi(String(totalAmount - Number(e.target.value))); }} placeholder="₹" style={{ width: "100%", padding: "4px", border: `1px solid ${C.line}`, borderRadius: 4, fontSize: 12, fontWeight: 700 }} />
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 9, color: C.gray, fontWeight: 700 }}>UPI / Online</div>
-                      <input type="number" value={splitUpi} onChange={e => { setSplitUpi(e.target.value); setSplitCash(String(totalAmount - Number(e.target.value))); }} placeholder="₹" style={{ width: "100%", padding: "4px", border: `1px solid ${C.line}`, borderRadius: 4, fontSize: 12, fontWeight: 700 }} />
+                <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontSize: 11, color: C.gray, fontWeight: 800 }}>
+                  Cash discount
+                  <input aria-label="Cash discount" type="number" min={0} value={cashDiscount || ""} onChange={e => setCashDiscount(Math.max(0, Number(e.target.value) || 0))} placeholder="₹" style={{ width: 82, padding: "8px 9px", border: `1px solid ${C.line}`, borderRadius: 7, fontSize: 12, background: C.card, color: C.ink, fontWeight: 700, outline: "none" }} />
+                </label>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 800, color: C.ink }}>Payment method</div>
+                      <div style={{ fontSize: 10, color: C.gray, marginTop: 2 }}>Choose how the customer pays</div>
                     </div>
                   </div>
-                )}
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 7 }}>
+                    {[["cash", "Cash", "₹"], ["upi", "UPI", "↗"], ["card", "Card", "▤"], ["due", "Due", "◷"], ["split", "Split", "⇄"]].map(([id, label, icon]) => (
+                      <button key={id} type="button" aria-pressed={payMode === id} onClick={() => setPayMode(id)} style={{ minHeight: 48, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "8px 6px", borderRadius: 9, border: `1px solid ${payMode === id ? C.gold : C.line}`, background: payMode === id ? C.goldLight : C.card, color: payMode === id ? C.goldText : C.ink, fontWeight: 800, fontSize: 11, cursor: "pointer", fontFamily: "inherit", boxShadow: payMode === id ? `inset 0 0 0 1px ${C.gold}` : "none" }}>
+                        <span aria-hidden="true" style={{ fontSize: 14 }}>{icon}</span>{label}
+                      </button>
+                    ))}
+                  </div>
+                  {payMode === "split" && (
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", background: C.cardAlt, padding: 10, borderRadius: 9, border: `1px solid ${C.line}` }}>
+                      <label style={{ flex: 1, minWidth: 0, fontSize: 10, color: C.gray, fontWeight: 800 }}>Cash
+                        <input aria-label="Cash portion" type="number" value={splitCash} onChange={e => { setSplitCash(e.target.value); setSplitUpi(String(totalAmount - Number(e.target.value))); }} placeholder="₹" style={{ display: "block", width: "100%", boxSizing: "border-box", marginTop: 5, padding: "8px 9px", border: `1px solid ${C.line}`, borderRadius: 7, fontSize: 12, fontWeight: 700, background: C.card, color: C.ink }} />
+                      </label>
+                      <label style={{ flex: 1, minWidth: 0, fontSize: 10, color: C.gray, fontWeight: 800 }}>UPI / Online
+                        <input aria-label="UPI or online portion" type="number" value={splitUpi} onChange={e => { setSplitUpi(e.target.value); setSplitCash(String(totalAmount - Number(e.target.value))); }} placeholder="₹" style={{ display: "block", width: "100%", boxSizing: "border-box", marginTop: 5, padding: "8px 9px", border: `1px solid ${C.line}`, borderRadius: 7, fontSize: 12, fontWeight: 700, background: C.card, color: C.ink }} />
+                      </label>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
-            <div style={{ background: C.card, borderRadius: 6, padding: 8, marginBottom: 6 }}>
+            <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 10, padding: "10px 12px", marginBottom: 8 }}>
               {addMoreMode && <>
-                <div style={{ display: "flex", justifyContent: "space-between", padding: "2px 0", fontSize: 11 }}><span style={{ color: C.gray }}>Running ({existingItems.length})</span><span style={{ fontWeight: 700, fontFamily: "monospace", color: C.ink }}>{inr(existingSubtotal)}</span></div>
-                <div style={{ display: "flex", justifyContent: "space-between", padding: "2px 0", fontSize: 11, color: C.green }}><span>New ({cartItems.length})</span><span style={{ fontFamily: "monospace", fontWeight: 700 }}>+{inr(cartSubtotal)}</span></div>
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 12 }}><span style={{ color: C.gray }}>Running ({existingItems.length})</span><span style={{ fontWeight: 700, fontFamily: "monospace", color: C.ink }}>{inr(existingSubtotal)}</span></div>
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 12, color: C.green }}><span>New ({cartItems.length})</span><span style={{ fontFamily: "monospace", fontWeight: 700 }}>+{inr(cartSubtotal)}</span></div>
               </>}
-              {!addMoreMode && discount > 0 && <div style={{ display: "flex", justifyContent: "space-between", padding: "2px 0", fontSize: 11, color: C.green }}><span>Disc {discount}%</span><span style={{ fontFamily: "monospace" }}>-{inr(discAmt)}</span></div>}
-              {!addMoreMode && gstRate > 0 && <div style={{ display: "flex", justifyContent: "space-between", padding: "2px 0", fontSize: 11, color: C.red }}><span>GST {gstRate}%</span><span style={{ fontFamily: "monospace" }}>+{inr(gstAmt)}</span></div>}
-              {!addMoreMode && discount === 0 && gstRate === 0 && <div style={{ display: "flex", justifyContent: "space-between", padding: "2px 0", fontSize: 11 }}><span style={{ color: C.gray }}>Subtotal</span><span style={{ fontWeight: 700, fontFamily: "monospace", color: C.ink }}>{inr(grossSub)}</span></div>}
+              {!addMoreMode && <>
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 12 }}><span style={{ color: C.gray }}>Subtotal</span><span style={{ fontWeight: 700, fontFamily: "monospace", color: C.ink }}>{inr(grossSub)}</span></div>
+                {discount > 0 && <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 12, color: C.green }}><span>Discount ({discount}%)</span><span style={{ fontFamily: "monospace" }}>-{inr(discAmt)}</span></div>}
+                {gstRate > 0 && <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 12, color: C.red }}><span>GST ({gstRate}%)</span><span style={{ fontFamily: "monospace" }}>+{inr(gstAmt)}</span></div>}
+                {cashDiscount > 0 && <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 12, color: C.green }}><span>Cash discount</span><span style={{ fontFamily: "monospace" }}>-{inr(cashDiscount)}</span></div>}
+              </>}
             </div>
-            <div style={{ background: `linear-gradient(135deg, ${C.gold} 0%, ${C.goldDark} 100%)`, borderRadius: 8, padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", boxShadow: `0 4px 12px ${C.gold}40` }}>
-              <span style={{ color: "#fff", fontSize: 12, fontWeight: 800, letterSpacing: 0.5 }}>TOTAL</span>
-              <span style={{ color: "#fff", fontSize: 20, fontWeight: 900, fontFamily: "monospace" }}>{inr(addMoreMode ? grossSub : totalAmount)}</span>
+            <div style={{ background: `linear-gradient(135deg, ${C.gold} 0%, ${C.goldDark} 100%)`, borderRadius: 11, padding: "13px 15px", display: "flex", justifyContent: "space-between", alignItems: "center", boxShadow: `0 6px 16px ${C.gold}35` }}>
+              <div><div style={{ color: "rgba(255,255,255,0.78)", fontSize: 10, fontWeight: 800, letterSpacing: 1 }}>AMOUNT DUE</div><div style={{ color: "#fff", fontSize: 12, fontWeight: 700, marginTop: 2 }}>Total</div></div>
+              <span style={{ color: "#fff", fontSize: 23, fontWeight: 900, fontFamily: "monospace" }}>{inr(addMoreMode ? grossSub : totalAmount)}</span>
             </div>
             {existingOrder && !addMoreMode && (
               <div style={{ marginTop: 8 }}>
                 {existingOrder.paid && <div style={{ padding: 8, borderRadius: 6, background: C.greenLight, color: C.green, fontWeight: 900, fontSize: 12, textAlign: "center", border: "1px solid " + C.green, marginBottom: 6 }}>PAID</div>}
-                <div style={{ display: "flex", gap: 6 }}>
-                  <button onClick={handleSaveBill} disabled={placing || !!existingOrder.paid} style={{ flex: 1, padding: "9px 6px", border: "none", borderRadius: 6, background: C.blue, color: "#fff", fontWeight: 700, fontSize: 12, cursor: placing ? "not-allowed" : "pointer", fontFamily: "inherit" }}>Save</button>
-                  <button onClick={handlePrintBill} disabled={placing} style={{ flex: 1, padding: "9px 6px", border: "1px solid " + C.ink, borderRadius: 6, background: "transparent", color: C.ink, fontWeight: 700, fontSize: 12, cursor: placing ? "not-allowed" : "pointer", fontFamily: "inherit" }}>Print</button>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 7, marginTop: 9 }}>
+                  <button onClick={handleSaveBill} disabled={placing || !!existingOrder.paid} style={{ padding: "10px 8px", border: `1px solid ${C.line}`, borderRadius: 8, background: C.cardAlt, color: C.ink, fontWeight: 800, fontSize: 12, cursor: placing ? "not-allowed" : "pointer", fontFamily: "inherit" }}>Save changes</button>
+                  <button onClick={handlePrintBill} disabled={placing} style={{ padding: "10px 8px", border: `1px solid ${C.line}`, borderRadius: 8, background: C.card, color: C.ink, fontWeight: 800, fontSize: 12, cursor: placing ? "not-allowed" : "pointer", fontFamily: "inherit" }}>Print bill</button>
                   {onSplit && !existingOrder.paid && (existingOrder.items || []).length > 1 && (
-                    <button onClick={() => onSplit(existingOrder)} disabled={placing} style={{ flex: 1, padding: "9px 6px", border: "1px solid " + C.amber, borderRadius: 6, background: "transparent", color: C.amber, fontWeight: 700, fontSize: 12, cursor: placing ? "not-allowed" : "pointer", fontFamily: "inherit" }}>✂ Split</button>
+                    <button onClick={() => onSplit(existingOrder)} disabled={placing} style={{ padding: "9px 8px", border: `1px solid ${C.line}`, borderRadius: 8, background: C.card, color: C.ink, fontWeight: 700, fontSize: 11, cursor: placing ? "not-allowed" : "pointer", fontFamily: "inherit" }}>✂ Split bill</button>
                   )}
                   {!existingOrder.paid && onSwitchAdd && (
-                    <button onClick={onSwitchAdd} disabled={placing} style={{ flex: 1, padding: "9px 6px", border: "1px solid " + C.green, borderRadius: 6, background: "transparent", color: C.green, fontWeight: 700, fontSize: 12, cursor: placing ? "not-allowed" : "pointer", fontFamily: "inherit" }}>+ Add</button>
-                  )}
-                  {!existingOrder.paid && (
-                    <button onClick={handlePaidPrint} disabled={placing} style={{ flex: 1.5, padding: "9px 6px", border: "none", borderRadius: 6, background: C.green, color: "#fff", fontWeight: 800, fontSize: 12, cursor: placing ? "not-allowed" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center" }}>{placing ? <Spinner /> : (payMode === "due" ? "Due" : "Paid")}</button>
+                    <button onClick={onSwitchAdd} disabled={placing} style={{ padding: "9px 8px", border: `1px solid ${C.line}`, borderRadius: 8, background: C.card, color: C.ink, fontWeight: 700, fontSize: 11, cursor: placing ? "not-allowed" : "pointer", fontFamily: "inherit" }}>+ Add items</button>
                   )}
                 </div>
+                {!existingOrder.paid && <button onClick={handlePaidPrint} disabled={placing} style={{ width: "100%", marginTop: 8, padding: "12px 10px", border: "none", borderRadius: 9, background: `linear-gradient(135deg, ${C.green} 0%, #15803D 100%)`, color: "#fff", fontWeight: 900, fontSize: 14, cursor: placing ? "not-allowed" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, boxShadow: `0 5px 14px ${C.green}35` }}>{placing ? <Spinner /> : (payMode === "due" ? "Record as due" : `Collect ${inr(totalAmount)} & print`)}</button>}
                 {isOwner && !existingOrder.paid && (
                   <button onClick={() => setCancelOpen(true)} style={{ width: "100%", marginTop: 6, padding: 4, border: "none", background: "transparent", color: C.gray, fontWeight: 700, fontSize: 11, textDecoration: "underline", cursor: "pointer", fontFamily: "inherit" }}>Order cancel karein</button>
                 )}
