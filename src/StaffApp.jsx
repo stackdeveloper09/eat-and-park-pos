@@ -2716,7 +2716,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
           </div>
         </div>
 
-        <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 16, boxShadow: "0 12px 32px rgba(0,0,0,0.16)", display: "flex", flexDirection: "column", overflow: "hidden", flexShrink: 0, width: isMobile ? "100%" : 420, minHeight: isMobile ? 400 : undefined }}>
+        <div style={{ position: "relative", background: C.card, border: `1px solid ${C.line}`, borderRadius: 16, boxShadow: "0 12px 32px rgba(0,0,0,0.16)", display: "flex", flexDirection: "column", overflow: "hidden", flexShrink: 0, width: isMobile ? "100%" : 420, minHeight: isMobile ? 400 : 0, height: isMobile ? undefined : "100%" }}>
           <div style={{ padding: "16px 18px", borderBottom: `1px solid ${C.line}`, background: C.cardAlt, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
             <div style={{ minWidth: 0 }}>
               <div style={{ fontWeight: 900, fontSize: isMobile ? 14 : 16, color: C.ink, letterSpacing: 0.1 }}>{addMoreMode ? "Add items" : existingOrder ? "Checkout" : "New order"}</div>
@@ -2762,7 +2762,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
               );
             })}
           </div>
-<div style={{ borderTop: `2px solid ${C.line}`, padding: 10, background: C.light, overflowY: isMobile ? "visible" : "auto", maxHeight: isMobile ? "none" : "55vh" }}>
+<div style={{ borderTop: `2px solid ${C.line}`, padding: "10px 10px 170px", background: C.light, overflowY: isMobile ? "visible" : "auto", maxHeight: isMobile ? "none" : "100%", minHeight: 0 }}>
             {!addMoreMode && (
               <button onClick={() => setShowAdj((v) => !v)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 10px", marginBottom: 8, border: "1px solid " + C.line, borderRadius: 8, background: C.card, color: C.ink, fontWeight: 700, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
                 <span>Disc {discount}% - GST {gstRate ? gstRate + "%" : "No"} - {String(payMode).toUpperCase()}</span>
@@ -2853,8 +2853,9 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
               <div><div style={{ color: "rgba(255,255,255,0.78)", fontSize: 10, fontWeight: 800, letterSpacing: 1 }}>AMOUNT DUE</div><div style={{ color: "#fff", fontSize: 12, fontWeight: 700, marginTop: 2 }}>Total</div></div>
               <span style={{ color: "#fff", fontSize: 23, fontWeight: 900, fontFamily: "monospace" }}>{inr(addMoreMode ? grossSub : totalAmount)}</span>
             </div>
+            <div style={{ position: "absolute", zIndex: 2, left: 0, right: 0, bottom: 0, padding: "8px 10px 10px", background: C.light, borderTop: `1px solid ${C.line}`, boxShadow: "0 -8px 18px rgba(0,0,0,0.12)" }}>
             {existingOrder && !addMoreMode && (
-              <div style={{ marginTop: 8 }}>
+              <div style={{ marginTop: 0 }}>
                 {existingOrder.paid && <div style={{ padding: 8, borderRadius: 6, background: C.greenLight, color: C.green, fontWeight: 900, fontSize: 12, textAlign: "center", border: "1px solid " + C.green, marginBottom: 6 }}>PAID</div>}
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 7, marginTop: 9 }}>
                   <button onClick={handleSaveBill} disabled={placing || !!existingOrder.paid} style={{ padding: "10px 8px", border: `1px solid ${C.line}`, borderRadius: 8, background: C.cardAlt, color: C.ink, fontWeight: 800, fontSize: 12, cursor: placing ? "not-allowed" : "pointer", fontFamily: "inherit" }}>Save changes</button>
@@ -2878,6 +2879,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
             {!existingOrder && (
               <button onClick={handlePlaceOrder} disabled={cartItems.length === 0 || placing} style={{ width: "100%", padding: 10, marginTop: 8, border: "none", borderRadius: 10, background: cartItems.length === 0 ? C.line : `linear-gradient(135deg, ${C.gold} 0%, ${C.goldDark} 100%)`, color: cartItems.length === 0 ? C.gray : "#fff", fontWeight: 800, fontSize: 14, cursor: cartItems.length === 0 ? "not-allowed" : "pointer", fontFamily: "inherit", boxShadow: cartItems.length === 0 ? "none" : `0 6px 16px ${C.gold}40`, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>{placing ? <><Spinner /> Placing...</> : "Send KOT"}</button>
             )}
+            </div>
           </div>
         </div>
       </div>
