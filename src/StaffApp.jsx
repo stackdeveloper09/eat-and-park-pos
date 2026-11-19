@@ -4,6 +4,7 @@ import React, { useState, useEffect, useMemo, useRef, useContext, createContext,
 import { db, auth } from "./firebase";
 import { assertEditable, resolveVendorId } from "./lib/guards";
 import { PAID_STATUSES, OPEN_WINDOW_MS, isOpenParcel, isOpenDineIn, isActiveOrder, paidOrders, paidRevenue, buildPaidPatch } from "./lib/orderRules";
+import { paymentBreakdown, splitPayment } from "./lib/billing";
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged, setPersistence, browserLocalPersistence } from "firebase/auth";
 import {
   collection, doc, setDoc, onSnapshot, getDoc, updateDoc, addDoc,
@@ -2241,7 +2242,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
   const [gstRate, setGstRate] = useState(0);
   const [payMode, setPayMode] = useState("cash");
   const [splitCash, setSplitCash] = useState("");
-  const [splitUpi, setSplitUpi] = useState("");
+  const [cashReceived, setCashReceived] = useState("");
   const [custName, setCustName] = useState("");
   const [custPhone, setCustPhone] = useState("");
   const [custAddress, setCustAddress] = useState("");
@@ -2321,11 +2322,14 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
     if (!existingOrder) { lastSeededSigRef.current = null; return; }
     setDiscount(existingOrder.billDiscountPct || 0);
     setGstRate(existingOrder.gstRate || 0);
+    setCashDiscount(existingOrder.cashDiscount || 0);
+    setCashReceived("");
     if (addMoreMode) {
       setCart({});
       return;
     }
     setPayMode(existingOrder.payment || "cash");
+    setSplitCash(String(existingOrder.paymentSplit?.cash ?? existingOrder.finalTotal ?? 0));
     if (lastSeededSigRef.current === orderSig) return;
     lastSeededSigRef.current = orderSig;
     const initialCart = {};
@@ -2398,6 +2402,9 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
   const discAmt = Math.round(grossSub * discount / 100);
   const gstAmt = Math.round((grossSub - discAmt) * gstRate / 100);
   const totalAmount = Math.max(0, grossSub - discAmt + gstAmt - Number(cashDiscount || 0));
+  const splitAmounts = splitPayment(totalAmount, splitCash === "" ? totalAmount : splitCash);
+  const cashBalance = cashReceived === "" ? null : Number(cashReceived) - totalAmount;
+  const cashSuggestions = [...new Set([totalAmount, Math.ceil(totalAmount / 100) * 100, Math.ceil(totalAmount / 500) * 500])];
 
   useEffect(() => {
     const running = orders.filter(o => Number(o.table) === Number(table) && isOpenDineIn(o));
@@ -2472,7 +2479,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
       const oref = doc(db, "orders", existingOrder.id);
       const osnap = await tx.get(oref);
       assertEditable(osnap.exists() ? osnap.data() : null, existingOrder);
-      tx.update(oref, { items: finalItems, subtotal: sub, billDiscountPct: discount, billDiscount: d, gstRate, gstAmount: g, finalTotal, payment: payMode, cashDiscount: Number(cashDiscount || 0), paymentSplit: payMode === "split" ? { cash: Number(splitCash), online: Number(splitUpi) } : null, customer: { ...(existingOrder.customer || {}), name: custName || "Walk-in", phone: custPhone || "", address: custAddress || "" }, billEditedAt: Date.now(), ...extra });
+      tx.update(oref, { items: finalItems, subtotal: sub, billDiscountPct: discount, billDiscount: d, gstRate, gstAmount: g, finalTotal, payment: payMode, cashDiscount: Number(cashDiscount || 0), paymentSplit: payMode === "split" ? splitPayment(finalTotal, splitCash === "" ? finalTotal : splitCash) : null, customer: { ...(existingOrder.customer || {}), name: custName || "Walk-in", phone: custPhone || "", address: custAddress || "" }, billEditedAt: Date.now(), ...extra });
     });
     if (newKotItems.length) printKOT({ ...existingOrder, items: newKotItems, kots: [] });
     /*P8*/ if (removedItems.length) printKOT({ ...existingOrder, items: removedItems.map((i) => ({ ...i, name: "CANCEL >> " + i.name })), kots: [] });
@@ -2543,7 +2550,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
       const d = Math.round((sub * discount) / 100);
       const g = Math.round(((sub - d) * gstRate) / 100);
       const finalTotal = Math.max(0, sub - d + g - Number(cashDiscount || 0));
-      const order = { id: orderId, table: table === "parcel" ? "" : table, orderType: table === "parcel" ? "parcel" : "dine_in", customer: { name: custName || "Walk-in", phone: custPhone || "", address: custAddress || "" }, cashDiscount: Number(cashDiscount || 0), paymentSplit: payMode === "split" ? { cash: Number(splitCash), online: Number(splitUpi) } : null, items, waiter: waiterName || "Staff", kots: [{ id: uid("kot"), kotNumber: 1, items, createdAt: Date.now(), status: "new", isRunning: false }], status: "new", paid: false, subtotal: sub, billDiscountPct: discount, billDiscount: d, gstRate, gstAmount: g, finalTotal, payment: payMode, createdAt: Date.now(), createdBy: auth.currentUser?.uid };
+      const order = { id: orderId, table: table === "parcel" ? "" : table, orderType: table === "parcel" ? "parcel" : "dine_in", customer: { name: custName || "Walk-in", phone: custPhone || "", address: custAddress || "" }, cashDiscount: Number(cashDiscount || 0), paymentSplit: payMode === "split" ? splitAmounts : null, items, waiter: waiterName || "Staff", kots: [{ id: uid("kot"), kotNumber: 1, items, createdAt: Date.now(), status: "new", isRunning: false }], status: "new", paid: false, subtotal: sub, billDiscountPct: discount, billDiscount: d, gstRate, gstAmount: g, finalTotal, payment: payMode, createdAt: Date.now(), createdBy: auth.currentUser?.uid };
       await runTransaction(db, async (tx) => {
         const ref = doc(db, "orders", orderId);
         const snap = await tx.get(ref);
@@ -2789,7 +2796,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
                 </div>
                 <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontSize: 11, color: C.gray, fontWeight: 800 }}>
                   Cash discount
-                  <input aria-label="Cash discount" type="number" min={0} value={cashDiscount || ""} onChange={e => setCashDiscount(Math.max(0, Number(e.target.value) || 0))} placeholder="₹" style={{ width: 82, padding: "8px 9px", border: `1px solid ${C.line}`, borderRadius: 7, fontSize: 12, background: C.card, color: C.ink, fontWeight: 700, outline: "none" }} />
+                  <input aria-label="Cash discount" type="number" min={0} max={grossSub - discAmt + gstAmt} value={cashDiscount || ""} onChange={e => setCashDiscount(Math.min(grossSub - discAmt + gstAmt, Math.max(0, Number(e.target.value) || 0)))} placeholder="₹" style={{ width: 82, padding: "8px 9px", border: `1px solid ${C.line}`, borderRadius: 7, fontSize: 12, background: C.card, color: C.ink, fontWeight: 700, outline: "none" }} />
                 </label>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
@@ -2800,18 +2807,29 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
                   </div>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 7 }}>
                     {[["cash", "Cash", "₹"], ["upi", "UPI", "↗"], ["card", "Card", "▤"], ["due", "Due", "◷"], ["split", "Split", "⇄"]].map(([id, label, icon]) => (
-                      <button key={id} type="button" aria-pressed={payMode === id} onClick={() => setPayMode(id)} style={{ minHeight: 48, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "8px 6px", borderRadius: 9, border: `1px solid ${payMode === id ? C.gold : C.line}`, background: payMode === id ? C.goldLight : C.card, color: payMode === id ? C.goldText : C.ink, fontWeight: 800, fontSize: 11, cursor: "pointer", fontFamily: "inherit", boxShadow: payMode === id ? `inset 0 0 0 1px ${C.gold}` : "none" }}>
+                      <button key={id} type="button" aria-pressed={payMode === id} onClick={() => { if (id === "split" && payMode !== "split") setSplitCash(String(totalAmount)); if (id === "cash") setCashReceived(""); setPayMode(id); }} style={{ minHeight: 48, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "8px 6px", borderRadius: 9, border: `1px solid ${payMode === id ? C.gold : C.line}`, background: payMode === id ? C.goldLight : C.card, color: payMode === id ? C.goldText : C.ink, fontWeight: 800, fontSize: 11, cursor: "pointer", fontFamily: "inherit", boxShadow: payMode === id ? `inset 0 0 0 1px ${C.gold}` : "none" }}>
                         <span aria-hidden="true" style={{ fontSize: 14 }}>{icon}</span>{label}
                       </button>
                     ))}
                   </div>
+                  {payMode === "cash" && (
+                    <div style={{ padding: 10, border: `1px solid ${C.line}`, borderRadius: 9, background: C.cardAlt }}>
+                      <label style={{ display: "block", fontSize: 10, color: C.gray, fontWeight: 800 }}>CASH RECEIVED
+                        <input aria-label="Cash received" type="number" min={0} value={cashReceived} onChange={e => setCashReceived(e.target.value)} placeholder={String(totalAmount)} style={{ display: "block", width: "100%", boxSizing: "border-box", marginTop: 5, padding: "9px 10px", border: `1px solid ${C.line}`, borderRadius: 7, fontSize: 14, fontWeight: 800, background: C.card, color: C.ink }} />
+                      </label>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+                        {cashSuggestions.map((amount, index) => <button key={`${amount}-${index}`} type="button" onClick={() => setCashReceived(String(amount))} style={{ padding: "5px 9px", border: `1px solid ${C.line}`, borderRadius: 7, background: C.card, color: C.ink, fontWeight: 700, fontSize: 10, cursor: "pointer" }}>{index === 0 ? "Exact" : inr(amount)}</button>)}
+                      </div>
+                      {cashBalance !== null && Number.isFinite(cashBalance) && <div aria-live="polite" style={{ marginTop: 8, fontSize: 12, fontWeight: 800, color: cashBalance >= 0 ? C.green : C.amber }}>{cashBalance >= 0 ? `Change to return: ${inr(cashBalance)}` : `Still due: ${inr(Math.abs(cashBalance))}`}</div>}
+                    </div>
+                  )}
                   {payMode === "split" && (
                     <div style={{ display: "flex", gap: 8, alignItems: "center", background: C.cardAlt, padding: 10, borderRadius: 9, border: `1px solid ${C.line}` }}>
                       <label style={{ flex: 1, minWidth: 0, fontSize: 10, color: C.gray, fontWeight: 800 }}>Cash
-                        <input aria-label="Cash portion" type="number" value={splitCash} onChange={e => { setSplitCash(e.target.value); setSplitUpi(String(totalAmount - Number(e.target.value))); }} placeholder="₹" style={{ display: "block", width: "100%", boxSizing: "border-box", marginTop: 5, padding: "8px 9px", border: `1px solid ${C.line}`, borderRadius: 7, fontSize: 12, fontWeight: 700, background: C.card, color: C.ink }} />
+                        <input aria-label="Cash portion" type="number" min={0} max={totalAmount} value={splitAmounts.cash} onChange={e => setSplitCash(e.target.value)} placeholder="₹" style={{ display: "block", width: "100%", boxSizing: "border-box", marginTop: 5, padding: "8px 9px", border: `1px solid ${C.line}`, borderRadius: 7, fontSize: 12, fontWeight: 700, background: C.card, color: C.ink }} />
                       </label>
                       <label style={{ flex: 1, minWidth: 0, fontSize: 10, color: C.gray, fontWeight: 800 }}>UPI / Online
-                        <input aria-label="UPI or online portion" type="number" value={splitUpi} onChange={e => { setSplitUpi(e.target.value); setSplitCash(String(totalAmount - Number(e.target.value))); }} placeholder="₹" style={{ display: "block", width: "100%", boxSizing: "border-box", marginTop: 5, padding: "8px 9px", border: `1px solid ${C.line}`, borderRadius: 7, fontSize: 12, fontWeight: 700, background: C.card, color: C.ink }} />
+                        <input aria-label="UPI or online portion" type="number" min={0} max={totalAmount} value={splitAmounts.online} onChange={e => { const online = Math.min(totalAmount, Math.max(0, Number(e.target.value) || 0)); setSplitCash(String(totalAmount - online)); }} placeholder="₹" style={{ display: "block", width: "100%", boxSizing: "border-box", marginTop: 5, padding: "8px 9px", border: `1px solid ${C.line}`, borderRadius: 7, fontSize: 12, fontWeight: 700, background: C.card, color: C.ink }} />
                       </label>
                     </div>
                   )}
@@ -2848,7 +2866,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
                     <button onClick={onSwitchAdd} disabled={placing} style={{ padding: "9px 8px", border: `1px solid ${C.line}`, borderRadius: 8, background: C.card, color: C.ink, fontWeight: 700, fontSize: 11, cursor: placing ? "not-allowed" : "pointer", fontFamily: "inherit" }}>+ Add items</button>
                   )}
                 </div>
-                {!existingOrder.paid && <button onClick={handlePaidPrint} disabled={placing} style={{ width: "100%", marginTop: 8, padding: "12px 10px", border: "none", borderRadius: 9, background: `linear-gradient(135deg, ${C.green} 0%, #15803D 100%)`, color: "#fff", fontWeight: 900, fontSize: 14, cursor: placing ? "not-allowed" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, boxShadow: `0 5px 14px ${C.green}35` }}>{placing ? <Spinner /> : (payMode === "due" ? "Record as due" : `Collect ${inr(totalAmount)} & print`)}</button>}
+                {!existingOrder.paid && <button onClick={handlePaidPrint} disabled={placing || (payMode === "cash" && cashReceived !== "" && (!Number.isFinite(Number(cashReceived)) || Number(cashReceived) < totalAmount))} style={{ width: "100%", marginTop: 8, padding: "12px 10px", border: "none", borderRadius: 9, background: `linear-gradient(135deg, ${C.green} 0%, #15803D 100%)`, color: "#fff", fontWeight: 900, fontSize: 14, cursor: placing || (payMode === "cash" && cashReceived !== "" && Number(cashReceived) < totalAmount) ? "not-allowed" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, boxShadow: `0 5px 14px ${C.green}35` }}>{placing ? <Spinner /> : (payMode === "due" ? "Record as due" : `Collect ${inr(totalAmount)} & print`)}</button>}
                 {isOwner && !existingOrder.paid && (
                   <button onClick={() => setCancelOpen(true)} style={{ width: "100%", marginTop: 6, padding: 4, border: "none", background: "transparent", color: C.gray, fontWeight: 700, fontSize: 11, textDecoration: "underline", cursor: "pointer", fontFamily: "inherit" }}>Order cancel karein</button>
                 )}
@@ -2926,8 +2944,11 @@ function ReportsExtra({ C, isMobile, orders, rangeLabel }) {
   }));
   const topItems = Object.entries(itemMap).sort((a, b) => b[1].qty - a[1].qty).slice(0, 10);
   const maxQty = topItems.length ? topItems[0][1].qty : 1;
-  const pay = { cash: 0, upi: 0, card: 0 };
-  paidOrders.forEach(o => { const m = String(o.payment || "cash").toLowerCase(); pay[m] = (pay[m] || 0) + (Number(o.finalTotal) || 0); });
+  const pay = { cash: 0, upi: 0, card: 0, split: 0 };
+  paidOrders.forEach(o => {
+    const breakdown = paymentBreakdown(o);
+    Object.keys(pay).forEach((mode) => { pay[mode] += breakdown[mode]; });
+  });
   const dueTotal = valid.filter(o => o.paymentStatus === "due").reduce((s, o) => s + (Number(o.finalTotal) || 0), 0);
   const collected = paidOrders.reduce((s, o) => s + (Number(o.finalTotal) || 0), 0);
   const cancelled = orders.length - valid.length;
@@ -2945,7 +2966,7 @@ const csv = rows.map(r => r.map(c => `"${String(csvCellSafe(c)).replace(/"/g, '"
 
   const closeDay = () => {
     const row = (k, v) => `<tr><td>${k}</td><td style="text-align:right">${v}</td></tr>`;
-    printHtml("Day Close", `<h2>${RESTAURANT.name}</h2><div class="c">DAY CLOSING - ${rangeLabel}</div><div class="c">${new Date().toLocaleString("en-IN")}</div><div class="line"></div><table>${row("Total orders", orders.length)}${row("Cancelled", cancelled)}${row("Paid orders", paidOrders.length)}</table><div class="line"></div><table>${row("Cash", inr(pay.cash))}${row("UPI", inr(pay.upi))}${row("Card", inr(pay.card))}${row("<b>Total collected</b>", "<b>" + inr(collected) + "</b>")}${row("Due pending", inr(dueTotal))}</table><div class="line"></div><div class="c">- End of report -</div>`);
+    printHtml("Day Close", `<h2>${RESTAURANT.name}</h2><div class="c">DAY CLOSING - ${rangeLabel}</div><div class="c">${new Date().toLocaleString("en-IN")}</div><div class="line"></div><table>${row("Total orders", orders.length)}${row("Cancelled", cancelled)}${row("Paid orders", paidOrders.length)}</table><div class="line"></div><table>${row("Cash", inr(pay.cash))}${row("UPI", inr(pay.upi))}${row("Card", inr(pay.card))}${row("Split (unallocated)", inr(pay.split))}${row("<b>Total collected</b>", "<b>" + inr(collected) + "</b>")}${row("Due pending", inr(dueTotal))}</table><div class="line"></div><div class="c">- End of report -</div>`);
   };
 
   const box = { background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: isMobile ? 14 : 20, marginBottom: 24 };
@@ -2960,7 +2981,7 @@ const csv = rows.map(r => r.map(c => `"${String(csvCellSafe(c)).replace(/"/g, '"
           </div>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(auto-fit, minmax(110px, 1fr))", gap: 10 }}>
-          {[["Cash", pay.cash, C.green], ["UPI", pay.upi, C.blue], ["Card", pay.card, C.amber], ["Due", dueTotal, C.red]].map(([l, v, c]) => (
+          {[["Cash", pay.cash, C.green], ["UPI", pay.upi, C.blue], ["Card", pay.card, C.amber], ["Split (unallocated)", pay.split, C.gray], ["Due", dueTotal, C.red]].map(([l, v, c]) => (
             <div key={l} style={{ background: C.cardAlt, borderRadius: 10, padding: isMobile ? 10 : 12 }}>
               <div style={{ fontSize: 10, color: C.gray, fontWeight: 800 }}>{l}</div>
               <div style={{ fontSize: isMobile ? 15 : 18, fontWeight: 900, color: c, fontFamily: "monospace", marginTop: 4 }}>{inr(v)}</div>
@@ -3797,8 +3818,11 @@ function calcStats(orders, expenses) {
   const paid = valid.filter((o) => o.paid);
   const duePending = sum(valid.filter((o) => o.paymentStatus === "due" && !o.paid), (o) => o.finalTotal);
   const revenue = sum(paid, (o) => o.finalTotal);
-  const pay = { cash: 0, upi: 0, card: 0 };
-  paid.forEach((o) => { const m = String(o.payment || "cash").toLowerCase(); pay[m] = (pay[m] || 0) + (Number(o.finalTotal) || 0); });
+  const pay = { cash: 0, upi: 0, card: 0, split: 0 };
+  paid.forEach((o) => {
+    const breakdown = paymentBreakdown(o);
+    Object.keys(pay).forEach((mode) => { pay[mode] += breakdown[mode]; });
+  });
   const expTotal = sum(expenses, (e) => e.amount);
   const expByCat = {};
   expenses.forEach((e) => { const c = e.category || "Anya"; expByCat[c] = (expByCat[c] || 0) + (Number(e.amount) || 0); });
@@ -4303,7 +4327,7 @@ function ReportsView({ C, isMobile, isOwner, waiterName }) {
         ["Revenue (paid)", s.revenue], ["Kharcha", s.expTotal], ["Net Profit", s.profit], ["Margin %", Math.round(s.margin * 10) / 10], [],
         ["Orders (cancelled nahi)", s.valid.length], ["Paid orders", s.paid.length], ["Avg bill", s.avg], ["Discount diya", s.discount], ["GST", s.gst],
         ["Due baaki", s.duePending], ["Cancelled orders", s.cancelled], [],
-        ["Cash", s.pay.cash], ["UPI", s.pay.upi], ["Card", s.pay.card],
+        ["Cash", s.pay.cash], ["UPI", s.pay.upi], ["Card", s.pay.card], ["Split (unallocated)", s.pay.split],
       ] },
       { name: "Daily", rows: [["Date", "Orders", "Revenue", "Kharcha", "Profit"], ...s.daily.map((d) => [d.date, d.orders, d.revenue, d.expense, d.profit])] },
       { name: "Kharcha Category", rows: [["Category", "Amount"], ...s.catRows.map(([c, v]) => [c, v])] },
@@ -4320,7 +4344,7 @@ function ReportsView({ C, isMobile, isOwner, waiterName }) {
     const row = (k, v, b) => "<tr><td>" + (b ? "<b>" + k + "</b>" : k) + "</td><td style='text-align:right'>" + (b ? "<b>" + v + "</b>" : v) + "</td></tr>";
     const body = "<h1>" + esc(RESTAURANT.name) + "</h1><div class='sub'>Profit &amp; Loss - " + esc(rangeLabel) + "</div>" +
       "<table>" + row("Revenue (paid)", rs(s.revenue)) + row("Kharcha", rs(s.expTotal)) + row(s.profit >= 0 ? "NET PROFIT" : "NET LOSS", rs(Math.abs(s.profit)), true) + row("Margin", (Math.round(s.margin * 10) / 10) + "%") + "</table>" +
-      "<h3>Payment</h3><table>" + row("Cash", rs(s.pay.cash)) + row("UPI", rs(s.pay.upi)) + row("Card", rs(s.pay.card)) + row("Due baaki", rs(s.duePending)) + row("Discount diya", rs(s.discount)) + row("GST", rs(s.gst)) + "</table>" +
+      "<h3>Payment</h3><table>" + row("Cash", rs(s.pay.cash)) + row("UPI", rs(s.pay.upi)) + row("Card", rs(s.pay.card)) + row("Split (unallocated)", rs(s.pay.split)) + row("Due baaki", rs(s.duePending)) + row("Discount diya", rs(s.discount)) + row("GST", rs(s.gst)) + "</table>" +
       "<h3>Kharcha (category)</h3><table>" + (s.catRows.map(([c, v]) => row(esc(c), rs(v))).join("") || row("-", "-")) + "</table>" +
       "<h3>Daily</h3><table><tr><th>Date</th><th>Orders</th><th>Revenue</th><th>Kharcha</th><th>Profit</th></tr>" + s.daily.map((d) => "<tr><td>" + d.date + "</td><td>" + d.orders + "</td><td>" + rs(d.revenue) + "</td><td>" + rs(d.expense) + "</td><td>" + (d.profit < 0 ? "-" : "") + rs(Math.abs(d.profit)) + "</td></tr>").join("") + "</table>" +
       "<h3>Top 10 items</h3><table><tr><th>Item</th><th>Qty</th><th>Amount</th></tr>" + s.items.slice(0, 10).map((i) => "<tr><td>" + esc(i.name) + "</td><td>" + i.qty + "</td><td>" + rs(i.amt) + "</td></tr>").join("") + "</table>" +
@@ -4331,7 +4355,7 @@ function ReportsView({ C, isMobile, isOwner, waiterName }) {
 
   const shareWhatsapp = () => {
     const s = stats;
-    const msg = "*" + RESTAURANT.name + " - P&L*\n" + rangeLabel + "\n\nRevenue: " + rs(s.revenue) + "\nKharcha: " + rs(s.expTotal) + "\n*" + (s.profit >= 0 ? "Profit: " : "Loss: ") + rs(Math.abs(s.profit)) + "*\nMargin: " + (Math.round(s.margin * 10) / 10) + "%\n\nCash: " + rs(s.pay.cash) + "\nUPI: " + rs(s.pay.upi) + "\nCard: " + rs(s.pay.card) + "\nDue baaki: " + rs(s.duePending);
+    const msg = "*" + RESTAURANT.name + " - P&L*\n" + rangeLabel + "\n\nRevenue: " + rs(s.revenue) + "\nKharcha: " + rs(s.expTotal) + "\n*" + (s.profit >= 0 ? "Profit: " : "Loss: ") + rs(Math.abs(s.profit)) + "*\nMargin: " + (Math.round(s.margin * 10) / 10) + "%\n\nCash: " + rs(s.pay.cash) + "\nUPI: " + rs(s.pay.upi) + "\nCard: " + rs(s.pay.card) + "\nSplit (unallocated): " + rs(s.pay.split) + "\nDue baaki: " + rs(s.duePending);
     window.open("https://wa.me/?text=" + encodeURIComponent(msg), "_blank");
   };
 
@@ -4355,18 +4379,22 @@ function ReportsView({ C, isMobile, isOwner, waiterName }) {
       cashVendorPay = pSnap.docs.reduce((t, d) => t + (Number(d.data().amount) || 0), 0);
     } catch (e) { toast("Vendor payments load nahi hue, Day Close roka gaya: " + e.message, "error"); return; }
     // Aaj drawer me jo cash AAYA (paidAt aaj) - order kisi bhi din ka ho (jaise kal ka due aaj settle hua)
-    let cashIn = s.pay.cash;
+    let paymentsToday = [];
     try {
       const t0 = new Date(todayKey + "T00:00:00").getTime();
       const paidSnap = await getDocs(query(collection(db, "orders"), where("paidAt", ">=", t0), where("paidAt", "<", t0 + 86400000)));
-      cashIn = paidSnap.docs.map((d) => d.data())
-        .filter((x) => x.paid && x.status !== "cancelled" && String(x.payment || "cash").toLowerCase() === "cash")
-        .reduce((t, x) => t + (Number(x.finalTotal) || 0), 0);
+      paymentsToday = paidSnap.docs.map((d) => d.data()).filter((x) => x.paid && x.status !== "cancelled");
     } catch (e) { toast("Aaj ka cash load nahi hua, Day Close roka gaya: " + e.message, "error"); return; }
+    const paidTodayTotals = paymentsToday.reduce((totals, order) => {
+      const breakdown = paymentBreakdown(order);
+      Object.keys(totals).forEach((mode) => { totals[mode] += breakdown[mode]; });
+      return totals;
+    }, { cash: 0, upi: 0, card: 0, split: 0 });
+    const cashIn = paidTodayTotals.cash;
     const opening = Number(op) || 0;
     const counted = Number(cc) || 0;
     const expected = opening + cashIn - cashExp - cashVendorPay;
-    const rec = { date: todayKey, revenue: s.revenue, cash: cashIn, upi: s.pay.upi, card: s.pay.card, cashVendorPayments: cashVendorPay, duePending: s.duePending, expenses: s.expTotal, cashExpenses: cashExp, profit: s.profit, orders: s.valid.length, openingCash: opening, countedCash: counted, expectedCash: expected, cashDiff: counted - expected, by: waiterName || "Staff", at: Date.now() };
+    const rec = { date: todayKey, revenue: s.revenue, cash: cashIn, upi: paidTodayTotals.upi, card: paidTodayTotals.card, split: paidTodayTotals.split, cashVendorPayments: cashVendorPay, duePending: s.duePending, expenses: s.expTotal, cashExpenses: cashExp, profit: s.profit, orders: s.valid.length, openingCash: opening, countedCash: counted, expectedCash: expected, cashDiff: counted - expected, by: waiterName || "Staff", at: Date.now() };
     try {
       await setDoc(doc(db, "dayClose", todayKey), rec);
       logAudit("day_closed", { total: s.revenue, reason: "Cash fark: " + (counted - expected) });
@@ -4439,8 +4467,8 @@ function ReportsView({ C, isMobile, isOwner, waiterName }) {
 
           <div style={box}>
             <div style={boxTitle}>Payment Split</div>
-            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, 1fr)", gap: 10 }}>
-              {[["Cash", s.pay.cash, C.green], ["UPI", s.pay.upi, C.blue], ["Card", s.pay.card, C.amber], ["Discount diya", s.discount, C.gray]].map(([l, v, c]) => (
+            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(3, 1fr)", gap: 10 }}>
+              {[["Cash", s.pay.cash, C.green], ["UPI", s.pay.upi, C.blue], ["Card", s.pay.card, C.amber], ["Split (unallocated)", s.pay.split, C.gray], ["Discount diya", s.discount, C.gray]].map(([l, v, c]) => (
                 <div key={l} style={{ background: C.cardAlt, borderRadius: 10, padding: 12 }}>
                   <div style={{ fontSize: 10, color: C.gray, fontWeight: 800 }}>{l}</div>
                   <div style={{ fontSize: isMobile ? 15 : 18, fontWeight: 900, color: c, fontFamily: "monospace", marginTop: 4 }}>{inr(v)}</div>

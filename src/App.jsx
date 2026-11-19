@@ -2531,6 +2531,7 @@ function CustomerView({ menu, orders, placeOrder, bookEvent, gallery, offersList
   const [activeModal, setActiveModal] = useState(null);
   const [myOrderIds, setMyOrderIds] = useState([]);
   const [orderType, setOrderType] = useState("dine_in");
+  const [fulfillmentMode, setFulfillmentMode] = useState("dine_in");
   const [custName, setCustName] = useState(() => localStorage.getItem("enp_cust_name") || "");
   const [custPhone, setCustPhone] = useState(() => localStorage.getItem("enp_cust_phone") || "");
   const [custAddress, setCustAddress] = useState("");
@@ -2546,7 +2547,7 @@ function CustomerView({ menu, orders, placeOrder, bookEvent, gallery, offersList
   const [otpStep, setOtpStep] = useState("phone");
   const [otpCode, setOtpCode] = useState("");
   const [generatedOtp, setGeneratedOtp] = useState("");
-  const [isLoggedIn, setIsLoggedIn] = useState(() => localStorage.getItem("enp_cust_logged_in") === "true");
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [couponCode, setCouponCode] = useState("");
   const [appliedDiscount, setAppliedDiscount] = useState(0);
   const [couponMin, setCouponMin] = useState(0);
@@ -2804,11 +2805,14 @@ const mine = orders.filter((o) => o.createdBy === uid && !o.waiter && !o.takenBy
   useEffect(() => {
     return onAuthStateChanged(auth, (u) => {
       if (u && u.phoneNumber) {
-        setCustPhone(u.phoneNumber.replace(/\D/g, "").slice(-10));
+        const phone = u.phoneNumber.replace(/\D/g, "").slice(-10);
+        setCustPhone(phone);
         localStorage.setItem("enp_cust_logged_in", "true");
-      localStorage.setItem("enp_cust_phone", custPhone);
-      localStorage.setItem("enp_cust_name", custName);
+        localStorage.setItem("enp_cust_phone", phone);
       setIsLoggedIn(true);
+      } else {
+        localStorage.removeItem("enp_cust_logged_in");
+        setIsLoggedIn(false);
       }
     });
   }, []);
@@ -3214,16 +3218,20 @@ const handleWaiterPinSubmitOld = () => {
 
   const handleLogout = async () => {
     if (!window.confirm("Logout karna hai?")) return;
-    try { await signOut(auth); } catch (e) { console.error("logout:", e); }
+    try { await signOut(auth); } catch (e) { console.error("logout:", e); showToast("Logout failed: " + (e.message || "Please try again"), "error"); return; }
     try {
       localStorage.removeItem("eatpark_customer");
       localStorage.removeItem("eatpark_orders");
       localStorage.removeItem("eatpark_cart");
+      localStorage.removeItem("enp_cust_logged_in");
+      localStorage.removeItem("enp_cust_phone");
+      localStorage.removeItem("enp_cust_name");
     } catch (e) {}
     otpConfRef.current = null;
     setWaiterUnlocked(false);
     setShowWaiterMode(false);
     setCustName(""); setCustPhone(""); setCustAddress("");
+    setIsLoggedIn(false);
     setOtpStep("phone"); setOtpCode("");
     setCart({}); setMyOrderIds([]);
     setShowSidebar(false);
@@ -3288,10 +3296,10 @@ const handleWaiterPinSubmitOld = () => {
     if (!guestMode && !custName.trim()) { showToast("⚠️ Enter Name", 'error'); setIsProcessingPayment(false); return; }
     if (!guestMode && (!custPhone.trim() || custPhone.length < 10)) { showToast("⚠️ Enter valid Phone", 'error'); setIsProcessingPayment(false); return; }
 
-    // ✅ SMART LOGIC: Agar table select hai (QR scan), toh address nahi maangega
-    const isTakeawayFromTable = orderType === "parcel" && table > 0;
-    
-    if (orderType === "parcel" && !isTakeawayFromTable && (!custAddress.trim() || !custPinCode || custPinCode.length !== 6)) { 
+    const isTakeawayFromTable = fulfillmentMode === "takeaway";
+    const isDelivery = fulfillmentMode === "delivery";
+
+    if (isDelivery && (!custAddress.trim() || !custPinCode || custPinCode.length !== 6)) {
       showToast("⚠️ Delivery ke liye Address aur 6-digit Pincode zaroori hai!", 'error'); 
       setIsProcessingPayment(false); 
       return; 
@@ -3326,13 +3334,18 @@ const handleWaiterPinSubmitOld = () => {
       });
 
       const order = {
-        id: orderId, table, orderType,
-customer: { 
-          name: custName.trim() || "Guest", 
-          phone: custPhone.trim() || "WALK-IN", 
-          address: isTakeawayFromTable ? "TAKEAWAY (At Table)" : (orderType === "parcel" ? custAddress : ""), 
-          exactAddress: custExactAddress, 
-          pincode: custPinCode 
+        id: orderId,
+        table: isDelivery ? 0 : table,
+        orderType: fulfillmentMode === "dine_in" ? "dine_in" : "parcel",
+        fulfillmentMode,
+        customer: {
+          name: custName.trim() || "Guest",
+          phone: custPhone.trim() || "WALK-IN",
+          address: isDelivery
+            ? custAddress
+            : (isTakeawayFromTable ? "TAKEAWAY (At Table)" : ""),
+          exactAddress: isDelivery ? custExactAddress : "",
+          pincode: isDelivery ? custPinCode : ""
         },
         items: initialItems,
         claimedReward: claimedReward ? claimedReward.item : null,
@@ -3392,6 +3405,12 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
       setMyOrderIds(prev => [...prev, orderId]);
       setCart({});
       setNotes(""); setClaimedReward(null); setCartOpen(false); setActiveModal('track');
+      setFulfillmentMode("dine_in");
+      setOrderType("dine_in");
+      if (table === 0) setTable(1);
+      setCustAddress("");
+      setCustExactAddress("");
+      setCustPinCode("");
       setIsScheduled(false); setScheduleDate(""); setScheduleTime("");
       showToast("🎉 Order Placed!", 'success');
     } catch (e) {
@@ -3609,17 +3628,36 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
             </div>
 
             <button
-              onClick={() => { setOrderType("dine_in"); setGuestMode(true); setShowGuestChoice(false); setCustAddress(""); setCustExactAddress(""); setCustPinCode(""); }}
+              onClick={() => { setFulfillmentMode("dine_in"); setOrderType("dine_in"); setGuestMode(true); setShowGuestChoice(false); setCustAddress(""); setCustExactAddress(""); setCustPinCode(""); }}
               style={{ width: "100%", padding: 16, marginBottom: 12, background: "#FF5A1F", border: "none", borderRadius: 14, color: "#fff", fontSize: 16, fontWeight: 800, cursor: "pointer" }}
             >
               🍽️ Dine-in (Table {table})
             </button>
 
             <button
-              onClick={() => { setOrderType("parcel"); setGuestMode(true); setShowGuestChoice(false); setCustAddress(""); setCustExactAddress(""); setCustPinCode(""); }}
+              onClick={() => {
+                setFulfillmentMode("takeaway");
+                setOrderType("parcel");
+                setGuestMode(true);
+                setShowGuestChoice(false);
+                setCustAddress("");
+                setCustExactAddress("");
+                setCustPinCode("");
+              }}
               style={{ width: "100%", padding: 16, marginBottom: 12, background: "#10B981", border: "none", borderRadius: 14, color: "#fff", fontSize: 16, fontWeight: 800, cursor: "pointer" }}
             >
-              🛍️ Takeaway / Parcel
+              🛍️ Table Takeaway
+            </button>
+            <button
+              onClick={() => {
+                setFulfillmentMode("delivery");
+                setOrderType("parcel");
+                setGuestMode(true);
+                setShowGuestChoice(false);
+              }}
+              style={{ width: "100%", padding: 16, marginBottom: 12, background: "#2563EB", border: "none", borderRadius: 14, color: "#fff", fontSize: 16, fontWeight: 800, cursor: "pointer" }}
+            >
+              🛵 Home Delivery
             </button>
 
             <button
@@ -3958,8 +3996,9 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
 })}
 
                 <div style={{ display: "flex", gap: 12, marginTop: 20, marginBottom: 16 }}>
-                  {!guestMode && <button onClick={() => setOrderType("dine_in")} style={{ flex: 1, padding: "12px", border: `2px solid ${orderType === "dine_in" ? COLORS.copper : COLORS.line}`, background: orderType === "dine_in" ? COLORS.copper : "#fff", color: orderType === "dine_in" ? "#fff" : COLORS.ink, borderRadius: 12, fontWeight: 800, cursor: "pointer" }}>🍽️ Dine-in</button>}
-                  {!guestMode && <button onClick={() => { if (!parcelOpenNow()) { showToast(PARCEL_MSG, 'warning'); return; } setOrderType("parcel"); }} style={{ flex: 1, padding: "12px", border: `2px solid ${orderType === "parcel" ? COLORS.copper : COLORS.line}`, background: orderType === "parcel" ? COLORS.copper : "#fff", color: orderType === "parcel" ? "#fff" : COLORS.ink, borderRadius: 12, fontWeight: 800, cursor: "pointer" }}>🛍️ Parcel</button>}
+                  {!guestMode && <button onClick={() => { setFulfillmentMode("dine_in"); setOrderType("dine_in"); setCustAddress(""); setCustExactAddress(""); setCustPinCode(""); }} style={{ flex: 1, padding: "12px", border: `2px solid ${fulfillmentMode === "dine_in" ? COLORS.copper : COLORS.line}`, background: fulfillmentMode === "dine_in" ? COLORS.copper : "#fff", color: fulfillmentMode === "dine_in" ? "#fff" : COLORS.ink, borderRadius: 12, fontWeight: 800, cursor: "pointer" }}>🍽️ Dine-in</button>}
+                  {!guestMode && <button onClick={() => { if (!parcelOpenNow()) { showToast(PARCEL_MSG, 'warning'); return; } setFulfillmentMode("takeaway"); setOrderType("parcel"); setCustAddress(""); setCustExactAddress(""); setCustPinCode(""); }} style={{ flex: 1, padding: "12px", border: `2px solid ${fulfillmentMode === "takeaway" ? COLORS.copper : COLORS.line}`, background: fulfillmentMode === "takeaway" ? COLORS.copper : "#fff", color: fulfillmentMode === "takeaway" ? "#fff" : COLORS.ink, borderRadius: 12, fontWeight: 800, cursor: "pointer" }}>🛍️ Takeaway</button>}
+                  {!guestMode && <button onClick={() => { if (!parcelOpenNow()) { showToast(PARCEL_MSG, 'warning'); return; } setFulfillmentMode("delivery"); setOrderType("parcel"); }} style={{ flex: 1, padding: "12px", border: `2px solid ${fulfillmentMode === "delivery" ? COLORS.copper : COLORS.line}`, background: fulfillmentMode === "delivery" ? COLORS.copper : "#fff", color: fulfillmentMode === "delivery" ? "#fff" : COLORS.ink, borderRadius: 12, fontWeight: 800, cursor: "pointer" }}>🛵 Delivery</button>}
                 </div>
 
                 <div style={{ marginBottom: 16 }}>
@@ -3996,7 +4035,7 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
                 <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16, borderBottom: `1px solid ${COLORS.line}`, paddingBottom: 20 }}>
                   <input type="text" placeholder="Your Name *" value={custName} onChange={(e) => setCustName(e.target.value)} style={inputStyle} />
                   <input type="tel" placeholder={guestMode ? "Phone (optional)" : "Phone *"} value={custPhone} onChange={(e) => setCustPhone(e.target.value.replace(/\D/g, "").slice(0, 10))} style={inputStyle} />
-                  {orderType === "parcel" && !guestMode && (
+                  {fulfillmentMode === "delivery" && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                       {/* Auto GPS Box */}
                       <div style={{ display: "flex", gap: 8 }}>

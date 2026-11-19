@@ -10,7 +10,7 @@ const anon = () => env.unauthenticatedContext().firestore();
 beforeAll(async () => {
   env = await initializeTestEnvironment({
     projectId: "demo-eatpark",
-    firestore: { rules: readFileSync("firestore.rules.proposed", "utf8") },
+    firestore: { rules: readFileSync("firestore.rules", "utf8") },
   });
   await env.clearFirestore();
   await env.withSecurityRulesDisabled(async (ctx) => {

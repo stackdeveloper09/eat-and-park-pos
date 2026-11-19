@@ -37,16 +37,15 @@ export const buildPaidPatch = (order, mode, by) => {
   };
   
   // Delivery parcel (jiska address ho) ka status rider hi badlega.
-  // Sirf ready + non-delivery order ko yahan auto-serve karo.
-  const isDelivery =
-    order.orderType === "parcel" &&
-    !!(order.customer?.exactAddress || order.customer?.address);
-    
-    if (!isDelivery && order.status !== "cancelled" && order.status !== "served") {
+  const address = String(order.customer?.exactAddress || order.customer?.address || "");
+  const isDelivery = order.fulfillmentMode === "delivery" ||
+    (order.orderType === "parcel" && !order.fulfillmentMode && !!address && !/^takeaway\b/i.test(address));
+
+  const isReadyDineIn = order.orderType === "dine_in" && order.status === "ready";
+  const isPaidParcelPickup = order.orderType === "parcel" && !isDelivery;
+  if ((isReadyDineIn || isPaidParcelPickup) && order.status !== "cancelled") {
     patch.status = "served";
     patch.servedAt = Date.now();
-    
   }
   return patch;
-
 };
