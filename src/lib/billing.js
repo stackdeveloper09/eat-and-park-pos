@@ -7,8 +7,26 @@ export function splitPayment(total, cash) {
   return { cash: cashAmount, online: amountDue - cashAmount };
 }
 
+export function partialPayment(total, cash, online) {
+  const parsedTotal = Number(total);
+  const amountDue = Number.isFinite(parsedTotal) ? Math.max(0, parsedTotal) : 0;
+  const parsedCash = Number(cash);
+  const cashAmount = Number.isFinite(parsedCash) ? Math.min(amountDue, Math.max(0, parsedCash)) : 0;
+  const parsedOnline = Number(online);
+  const onlineAmount = Number.isFinite(parsedOnline)
+    ? Math.min(amountDue - cashAmount, Math.max(0, parsedOnline))
+    : 0;
+
+  return {
+    cash: cashAmount,
+    online: onlineAmount,
+    received: cashAmount + onlineAmount,
+    due: amountDue - cashAmount - onlineAmount,
+  };
+}
+
 export function paymentBreakdown(order) {
-  const parsedTotal = Number(order.finalTotal);
+  const parsedTotal = Number(order.paymentStatus === "due" && order.amountPaid != null ? order.amountPaid : order.finalTotal);
   const total = Number.isFinite(parsedTotal) ? Math.max(0, parsedTotal) : 0;
   const mode = String(order.payment || "cash").toLowerCase();
 

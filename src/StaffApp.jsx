@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo, useRef, useContext, createContext,
 import { db, auth } from "./firebase";
 import { assertEditable, resolveVendorId } from "./lib/guards";
 import { PAID_STATUSES, OPEN_WINDOW_MS, isOpenParcel, isOpenDineIn, isActiveOrder, paidOrders, paidRevenue, buildPaidPatch } from "./lib/orderRules";
-import { paymentBreakdown, splitPayment } from "./lib/billing";
+import { paymentBreakdown, partialPayment, splitPayment } from "./lib/billing";
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged, setPersistence, browserLocalPersistence } from "firebase/auth";
 import {
   collection, doc, setDoc, onSnapshot, getDoc, updateDoc, addDoc,
@@ -915,7 +915,6 @@ const isOwner = ["owner", "admin", "manager"].includes(String(staffData?.role ||
   }, [orders]);
 
   useEffect(() => {
-    if (true) return; // [KOT-READONLY] new-order notify off
     const fresh = orders.filter(o => o.status === "new" && toMillis(o.createdAt) > Date.now() - FRESH_MS);
     const freshIds = fresh.map(o => o.id);
     if (prevNewIdsRef.current === null) { prevNewIdsRef.current = freshIds; return; }
@@ -926,7 +925,10 @@ const isOwner = ["owner", "admin", "manager"].includes(String(staffData?.role ||
       fresh.forEach(o => {
         if (prevSet.has(o.id)) return;
         if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-          try { new Notification("New Order", { body: (o.orderType === "parcel" ? "Parcel" : "Table " + o.table) + " - " + inr(o.finalTotal || 0) }); } catch (e) {}
+          try {
+            const vipLabel = o.customer?.isVip ? " 👑 VIP Elite" : "";
+            new Notification("New Order" + vipLabel, { body: (o.orderType === "parcel" ? "Parcel" : "Table " + o.table) + " - " + inr(o.finalTotal || 0) });
+          } catch (e) {}
         }
       });
     }
@@ -1453,6 +1455,7 @@ function OrdersView({ C, isMobile, orders, menu, waiterName, isOwner, filter, se
   const [openId, setOpenId] = useState(null);
   const payLockRef = useRef(false);
   const [payFor, setPayFor] = useState(null);
+  const [splitCash, setSplitCash] = useState("");
   const [cancellingId, setCancellingId] = useState(null);
   const start = rangeStart ?? defaultStart;
   const end = rangeEnd ?? Date.now();
@@ -1538,11 +1541,11 @@ function OrdersView({ C, isMobile, orders, menu, waiterName, isOwner, filter, se
     } catch (e) { toast(e.message, "error"); }
   };
 
-  const markPaidWith = async (order, mode) => {
+  const markPaidWith = async (order, mode, paymentSplit = null) => {
     if (payLockRef.current) return;
     payLockRef.current = true;
     haptic(30);
-    const patch = buildPaidPatch(order, mode, waiterName);
+    const patch = { ...buildPaidPatch(order, mode, waiterName), ...(paymentSplit ? { paymentSplit } : { paymentSplit: null }) };
     // status "served" ka rule: buildPaidPatch (orderRules.js) - orders tab
     setOrders(prev => prev.map(o => o.id === order.id ? { ...o, ...patch } : o));
     try {
@@ -1564,12 +1567,33 @@ function OrdersView({ C, isMobile, orders, menu, waiterName, isOwner, filter, se
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 12 }}>
         <h2 style={{ margin: 0, fontSize: isMobile ? 18 : 22, fontWeight: 800, color: C.ink }}>{filterLabel} Orders ({filtered.length})</h2>
         {payFor && (
-          <ModalShell C={C} open onClose={() => setPayFor(null)} isMobile={isMobile} title="Payment mode" icon="💰" maxWidth={340}>
+          <ModalShell C={C} open onClose={() => { setPayFor(null); setSplitCash(""); }} isMobile={isMobile} title="Payment mode" icon="💰" maxWidth={340}>
             <div style={{ fontSize: 13, color: C.gray, marginBottom: 14 }}>{payFor.orderType === "parcel" ? "Parcel" : "Table " + payFor.table} - {inr(payFor.finalTotal || 0)}</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
               {[["cash", "Cash", C.green], ["upi", "UPI", C.blue], ["card", "Card", C.amber]].map(([m, l, c]) => (
                 <button key={m} onClick={() => { const o = payFor; setPayFor(null); markPaidWith(o, m); }} style={{ padding: "14px 4px", border: "none", borderRadius: 10, background: c, color: "#fff", fontWeight: 800, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}>{l}</button>
               ))}
+            </div>
+            <div style={{ marginTop: 10, padding: 10, border: `1px solid ${C.line}`, borderRadius: 10, background: C.cardAlt }}>
+              <div style={{ fontSize: 11, color: C.gray, fontWeight: 800, marginBottom: 8 }}>CASH + ONLINE SPLIT</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <label style={{ flex: 1, fontSize: 10, color: C.gray, fontWeight: 800 }}>Cash
+                  <input aria-label="Split cash amount" type="number" min={0} max={Number(payFor.finalTotal) || 0} value={splitCash} onChange={(e) => setSplitCash(e.target.value)} placeholder="₹" style={{ display: "block", width: "100%", boxSizing: "border-box", marginTop: 4, padding: "9px 8px", border: `1px solid ${C.line}`, borderRadius: 7, background: C.card, color: C.ink, fontWeight: 800 }} />
+                </label>
+                <div style={{ flex: 1, fontSize: 10, color: C.gray, fontWeight: 800 }}>Online / UPI
+                  <div style={{ marginTop: 4, padding: "10px 8px", border: `1px solid ${C.line}`, borderRadius: 7, background: C.card, color: C.ink, fontWeight: 900, fontFamily: "monospace" }}>
+                    {inr(splitPayment(payFor.finalTotal, splitCash).online)}
+                  </div>
+                </div>
+              </div>
+              <button onClick={() => {
+                const o = payFor;
+                const breakdown = splitPayment(o.finalTotal, splitCash);
+                if (breakdown.cash <= 0 || breakdown.online <= 0) { toast("Cash aur online dono amount bharo", "warning"); return; }
+                setPayFor(null); setSplitCash(""); markPaidWith(o, "split", breakdown);
+              }} disabled={!Number.isFinite(Number(splitCash)) || Number(splitCash) <= 0 || Number(splitCash) >= Number(payFor.finalTotal)} style={{ width: "100%", marginTop: 8, padding: 11, border: "none", borderRadius: 8, background: C.gold, color: "#fff", fontWeight: 900, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
+                Confirm Split Payment
+              </button>
             </div>
           </ModalShell>
         )}
@@ -2242,6 +2266,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
   const [gstRate, setGstRate] = useState(0);
   const [payMode, setPayMode] = useState("cash");
   const [splitCash, setSplitCash] = useState("");
+  const [partialOnline, setPartialOnline] = useState("");
   const [cashReceived, setCashReceived] = useState("");
   const [custName, setCustName] = useState("");
   const [custPhone, setCustPhone] = useState("");
@@ -2330,6 +2355,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
     }
     setPayMode(existingOrder.payment || "cash");
     setSplitCash(String(existingOrder.paymentSplit?.cash ?? existingOrder.finalTotal ?? 0));
+    setPartialOnline(String(existingOrder.paymentSplit?.online ?? 0));
     if (lastSeededSigRef.current === orderSig) return;
     lastSeededSigRef.current = orderSig;
     const initialCart = {};
@@ -2403,6 +2429,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
   const gstAmt = Math.round((grossSub - discAmt) * gstRate / 100);
   const totalAmount = Math.max(0, grossSub - discAmt + gstAmt - Number(cashDiscount || 0));
   const splitAmounts = splitPayment(totalAmount, splitCash === "" ? totalAmount : splitCash);
+  const partialAmounts = partialPayment(totalAmount, splitCash, partialOnline);
   const cashBalance = cashReceived === "" ? null : Number(cashReceived) - totalAmount;
   const cashSuggestions = [...new Set([totalAmount, Math.ceil(totalAmount / 100) * 100, Math.ceil(totalAmount / 500) * 500])];
 
@@ -2591,14 +2618,33 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
     try {
       if (payMode === "due") {
         if (cartItems.length === 0) { toast("Bill me kam se kam 1 item hona chahiye", "warning"); setPlacing(false); return; }
+        const partial = partialPayment(totalAmount, splitCash, partialOnline);
+        if (partial.received >= totalAmount) {
+          toast("Pura payment hai to Cash/UPI/Split select karo", "warning");
+          setPlacing(false);
+          return;
+        }
         const dn = window.prompt("Customer ka naam (due)?", "");
         if (dn === null) { setPlacing(false); return; }
         if (!dn.trim()) { toast("Due ke liye naam likhna zaroori hai", "warning"); setPlacing(false); return; }
         const dp = (window.prompt("Phone number? (10 digit)", "") || "").replace(/\D/g, "");
         if (dp.length < 10) { toast("Sahi 10 digit phone zaroori hai", "warning"); setPlacing(false); return; }
         const applied = await applyCartChanges();
-        await updateDoc(doc(db, "orders", existingOrder.id), { payment: "due", paid: false, paymentStatus: "due", status: "served", dueName: dn || "Unknown", duePhone: dp, dueAt: Date.now() });
-        logAudit("due_created", { orderId: existingOrder.id, total: applied.finalTotal, name: dn || "" });
+        const received = partialPayment(applied.finalTotal, splitCash, partialOnline);
+        const partialMode = received.cash > 0 && received.online > 0 ? "split" : received.cash > 0 ? "cash" : "upi";
+        await updateDoc(doc(db, "orders", existingOrder.id), {
+          payment: partialMode,
+          paymentSplit: received.received > 0 ? { cash: received.cash, online: received.online } : null,
+          amountPaid: received.received,
+          amountDue: received.due,
+          paid: false,
+          paymentStatus: "due",
+          status: "served",
+          dueName: dn || "Unknown",
+          duePhone: dp,
+          dueAt: Date.now()
+        });
+        logAudit("due_created", { orderId: existingOrder.id, total: applied.finalTotal, amountPaid: received.received, amountDue: received.due, name: dn || "" });
         printBill({ ...existingOrder, items: applied.finalItems, finalTotal: applied.finalTotal, subtotal: applied.sub, gstAmount: applied.gstAmt, billDiscount: applied.discAmt, cashDiscount: applied.cashDiscount, payment: "due", paid: false });
         toast("Due me save ho gaya", "success");
         onBack();
@@ -2854,6 +2900,22 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
               <span style={{ color: "#fff", fontSize: 23, fontWeight: 900, fontFamily: "monospace" }}>{inr(addMoreMode ? grossSub : totalAmount)}</span>
             </div>
             <div style={{ position: "absolute", zIndex: 2, left: 0, right: 0, bottom: 0, padding: "8px 10px 10px", background: C.light, borderTop: `1px solid ${C.line}`, boxShadow: "0 -8px 18px rgba(0,0,0,0.12)" }}>
+            {!addMoreMode && (
+              <>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 5, marginBottom: 6 }}>
+                  {[["cash", "Cash"], ["upi", "UPI"], ["split", "Split"], ["due", "Due / Part"]].map(([id, label]) => (
+                    <button key={id} type="button" onClick={() => { if (id === "split") setSplitCash(String(totalAmount)); if (id === "due") { setSplitCash("0"); setPartialOnline("0"); } setPayMode(id); }} style={{ padding: "7px 3px", borderRadius: 7, border: `1px solid ${payMode === id ? C.gold : C.line}`, background: payMode === id ? C.goldLight : C.card, color: payMode === id ? C.goldText : C.ink, fontWeight: 800, fontSize: 10, cursor: "pointer", fontFamily: "inherit" }}>{label}</button>
+                  ))}
+                </div>
+                {payMode === "due" && (
+                  <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6 }}>
+                    <input aria-label="Partial cash received" type="number" min={0} max={totalAmount} value={splitCash} onChange={e => setSplitCash(e.target.value)} placeholder="Cash received" style={{ width: "50%", boxSizing: "border-box", padding: "8px", border: `1px solid ${C.line}`, borderRadius: 7, background: C.card, color: C.ink, fontSize: 11, fontWeight: 800 }} />
+                    <input aria-label="Partial online received" type="number" min={0} max={totalAmount} value={partialOnline} onChange={e => setPartialOnline(e.target.value)} placeholder="Online received" style={{ width: "50%", boxSizing: "border-box", padding: "8px", border: `1px solid ${C.line}`, borderRadius: 7, background: C.card, color: C.ink, fontSize: 11, fontWeight: 800 }} />
+                  </div>
+                )}
+                {payMode === "due" && <div style={{ fontSize: 11, color: C.amber, fontWeight: 900, marginBottom: 5, textAlign: "right" }}>Received {inr(partialAmounts.received)} · Due {inr(partialAmounts.due)}</div>}
+              </>
+            )}
             {existingOrder && !addMoreMode && (
               <div style={{ marginTop: 0 }}>
                 {existingOrder.paid && <div style={{ padding: 8, borderRadius: 6, background: C.greenLight, color: C.green, fontWeight: 900, fontSize: 12, textAlign: "center", border: "1px solid " + C.green, marginBottom: 6 }}>PAID</div>}

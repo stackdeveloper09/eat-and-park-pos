@@ -2687,10 +2687,19 @@ const subtotal = cartItems.reduce((s, [id, entry]) => {
     const _p = HX.cleanPhone(custPhone);
     if (!HX.isValidPhone(_p)) { setMyLoyalty(null); return; }
     let off = false;
-    getDoc(doc(db, "loyaltyUsers", _p)).then((s) => { if (!off) setMyLoyalty(s.exists() ? s.data() : null); }).catch(() => {});
+    Promise.all([
+      getDoc(doc(db, "loyaltyUsers", _p)),
+      getDoc(doc(db, "customers", _p)),
+    ]).then(([loyaltySnap, customerSnap]) => {
+      if (off) return;
+      const loyalty = loyaltySnap.exists() ? loyaltySnap.data() : {};
+      const customer = customerSnap.exists() ? customerSnap.data() : {};
+      setMyLoyalty(loyaltySnap.exists() || customerSnap.exists() ? { ...loyalty, ...customer, phone: _p } : null);
+    }).catch(() => {});
     return () => { off = true; };
   }, [custPhone]);
-  const activeUser = isLoggedIn ? (loyaltyUsers.find(u => u.phone === custPhone) || myLoyalty) : null;
+  const activePhone = HX.cleanPhone(custPhone);
+  const activeUser = isLoggedIn ? (loyaltyUsers.find(u => HX.cleanPhone(u.phone || u.id) === activePhone) || myLoyalty) : null;
 
 // 👇 VIP wala code yahan aayega 👇
 const isVip = activeUser?.isVip === true;
@@ -3341,7 +3350,8 @@ const handleWaiterPinSubmitOld = () => {
         customer: {
           name: custName.trim() || "Guest",
           phone: custPhone.trim() || "WALK-IN",
-          address: isDelivery
+        isVip,
+        address: isDelivery
             ? custAddress
             : (isTakeawayFromTable ? "TAKEAWAY (At Table)" : ""),
           exactAddress: isDelivery ? custExactAddress : "",
@@ -3353,7 +3363,7 @@ const handleWaiterPinSubmitOld = () => {
         earnedCoins: newEarnedCoins,
         discount: appliedDiscount,
         couponDiscountAmount: discountAmount,
-        loyaltyDiscount, loyaltyTier: loyaltyTier.name,
+        loyaltyDiscount, loyaltyTier: loyaltyTier.name, vipDiscount,
         deliveryFee, subtotal, finalTotal,
 notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
         payment: paymentMethod,
