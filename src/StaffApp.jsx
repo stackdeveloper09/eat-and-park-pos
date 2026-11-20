@@ -65,14 +65,6 @@ const VELOX_DARK = {
   amber: "#F59E0B", amberLight: "#3A2510", blue: "#3B82F6", blueLight: "#152A4A",
   gold: "#FF5A1F", goldDark: "#E04814", goldLight: "#2A1A15", goldText: "#FF8C5A",
 };
-const ORIGINAL_LIGHT = {
-  bg: "#FAF7EF", card: "#FFFFFF", cardAlt: "#F4EEDD", ink: "#1C1608",
-  gray: "#7A7058", light: "#FAF7EF", line: "#E9E0C9",
-  red: "#DC2626", redLight: "#FEF2F2", green: "#16A34A", greenLight: "#F0FDF4",
-  amber: "#F59E0B", amberLight: "#FFFBEB", blue: "#2563EB", blueLight: "#EFF6FF",
-  gold: "#B8860B", goldDark: "#7A5806", goldLight: "#FBF3D9", goldText: "#8A6200",
-};
-
 // ===========================================================================
 // GLOBAL CSS (animations, press states, shimmer)
 // ===========================================================================
@@ -723,7 +715,6 @@ function StaffAppInner() {
   const [selectedTable, setSelectedTable] = useState(null);
   const [cart, setCart] = useState({});
   const [waiterName, setWaiterName] = useState("");
-  const [darkMode, setDarkMode] = useState(() => safeStorageGet("staff_dark", "0") === "1");
    const [legacyUI, setLegacyUI] = useState(false);
   const [lang, setLang] = useState(() => safeStorageGet("staff_lang", "en"));
   const [searchTable, setSearchTable] = useState("");
@@ -820,10 +811,10 @@ function StaffAppInner() {
   const cycleViewMode = () => { haptic(15); setViewMode(m => m === "auto" ? "mobile" : m === "mobile" ? "desktop" : "auto"); };
   const viewIcon = viewMode === "auto" ? "🔄" : viewMode === "mobile" ? "📱" : "💻";
 
-  const C = legacyUI ? ORIGINAL_LIGHT : VELOX_DARK;
+  const C = VELOX_DARK;
 const isOwner = ["owner", "admin", "manager"].includes(String(staffData?.role || "").toLowerCase());
 
-  useEffect(() => { localStorage.setItem("staff_dark", darkMode ? "1" : "0"); document.body.style.background = C.bg; }, [darkMode]);
+  useEffect(() => { document.body.style.background = C.bg; }, [C.bg]);
 
   // Auth
   useEffect(() => {
@@ -1099,9 +1090,6 @@ const isOwner = ["owner", "admin", "manager"].includes(String(staffData?.role ||
           {!isMobile && (
             <button onClick={() => { const n = lang === "en" ? "hi" : "en"; setLang(n); localStorage.setItem("staff_lang", n); }} style={{ background: "rgba(255,255,255,0.18)", border: "none", color: "#fff", width: 44, height: 38, borderRadius: 8, fontSize: 12, cursor: "pointer", fontWeight: 800 }}>{lang === "en" ? "EN" : "हि"}</button>
           )}
-          {!isMobile && (
-            <button onClick={() => { haptic(); setDarkMode(d => !d); }} style={{ background: "rgba(255,255,255,0.18)", border: "none", color: "#fff", width: 38, height: 38, borderRadius: 8, fontSize: 16, cursor: "pointer" }}>{darkMode ? "☀️" : "🌙"}</button>
-          )}
           <button onClick={() => setLegacyUI(false)} style={{ background: "rgba(255,255,255,0.25)", border: "none", color: "#fff", padding: isMobile ? "9px 10px" : "9px 16px", borderRadius: 8, fontWeight: 800, fontSize: 12, cursor: "pointer", marginRight: 8 }}>✨ New UI</button>
           <button onClick={handleLogout} style={{ background: "rgba(255,255,255,0.18)", border: "none", color: "#fff", padding: isMobile ? "9px 10px" : "9px 16px", borderRadius: 8, fontWeight: 700, fontSize: 12, cursor: "pointer" }}>Logout</button>
         </div>
@@ -1238,9 +1226,6 @@ const isOwner = ["owner", "admin", "manager"].includes(String(staffData?.role ||
               <button onClick={() => { const n = lang === "en" ? "hi" : "en"; setLang(n); localStorage.setItem("staff_lang", n); }} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", border: "none", background: "transparent", color: C.ink, fontWeight: 700, fontSize: 14, borderRadius: 10, cursor: "pointer", width: "100%", textAlign: "left", fontFamily: "inherit" }}>
                 <span style={{ display: "flex", alignItems: "center", gap: 14 }}><span style={{ fontSize: 18 }}>🌐</span><span>Language</span></span>
                 <span style={{ fontSize: 11, color: C.gray, fontWeight: 800 }}>{lang === "en" ? "English" : "हिंदी"}</span>
-              </button>
-              <button onClick={() => { haptic(); setDarkMode(d => !d); }} style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 16px", border: "none", background: "transparent", color: C.ink, fontWeight: 700, fontSize: 14, borderRadius: 10, cursor: "pointer", width: "100%", textAlign: "left", fontFamily: "inherit" }}>
-                <span style={{ fontSize: 18 }}>{darkMode ? "☀️" : "🌙"}</span><span>{darkMode ? "Light Mode" : "Dark Mode"}</span>
               </button>
               <a href="/" style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 16px", color: C.blue, fontWeight: 700, fontSize: 14, textDecoration: "none", borderRadius: 10 }}>
                 <span style={{ fontSize: 18 }}>👤</span><span>Customer App</span>

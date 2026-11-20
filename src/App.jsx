@@ -2528,7 +2528,7 @@ const openUpiApp = (amount, ref) => {
   window.location.href = url;
 };
 
-function CustomerView({ menu, orders, placeOrder, bookEvent, gallery, offersList, table, setTable, requestPinPrompt, settings, isDark, setIsDark, requestWaiter, loyaltyRules, loyaltyUsers, coinHistory, setOrdersState, categories, flashSaleItems, comboOffers, setMenuState, setLoyaltyRules, advanceStatus, coupons = [] }) {
+function CustomerView({ menu, orders, placeOrder, bookEvent, gallery, offersList, table, setTable, requestPinPrompt, settings, requestWaiter, loyaltyRules, loyaltyUsers, coinHistory, setOrdersState, categories, flashSaleItems, comboOffers, setMenuState, setLoyaltyRules, advanceStatus, coupons = [] }) {
   const [category, setCategory] = useState(categories[0] || "Thali");
   /* ENP-CAT-FIRST */ const [catPickerOpen, setCatPickerOpen] = useState(true);
   const [viewMode, setViewMode] = useViewMode();
@@ -2545,10 +2545,6 @@ function CustomerView({ menu, orders, placeOrder, bookEvent, gallery, offersList
   const [myOrderIds, setMyOrderIds] = useState([]);
   const [orderType, setOrderType] = useState("dine_in");
   const [language, setLanguage] = useState(() => localStorage.getItem("eatpark_language") || "hi");
-  useEffect(() => {
-    const theme = isDark ? "dark" : "light";
-    document.documentElement.setAttribute("data-theme", theme);
-  }, [isDark]);
   const [fulfillmentMode, setFulfillmentMode] = useState("dine_in");
   const [custName, setCustName] = useState(() => localStorage.getItem("enp_cust_name") || "");
   const [custPhone, setCustPhone] = useState(() => localStorage.getItem("enp_cust_phone") || "");
@@ -3784,7 +3780,6 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
           <div style={{ fontSize: 11, color: "#8B9BB4", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{RESTAURANT.tagline}</div>
         </div>
         <button onClick={() => { const next = language === "hi" ? "en" : "hi"; setLanguage(next); localStorage.setItem("eatpark_language", next); }} title="Hindi / English" aria-label="Switch Hindi or English" style={{ height: 44, borderRadius: 10, border: "1px solid #273449", background: "#161F2F", color: "#fff", padding: "0 9px", fontWeight: 800, fontSize: 12, cursor: "pointer", flexShrink: 0 }}>{language === "hi" ? "EN" : "हि"}</button>
-        <button onClick={() => setIsDark((d) => !d)} title={isDark ? "Light mode" : "Dark mode"} aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"} style={{ height: 44, width: 44, borderRadius: 10, border: "1px solid #273449", background: "#161F2F", color: "#fff", fontSize: 16, cursor: "pointer", flexShrink: 0 }}>{isDark ? "☀️" : "🌙"}</button>
         <select value={table} onChange={(e) => setTable(Number(e.target.value))} style={{ background: "#161F2F", color: "#fff", border: "1px solid #273449", borderRadius: 10, padding: "9px 8px", fontWeight: 800, fontSize: 13, outline: "none" }}>
           {Array.from({ length: 20 }, (_, i) => i + 1).map((n) => (<option key={n} value={n} style={{ color: "#000" }}>Table {n}</option>))}
         </select>
@@ -4068,7 +4063,7 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
   return (
     <div key={id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, padding: "12px", background: COLORS.paper, borderRadius: 12 }}>
       <div>
-        <div style={{ fontSize: 15, fontWeight: 700 }}>{item.name}</div>
+        <div style={{ fontSize: 15, fontWeight: 700, color: COLORS.ink }}>{item.name}</div>
         {hasOverride && (
           <div style={{ fontSize: 11, color: COLORS.error, fontWeight: 700, marginTop: 2 }}>
             ⚡ Deal: ₹{entry.priceOverride} <span style={{ textDecoration: 'line-through', color: COLORS.textLight }}>₹{item.price}</span>
@@ -7653,7 +7648,6 @@ function RestaurantApp() {
       } catch (e) { setStaffRole(null); }
     } else setStaffRole(null);
   }), []);
-  const [isDark, setIsDark] = useState(false);
   const [calls, setCalls] = useState([]);
   const [inventory, setInventory] = useState([]);
   const [offersList, setOffersList] = useState(DEFAULT_OFFERS);
@@ -8206,7 +8200,7 @@ const unsubBookings = !staffRole ? () => {} : onSnapshot(collection(db, "booking
         <div className="app-content">
   
   
-  {role === "customer" && <ErrorBoundary key="cust"><CustomerView menu={currentMenu} orders={orders} placeOrder={placeOrder} bookEvent={bookEvent} gallery={gallery} offersList={offersList} table={table} setTable={setTable} requestPinPrompt={requestPinPrompt} settings={settings} isDark={isDark} setIsDark={setIsDark} requestWaiter={requestWaiter} loyaltyRules={loyaltyRules} loyaltyUsers={loyaltyUsers} coinHistory={coinHistory} setOrdersState={setOrdersState} categories={currentCategories} flashSaleItems={validFlashSaleItems} comboOffers={validComboOffers} setMenuState={setMenuState} setLoyaltyRules={saveLoyaltyRules} advanceStatus={advanceStatus} coupons={coupons} /></ErrorBoundary>}
+  {role === "customer" && <ErrorBoundary key="cust"><CustomerView menu={currentMenu} orders={orders} placeOrder={placeOrder} bookEvent={bookEvent} gallery={gallery} offersList={offersList} table={table} setTable={setTable} requestPinPrompt={requestPinPrompt} settings={settings} requestWaiter={requestWaiter} loyaltyRules={loyaltyRules} loyaltyUsers={loyaltyUsers} coinHistory={coinHistory} setOrdersState={setOrdersState} categories={currentCategories} flashSaleItems={validFlashSaleItems} comboOffers={validComboOffers} setMenuState={setMenuState} setLoyaltyRules={saveLoyaltyRules} advanceStatus={advanceStatus} coupons={coupons} /></ErrorBoundary>}
   
   {role === "staff" && <ErrorBoundary key="staff"><StaffView menu={currentMenu} orders={orders} placeOrder={placeOrder} categories={currentCategories} setMenuState={setMenuState} advanceStatus={advanceStatus} requestPinPrompt={requestPinPrompt} calls={calls} resolveCall={resolveCall} cancelOrderByStaff={cancelOrderByStaff} /></ErrorBoundary>}
   
