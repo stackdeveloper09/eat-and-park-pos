@@ -827,6 +827,10 @@ const isOwner = ["owner", "admin", "manager"].includes(String(staffData?.role ||
         try {
           const s = await getDoc(doc(db, "staff", u.uid));
           if (s.exists() && s.data().active !== false) {
+            if (s.data().role === "delivery") {
+              window.location.replace("/delivery");
+              return;
+            }
             setUser(u);
             setStaffData(s.data());
             setWaiterName(s.data().name || "Staff");
