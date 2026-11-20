@@ -1,6 +1,6 @@
 import { describe, test, expect } from "vitest";
 import {
-  isActiveOrder, isOpenDineIn, isOpenParcel, isDue, paidOrders, paidRevenue, buildPaidPatch, OPEN_WINDOW_MS,
+  isActiveOrder, isOpenDineIn, isOpenParcel, isDue, paidOrders, paidRevenue, buildPaidPatch, isDeliveryOrder, OPEN_WINDOW_MS,
 } from "./orderRules.js";
 
 const now = () => Date.now();
@@ -36,6 +36,19 @@ describe("order rules", () => {
     expect(isOpenDineIn(mk({ orderType: "parcel" }))).toBe(false);
     expect(isOpenParcel(mk({ orderType: "dine_in" }))).toBe(false);
     expect(isOpenParcel(mk({ orderType: "parcel" }))).toBe(true);
+  });
+  test("delivery parcel fulfillment mode se identify hota hai", () => {
+    expect(isDeliveryOrder(mk({ orderType: "parcel", fulfillmentMode: "delivery" }))).toBe(true);
+  });
+  test("legacy delivery parcel address se identify hota hai", () => {
+    expect(isDeliveryOrder(mk({ orderType: "parcel", customer: { address: "Ara, Bihar" } }))).toBe(true);
+  });
+  test("takeaway parcel delivery nahi hota", () => {
+    expect(isDeliveryOrder(mk({
+      orderType: "parcel",
+      fulfillmentMode: "takeaway",
+      customer: { address: "TAKEAWAY (At Table)" },
+    }))).toBe(false);
   });
   test(".filter(isOpenDineIn) index ki wajah se galat nahi hota", () => {
     const list = [mk({}), mk({}), mk({ paid: true })];

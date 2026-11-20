@@ -6,6 +6,13 @@ export const PAID_STATUSES = ["paid"];
 
 export const isCancelled = (o) => o.status === "cancelled";
 
+export const isDeliveryOrder = (order) => {
+  if (order.fulfillmentMode === "delivery") return true;
+  if (order.orderType !== "parcel" || order.fulfillmentMode) return false;
+  const address = String(order.customer?.exactAddress || order.customer?.address || "").trim();
+  return Boolean(address) && !/^takeaway\b/i.test(address);
+};
+
 // Due = udhaar, abhi paisa nahi aaya
 export const isDue = (o) => o.paymentStatus === "due" && !o.paid && !isCancelled(o);
 
@@ -37,12 +44,8 @@ export const buildPaidPatch = (order, mode, by) => {
   };
   
   // Delivery parcel (jiska address ho) ka status rider hi badlega.
-  const address = String(order.customer?.exactAddress || order.customer?.address || "");
-  const isDelivery = order.fulfillmentMode === "delivery" ||
-    (order.orderType === "parcel" && !order.fulfillmentMode && !!address && !/^takeaway\b/i.test(address));
-
   const isReadyDineIn = order.orderType === "dine_in" && order.status === "ready";
-  const isPaidParcelPickup = order.orderType === "parcel" && !isDelivery;
+  const isPaidParcelPickup = order.orderType === "parcel" && !isDeliveryOrder(order);
   if ((isReadyDineIn || isPaidParcelPickup) && order.status !== "cancelled") {
     patch.status = "served";
     patch.servedAt = Date.now();

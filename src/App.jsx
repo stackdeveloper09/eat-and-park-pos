@@ -10,7 +10,18 @@ if (typeof window !== "undefined") {
     const popup = document.createElement("div");
     popup.id = "custom-dark-toast";
     popup.style.cssText = "position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:#1e293b;color:#fff;padding:16px 24px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.6);z-index:99999;font-family:system-ui;font-weight:600;font-size:14px;border-left:4px solid #f97316;max-width:90%;min-width:280px;display:flex;align-items:center;gap:12px;";
-    popup.innerHTML = '<div style="font-size:20px;">⚠️</div><div style="flex:1;">' + message + '</div><button onclick="this.parentElement.remove()" style="background:none;border:none;color:#94a3b8;font-size:20px;cursor:pointer;padding:0;line-height:1;">×</button>';
+    const icon = document.createElement("div");
+    icon.style.fontSize = "20px";
+    icon.textContent = "⚠️";
+    const text = document.createElement("div");
+    text.style.flex = "1";
+    text.textContent = String(message ?? "");
+    const close = document.createElement("button");
+    close.type = "button";
+    close.textContent = "×";
+    close.style.cssText = "background:none;border:none;color:#94a3b8;font-size:20px;cursor:pointer;padding:0;line-height:1;";
+    close.addEventListener("click", () => popup.remove());
+    popup.append(icon, text, close);
     document.body.appendChild(popup);
     setTimeout(() => { if (popup.parentElement) popup.remove(); }, 4000);
   };
@@ -23,6 +34,7 @@ if (typeof window !== "undefined") {
 import React, { useState, useEffect, useRef, useCallback, useMemo, memo } from "react";
 import QRGenerator from './QRGenerator';
 import { db, auth, authReady } from "./firebase";
+import { isDeliveryOrder } from "./lib/orderRules";
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, RecaptchaVerifier, linkWithPhoneNumber, PhoneAuthProvider, signInWithCredential, setPersistence, browserLocalPersistence } from "firebase/auth";
 import {
   collection, doc, setDoc, onSnapshot, updateDoc, deleteDoc,
@@ -420,6 +432,7 @@ const PREP_TIME_ESTIMATES = {
   "Tandoori": 20,
   "Biryani & Thali": 25
 };const STATUS_FLOW = ["new", "preparing", "ready", "out_for_delivery", "served"];
+const isAdminRole = (role) => ["admin", "owner", "manager"].includes(role);
 const STATUS_LABEL = { new: "New", preparing: "Preparing", ready: "Ready", served: "Served" };
 const STATUS_COLOR = { new: COLORS.rust, preparing: COLORS.copper, ready: COLORS.sage, served: "#8A8375" };
 
@@ -5414,12 +5427,12 @@ ${billNotes ? `<div style="font-size:10px;margin-top:8px;border-top:1px dashed #
                       </div>
 
                       <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                        {!(o.orderType === "parcel" && o.status === "ready") ? (
-                          <button onClick={(e) => { e.stopPropagation(); advanceStatus(o.id, status); }} style={{ flex: 1, padding: "10px 8px", border: "none", borderRadius: 12, fontWeight: 800, fontSize: 13, cursor: "pointer", background: status === "ready" ? COLORS.sage : (status === "preparing" ? COLORS.copper : COLORS.ink), color: "#fff" }}>
-                            {status === "new" ? "👨‍🍳 Start Cooking" : status === "preparing" ? "✅ Mark Ready" : "🍽️ Mark Served"}
-                          </button>
+                        {o.status === "out_for_delivery" ? (
+                          <div style={{ flex: 1, padding: "10px 8px", borderRadius: 12, fontWeight: 800, fontSize: 13, border: "1px dashed " + COLORS.info, color: COLORS.info, textAlign: "center", display: "flex", alignItems: "center", justifyContent: "center" }}>With Rider</div>
                         ) : (
-                          <div style={{ flex: 1, padding: "10px 8px", borderRadius: 12, fontWeight: 800, fontSize: 13, border: "1px dashed " + COLORS.line, color: COLORS.textLight, textAlign: "center", display: "flex", alignItems: "center", justifyContent: "center" }}>Rider Pending</div>
+                          <button onClick={(e) => { e.stopPropagation(); advanceStatus(o.id, status); }} style={{ flex: 1, padding: "10px 8px", border: "none", borderRadius: 12, fontWeight: 800, fontSize: 13, cursor: "pointer", background: status === "ready" ? COLORS.sage : (status === "preparing" ? COLORS.copper : COLORS.ink), color: "#fff" }}>
+                            {status === "new" ? "👨‍🍳 Start Cooking" : status === "preparing" ? "✅ Mark Ready" : status === "ready" && o.orderType === "parcel" && isDeliveryOrder(o) ? "🛵 Send to Rider" : "🍽️ Mark Served"}
+                          </button>
                         )}
                         <button onClick={(e) => { e.stopPropagation(); printKotSlip(o); }} title="Print KOT (Kitchen)" style={{ background: isSelected ? 'rgba(255,255,255,0.25)' : COLORS.paper2, color: isSelected ? '#fff' : COLORS.ink, border: 'none', width: 44, height: 38, borderRadius: 12, fontSize: 18, cursor: 'pointer' }}>🍳</button>
                         <button onClick={(e) => { e.stopPropagation(); openBillEditor(o); }} title="Edit & Print Bill" style={{ background: COLORS.sage, color: '#fff', border: 'none', width: 52, height: 48, borderRadius: 12, fontSize: 18, cursor: 'pointer', fontWeight: 800 }}>🧾</button>
@@ -7515,18 +7528,7 @@ async function ensureUser() {
   return _anonInFlight;
 }
 
-export default function App() {
-  // === QR GENERATOR ROUTE ===
-  if (typeof window !== "undefined" && window.location.search.includes("view=qr")) {
-    return <QRGenerator />;
-  }
-  // === END QR ROUTE ===
-
-    // 👇 Check karo ki user delivery panel par aaya hai ya nahi
-  if (window.location.pathname === "/delivery") {
-    return <DeliveryApp />;
-  }
-
+function RestaurantApp() {
   const [role, setRole] = useState("customer");
   const [authUser, setAuthUser] = useState(null);
   const [staffRole, setStaffRole] = useState(null); // admin | staff | waiter
@@ -7545,7 +7547,7 @@ export default function App() {
         setStaffRole(_r);
         try {
           const saved = sessionStorage.getItem("eatpark_role");
-          if (_r && (saved === "staff" || (saved === "admin" && _r === "admin"))) setRole(saved);
+          if ((_r === "staff" && saved === "staff") || (isAdminRole(_r) && saved === "admin")) setRole(saved);
         } catch (e) {}
 
       } catch (e) { setStaffRole(null); }
@@ -7663,7 +7665,7 @@ export default function App() {
       signOut(auth).catch(() => {});
       return;
     }
-    if (staffRole === "admin" || (target === "staff" && staffRole === "staff")) { setRole(target); try { sessionStorage.setItem("eatpark_role", target); } catch (e) {} return; }
+    if (isAdminRole(staffRole) || (target === "staff" && staffRole === "staff")) { setRole(target); try { sessionStorage.setItem("eatpark_role", target); } catch (e) {} return; }
 
     setTargetRole(target); setShowPinModal(true); setPinInput("");
   };
@@ -7706,7 +7708,7 @@ export default function App() {
       }
 
       const r = s.data().role || "staff";
-      const ok = r === "admin" || (targetRole === "staff" && r === "staff");
+      const ok = isAdminRole(r) || (targetRole === "staff" && r === "staff");
            if (!ok) {
         await signOut(auth);
         alert(`❌ Is account ka role '${r}' hai, '${targetRole}' nahi.`);
@@ -7969,9 +7971,9 @@ const unsubBookings = !staffRole ? () => {} : onSnapshot(collection(db, "booking
   useEffect(() => {
     if (!staffRole) return;
     (async () => {
-      if (staffRole === "admin") try { const q1 = await getDocs(query(collection(db, "loyaltyUsers"), orderBy("coins", "desc"), limit(300))); setLoyaltyUsers(q1.docs.map(d => d.data())); } catch (e) { console.error(e); }
-      if (staffRole === "admin") try { const q2 = await getDocs(collection(db, "inventory")); setInventory(q2.docs.map(d => d.data())); } catch (e) { console.error(e); }
-      if (staffRole === "admin") try { const q3 = await getDocs(query(collection(db, "coinHistory"), orderBy("timestamp", "desc"), limit(300))); setCoinHistory(q3.docs.map(d => d.data())); } catch (e) { console.error(e); }
+      if (isAdminRole(staffRole)) try { const q1 = await getDocs(query(collection(db, "loyaltyUsers"), orderBy("coins", "desc"), limit(300))); setLoyaltyUsers(q1.docs.map(d => d.data())); } catch (e) { console.error(e); }
+      if (isAdminRole(staffRole)) try { const q2 = await getDocs(collection(db, "inventory")); setInventory(q2.docs.map(d => d.data())); } catch (e) { console.error(e); }
+      if (isAdminRole(staffRole)) try { const q3 = await getDocs(query(collection(db, "coinHistory"), orderBy("timestamp", "desc"), limit(300))); setCoinHistory(q3.docs.map(d => d.data())); } catch (e) { console.error(e); }
     })();
   }, [staffRole]);
 
@@ -8021,14 +8023,10 @@ const unsubBookings = !staffRole ? () => {} : onSnapshot(collection(db, "booking
 
   const advanceStatus = async (orderId, currentStatus) => {
 const order = orders.find(o => o.id === orderId);
-    if (order && order.orderType === "parcel" && currentStatus === "ready") {
-
-      alert("Parcel order delivery boy handle karega. Aap ise 'Delivered' mark nahi kar sakte.");
-      return;
-    }
     const idx = STATUS_FLOW.indexOf(currentStatus);
     let nextStatus = STATUS_FLOW[Math.min(idx + 1, STATUS_FLOW.length - 1)];
-    if (nextStatus === "out_for_delivery" && order && order.orderType !== "parcel") nextStatus = "served";
+    if (currentStatus === "ready" && order?.orderType === "parcel" && !isDeliveryOrder(order)) nextStatus = "served";
+    if (currentStatus === "out_for_delivery") return;
     if (nextStatus === currentStatus) return;
 
     const updateData = { status: nextStatus, ...(nextStatus === "served" ? { servedAt: Date.now() } : {}) };
@@ -8128,6 +8126,16 @@ const order = orders.find(o => o.id === orderId);
       </div>
     </ErrorBoundary>
   );
+}
+
+export default function App() {
+  if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("view") === "qr") {
+    return <QRGenerator />;
+  }
+  if (typeof window !== "undefined" && window.location.pathname === "/delivery") {
+    return <DeliveryApp />;
+  }
+  return <RestaurantApp />;
 }
 
 // EP-PATCH-v1

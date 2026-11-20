@@ -4,17 +4,22 @@ const admin = require("firebase-admin");
 admin.initializeApp();
 
 exports.setStaffRole = functions.https.onCall(async (data, context) => {
-  const BOOTSTRAP_SECRET = "CHANGE_ME_12345";
-  const isBootstrap = data.bootstrap === true && data.bootstrapSecret === BOOTSTRAP_SECRET;
-
-  if (!isBootstrap) {
-    if (!context.auth || context.auth.token.role !== "admin") {
-      throw new functions.https.HttpsError("permission-denied", "Sirf admin hi role assign kar sakta hai");
-    }
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Login required");
   }
 
-  const { uid, role } = data;
-  if (!uid || !["admin", "staff", "waiter"].includes(role)) {
+  const requester = await admin.firestore().collection("staff").doc(context.auth.uid).get();
+  const requesterRole = requester.exists ? requester.data().role : null;
+  if (
+    !requester.exists ||
+    requester.data().active === false ||
+    !["admin", "owner", "manager"].includes(requesterRole)
+  ) {
+    throw new functions.https.HttpsError("permission-denied", "Sirf active admin hi role assign kar sakta hai");
+  }
+
+  const { uid, role } = data || {};
+  if (!uid || !["admin", "owner", "manager", "staff", "waiter", "delivery"].includes(role)) {
     throw new functions.https.HttpsError("invalid-argument", "uid ya role invalid hai");
   }
 

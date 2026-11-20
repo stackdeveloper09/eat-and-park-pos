@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { db, auth } from "./firebase";
+import { isDeliveryOrder } from "./lib/orderRules";
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged, setPersistence, browserLocalPersistence } from "firebase/auth";
 import { collection, query, where, onSnapshot, doc, updateDoc, getDoc } from "firebase/firestore";
 
@@ -12,6 +13,13 @@ const timeAgo = (ts) => {
   const h = Math.floor(m / 60);
   if (h < 24) return h + "h ago";
   return Math.floor(h / 24) + "d ago";
+};
+const toMillis = (value) => {
+  if (typeof value === "number") return value;
+  if (value && typeof value.toMillis === "function") return value.toMillis();
+  if (value && typeof value.seconds === "number") return value.seconds * 1000;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 };
 
 const alertAudio = new Audio("https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3");
@@ -59,7 +67,7 @@ export default function DeliveryApp() {
       if (u) {
         try {
           const s = await getDoc(doc(db, "staff", u.uid));
-          if (s.exists() && s.data().role === "delivery") {
+          if (s.exists() && s.data().role === "delivery" && s.data().active !== false) {
             setUser(u);
           } else {
             await signOut(auth);
@@ -86,14 +94,13 @@ export default function DeliveryApp() {
       
       // Strict Filter: Sirf valid delivery orders (No Walk-ins, No missing address/phone)
             const validOrders = all.filter(o =>
-        o.status !== "cancelled" &&
-        (o.customer?.exactAddress || o.customer?.address)
-      );
+              o.status !== "cancelled" && isDeliveryOrder(o)
+            );
 
 
       const active = validOrders
         .filter(o => o.status !== "served")
-        .sort((a, b) => b.createdAt - a.createdAt);
+        .sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
       
       // 🔔 Notification Alert Logic
       if (!isFirstLoad.current) {
@@ -113,8 +120,8 @@ export default function DeliveryApp() {
       setActiveOrders(active);
 
       const hist = validOrders
-        .filter(o => o.status === "served" && (!o.deliveredBy || o.deliveredBy === user.email || o.deliveredBy === user.uid))
-        .sort((a, b) => b.createdAt - a.createdAt)
+        .filter(o => o.status === "served")
+        .sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt))
         .slice(0, 50);
             setHistoryOrders(hist);
     }, (err) => {

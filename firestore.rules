@@ -79,6 +79,8 @@ service cloud.firestore {
             && request.resource.data.diff(resource.data).affectedKeys()
                  .hasOnly(['status', 'paid', 'paymentStatus', 'deliveredAt', 'deliveredBy'])
             && request.resource.data.status in ['out_for_delivery', 'served']
+            && (request.resource.data.status != 'out_for_delivery'
+                || resource.data.status == 'ready')
             && (request.resource.data.status != 'served'
                 || resource.data.status == 'out_for_delivery'))
         || (signedIn() && resource.data.createdBy == request.auth.uid

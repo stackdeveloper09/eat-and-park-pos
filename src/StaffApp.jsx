@@ -3,7 +3,7 @@ import { tryRecover } from "./recover";
 import React, { useState, useEffect, useMemo, useRef, useContext, createContext, useCallback } from "react";
 import { db, auth } from "./firebase";
 import { assertEditable, resolveVendorId } from "./lib/guards";
-import { PAID_STATUSES, OPEN_WINDOW_MS, isOpenParcel, isOpenDineIn, isActiveOrder, paidOrders, paidRevenue, buildPaidPatch } from "./lib/orderRules";
+import { PAID_STATUSES, OPEN_WINDOW_MS, isOpenParcel, isOpenDineIn, isActiveOrder, paidOrders, paidRevenue, buildPaidPatch, isDeliveryOrder } from "./lib/orderRules";
 import { paymentBreakdown, partialPayment, splitPayment } from "./lib/billing";
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged, setPersistence, browserLocalPersistence } from "firebase/auth";
 import {
@@ -145,7 +145,7 @@ served: { label: "Served", color: "gray", emoji: "🍽️" },
   out_for_delivery: { label: "Out for Delivery", color: "blue", emoji: "🛵" },
 
 };
-const STATUS_FLOW = ["new", "preparing", "ready", "served"];
+const STATUS_FLOW = ["new", "preparing", "ready", "out_for_delivery", "served"];
 
 const RESTAURANT = {
   name: "Eat & Park",
@@ -1476,16 +1476,22 @@ function OrdersView({ C, isMobile, orders, menu, waiterName, isOwner, filter, se
     : rangeAll.filter(o => o.status === filter);
 
   const advanceOrder = async (order) => {
-    if (order.orderType === "parcel" && order.status === "ready") {
-      toast("Parcel order delivery boy handle karega", "warning");
-      return;
-    }
     const idx = STATUS_FLOW.indexOf(order.status);
     if (idx < 0 || idx >= STATUS_FLOW.length - 1) return;
-    const next = STATUS_FLOW[idx + 1];
+    let next = STATUS_FLOW[idx + 1];
+    if (order.orderType === "parcel" && order.status === "ready" && !isDeliveryOrder(order)) {
+      next = "served";
+    }
+    if (order.status === "out_for_delivery") return;
     haptic(12);
     setOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: next } : o));
-    try { await updateDoc(doc(db, "orders", order.id), { status: next }); toast("Order → " + STATUS[next].label, "success"); }
+    try {
+      await updateDoc(doc(db, "orders", order.id), {
+        status: next,
+        ...(next === "served" ? { servedAt: Date.now() } : {}),
+      });
+      toast(next === "out_for_delivery" ? "Order rider ko bhej diya" : "Order → " + STATUS[next].label, "success");
+    }
     catch (e) {
       setOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: order.status } : o));
       toast(e.message, "error");
@@ -1655,10 +1661,12 @@ function OrdersView({ C, isMobile, orders, menu, waiterName, isOwner, filter, se
                   <button onClick={() => restoreOrder(o)} style={{ padding: "9px", border: "none", borderRadius: 8, background: C.green, color: "#fff", fontWeight: 800, fontSize: 12, cursor: "pointer", fontFamily: "inherit", gridColumn: "span 2" }}>Restore Order</button>
                 )}
                 {!isCancelled && o.status !== "served" && (
-                  o.orderType === "parcel" && o.status === "ready" ? (
-                    <div style={{ flex: 1, padding: "9px", border: "1px dashed " + C.gray, borderRadius: 8, textAlign: "center", fontWeight: 800, fontSize: 12, color: C.gray }}>Rider Pending</div>
+                  o.status === "out_for_delivery" ? (
+                    <div style={{ flex: 1, padding: "9px", border: "1px dashed " + C.blue, borderRadius: 8, textAlign: "center", fontWeight: 800, fontSize: 12, color: C.blue }}>With Rider</div>
                   ) : (
-                    <button onClick={() => advanceOrder(o)} style={{ padding: "9px", border: "none", borderRadius: 8, background: stColor, color: "#fff", fontWeight: 800, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>{o.status === "new" ? "Start" : o.status === "preparing" ? "Ready" : "Serve"}</button>
+                    <button onClick={() => advanceOrder(o)} style={{ padding: "9px", border: "none", borderRadius: 8, background: stColor, color: "#fff", fontWeight: 800, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
+                      {o.status === "new" ? "Start" : o.status === "preparing" ? "Ready" : o.status === "ready" && o.orderType === "parcel" && isDeliveryOrder(o) ? "Send to Rider" : "Serve"}
+                    </button>
                   )
                 )}
                 {!isCancelled && !o.paid && <button onClick={() => setPayFor(o)} style={{ padding: "9px", border: "1.5px solid " + C.green, borderRadius: 8, background: "transparent", color: C.green, fontWeight: 800, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>Paid</button>}
