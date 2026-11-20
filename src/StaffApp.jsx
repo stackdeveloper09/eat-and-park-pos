@@ -1188,7 +1188,7 @@ const isOwner = ["owner", "admin", "manager"].includes(String(staffData?.role ||
             onBill={(order) => { haptic(); setBillOrder(order); setSelectedTable("parcel"); setCart({}); setAddMoreMode(false); }}
             onAdd={(order) => { haptic(); setBillOrder(order); setSelectedTable("parcel"); setCart({}); setAddMoreMode(true); }} />
         )}
-        {activeTab === "kot" && <KOTView C={C} isMobile={isMobile} orders={orders} setOrders={setOrders} readOnly={false} />}
+        {activeTab === "kot" && <KOTView C={C} isMobile={isMobile} orders={orders} setOrders={setOrders} readOnly={true} />}
 {activeTab === "inventory" && <InventoryPanel C={C} isMobile={isMobile} isOwner={isOwner} waiterName={waiterName} />}
         {activeTab === "stock" && <StockPanel C={C} isMobile={isMobile} menu={menu} />}
         {activeTab === "history" && <HistoryView C={C} isMobile={isMobile} isOwner={isOwner} />}
