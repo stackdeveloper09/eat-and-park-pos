@@ -747,6 +747,7 @@ function StaffAppInner() {
   const [muted, setMuted] = useState(() => safeStorageGet("staff_mute", "0") === "1");
   const prevNewIdsRef = useRef(null);
   const [lowCount, setLowCount] = useState(0);
+  const [lowItems, setLowItems] = useState([]);
   // 🔔 Waiter calls listener (unified patch)
   const [calls, setCalls] = useState([]);
   const [loyaltyUsers, setLoyaltyUsers] = useState([]);
@@ -793,7 +794,11 @@ function StaffAppInner() {
   useEffect(() => {
     if (!user) return;
     let invItems = [], invStock = {};
-    const calc = () => setLowCount(invItems.filter((it) => Number(it.min) > 0 && invStock[it.id] !== undefined && Number(invStock[it.id]) <= Number(it.min)).length);
+    const calc = () => {
+      const low = invItems.filter((it) => Number(it.min) > 0 && invStock[it.id] !== undefined && Number(invStock[it.id]) <= Number(it.min));
+      setLowCount(low.length);
+      setLowItems(low.map((it) => ({ ...it, stock: invStock[it.id] })).sort((a, b) => a.name.localeCompare(b.name)));
+    };
     const u1 = onSnapshot(doc(db, "inventory", "items"), (s) => { invItems = s.exists() && Array.isArray(s.data().list) ? s.data().list : []; calc(); }, () => {});
     const u2 = onSnapshot(doc(db, "inventory", "state"), (s) => { invStock = s.exists() ? (s.data().stock || {}) : {}; calc(); }, () => {});
     return () => { u1(); u2(); };
@@ -1171,12 +1176,13 @@ const isOwner = ["owner", "admin", "manager"].includes(String(staffData?.role ||
         {activeTab === "history" && <HistoryView C={C} isMobile={isMobile} isOwner={isOwner} />}
         {activeTab === "audit" && <AuditLogView C={C} isMobile={isMobile} />}
         {activeTab === "expenses" && <ExpensesView C={C} isMobile={isMobile} isOwner={isOwner} waiterName={waiterName} />}
-        {activeTab === "reports" && <ReportsView C={C} isMobile={isMobile} isOwner={isOwner} waiterName={waiterName} />}
+        {activeTab === "reports" && <ReportsView C={C} isMobile={isMobile} isOwner={isOwner} waiterName={waiterName} menu={menu} />}
         {activeTab === "import" && <ImportView C={C} isMobile={isMobile} isOwner={isOwner} waiterName={waiterName} onDone={() => {}} />}
         {activeTab === "customers" && <CustomersView C={C} isMobile={isMobile} isOwner={isOwner} waiterName={waiterName} orders={orders} loyaltyUsers={loyaltyUsers} />}
         {activeTab === "dashboard" && (
-          <DashboardView C={C} isMobile={isMobile} orders={orders} dueOrders={dueOrders} menu={menu}
+          <DashboardView C={C} isMobile={isMobile} orders={orders} dueOrders={dueOrders} menu={menu} lowItems={lowItems}
             onStatusClick={(status, bounds) => { setOrdersFilter(status); setOrdersRange(bounds || null); setActiveTab("orders"); }}
+            onInventoryClick={() => setActiveTab("inventory")}
             onOrderClick={(order) => {
               if (order.orderType === "dine_in" && order.table) { setBillOrder(order); setSelectedTable(Number(order.table)); setCart({}); setAddMoreMode(false); }
               else { setBillOrder(order); setSelectedTable("parcel"); setCart({}); setAddMoreMode(false); }
@@ -1792,7 +1798,7 @@ function KOTView({ C, isMobile, orders, setOrders, readOnly = false }) {
 // ===========================================================================
 // DASHBOARD VIEW (with animated numbers)
 // ===========================================================================
-function DashboardView({ C, isMobile, orders, dueOrders, menu, onStatusClick, onOrderClick }) {
+function DashboardView({ C, isMobile, orders, dueOrders, menu, lowItems = [], onStatusClick, onOrderClick, onInventoryClick }) {
   const todayStr = invDateKey();
   const [range, setRange] = useState("today");
   const [customDate, setCustomDate] = useState(todayStr);
@@ -1869,6 +1875,22 @@ function DashboardView({ C, isMobile, orders, dueOrders, menu, onStatusClick, on
           })}
         </div>
       </div>
+      {lowItems.length > 0 && (
+        <div style={{ background: C.redLight, border: `1px solid ${C.red}`, borderRadius: 14, padding: isMobile ? 14 : 20, marginBottom: 24 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 10 }}>
+            <div style={{ fontSize: isMobile ? 13 : 15, fontWeight: 800, color: C.ink }}>Low Stock Alert</div>
+            <button onClick={onInventoryClick} style={{ border: "none", borderRadius: 8, background: C.red, color: "#fff", padding: "7px 10px", fontSize: 11, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>{lowItems.length} items</button>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
+            {lowItems.slice(0, 6).map((it) => (
+              <div key={it.id} style={{ background: C.card, borderRadius: 9, padding: "9px 10px", display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12, fontWeight: 700, color: C.ink }}>
+                <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.name}</span>
+                <span style={{ color: C.red, fontFamily: "monospace", flexShrink: 0 }}>{it.stock} / {it.min} {it.unit || ""}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: isMobile ? 14 : 20, marginBottom: 24 }}>
         <div style={{ fontSize: isMobile ? 13 : 15, fontWeight: 800, color: C.ink, marginBottom: 16 }}>Orders by Hour - {rangeLabel}</div>
         <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 120 }}>
@@ -2480,9 +2502,10 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
       const price = rates[id] ?? ex?.price ?? m?.price ?? 0;
       const name = ex?.name ?? m?.name ?? "Item";
       const portion = ex?.portion ?? m?.portion ?? "";
+      const category = ex?.category ?? m?.category ?? "Anya";
       const prev = oldQty[id] || 0;
-      finalItems.push({ itemId: id, name, portion, price, qty: q, kotNumber: ex?.kotNumber || nextKotNo });
-      if (q > prev) newKotItems.push({ itemId: id, name, portion, price, qty: q - prev, kotNumber: nextKotNo });
+      finalItems.push({ itemId: id, name, category, portion, price, qty: q, kotNumber: ex?.kotNumber || nextKotNo });
+      if (q > prev) newKotItems.push({ itemId: id, name, category, portion, price, qty: q - prev, kotNumber: nextKotNo });
     });
     if (finalItems.length === 0) throw new Error("Bill me kam se kam 1 item hona chahiye");
 
@@ -2535,7 +2558,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
         const base = existingOrder;
         const baseKots = base.kots?.length ? base.kots : [{ id: uid("kot"), kotNumber: 1, items: base.items || [], createdAt: base.createdAt, status: base.status }];
         const nextNo = Math.max(1, ...baseKots.map(k => k.kotNumber || 1)) + 1;
-        const newItems = cartItems.map(([id, qty]) => { const m = menu.find(x => x.id === id); return { itemId: id, name: m.name, portion: m.portion || "", price: rates[id] ?? m.price, qty, kotNumber: nextNo }; });
+        const newItems = cartItems.map(([id, qty]) => { const m = menu.find(x => x.id === id); return { itemId: id, name: m.name, category: m.category || "Anya", portion: m.portion || "", price: rates[id] ?? m.price, qty, kotNumber: nextNo }; });
         const addedTotal = Math.round(newItems.reduce((s, it) => s + it.price * it.qty, 0));
         const runKot = { id: uid("kot"), kotNumber: nextNo, items: newItems, createdAt: Date.now(), status: "new", isRunning: true };
         await runTransaction(db, async (tx) => {
@@ -2580,7 +2603,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
     }
     setPlacing(true);
     try {
-      const items = cartItems.map(([id, qty]) => { const m = menu.find(x => x.id === id); return { itemId: id, name: m.name, portion: m.portion || "", price: rates[id] ?? m.price, qty: parseFloat(qty) || 0, kotNumber: 1 }; });
+      const items = cartItems.map(([id, qty]) => { const m = menu.find(x => x.id === id); return { itemId: id, name: m.name, category: m.category || "Anya", portion: m.portion || "", price: rates[id] ?? m.price, qty: parseFloat(qty) || 0, kotNumber: 1 }; });
       const orderId = uid("o");
       const sub = cartSubtotal;
       const d = Math.round((sub * discount) / 100);
@@ -2686,7 +2709,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
       if (!baseOrder) return;
       const baseKots = baseOrder.kots?.length ? baseOrder.kots : [{ id: uid("kot"), kotNumber: 1, items: baseOrder.items || [], createdAt: baseOrder.createdAt, status: baseOrder.status }];
       const nextNo = Math.max(1, ...baseKots.map(k => k.kotNumber || 1)) + 1;
-      const newItems = cartItems.map(([id, qty]) => { const m = menu.find(x => x.id === id); return { itemId: id, name: m.name, portion: m.portion || "", price: rates[id] ?? m.price, qty, kotNumber: nextNo }; });
+      const newItems = cartItems.map(([id, qty]) => { const m = menu.find(x => x.id === id); return { itemId: id, name: m.name, category: m.category || "Anya", portion: m.portion || "", price: rates[id] ?? m.price, qty, kotNumber: nextNo }; });
       const addedTotal = Math.round(newItems.reduce((s, it) => s + it.price * it.qty, 0));
       const runKot = { id: uid("kot"), kotNumber: nextNo, items: newItems, createdAt: Date.now(), status: "new", isRunning: true };
       await runTransaction(db, async (tx) => { // live-total txn (running)
@@ -3885,7 +3908,7 @@ const loadExpensesRange = async (fromKey, toKey) => {
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 };
 
-function calcStats(orders, expenses) {
+function calcStats(orders, expenses, menu = []) {
   const sum = (arr, f) => arr.reduce((s, x) => s + (Number(f(x)) || 0), 0);
   const valid = orders.filter((o) => o.status !== "cancelled");
   const paid = valid.filter((o) => o.paid);
@@ -3916,11 +3939,21 @@ function calcStats(orders, expenses) {
     itemMap[k].amt += (Number(it.price) || 0) * (Number(it.qty) || 0);
   }));
   const items = Object.values(itemMap).sort((a, b) => b.amt - a.amt);
+  const salesByCategory = {};
+  paid.forEach((o) => (o.items || []).forEach((it) => {
+    const menuItem = menu.find((m) => m.id === it.itemId) || menu.find((m) => String(m.name || "").trim().toLowerCase() === String(it.name || "").trim().toLowerCase());
+    const category = it.category || menuItem?.category || "Anya";
+    const amount = (Number(it.price) || 0) * (Number(it.qty) || 0);
+    if (!salesByCategory[category]) salesByCategory[category] = { category, qty: 0, amt: 0 };
+    salesByCategory[category].qty += Number(it.qty) || 0;
+    salesByCategory[category].amt += amount;
+  }));
+  const categorySales = Object.values(salesByCategory).sort((a, b) => b.amt - a.amt);
   const wMap = {};
   paid.forEach((o) => { const w = o.waiter || "Staff"; if (!wMap[w]) wMap[w] = { name: w, orders: 0, amt: 0 }; wMap[w].orders++; wMap[w].amt += Number(o.finalTotal) || 0; });
   const waiters = Object.values(wMap).sort((a, b) => b.amt - a.amt);
   return {
-    valid, paid, revenue, pay, duePending, expTotal, catRows, saman, profit, margin, daily, items, waiters,
+    valid, paid, revenue, pay, duePending, expTotal, catRows, categorySales, saman, profit, margin, daily, items, waiters,
     cancelled: orders.length - valid.length,
     avg: paid.length ? Math.round(revenue / paid.length) : 0,
     discount: sum(paid, (o) => o.billDiscount),
@@ -4335,7 +4368,7 @@ function ExpensesView({ C, isMobile, isOwner, waiterName }) {
 // ---------------------------------------------------------------------------
 // REPORTS: PROFIT / LOSS + DOWNLOAD + DAY CLOSE
 // ---------------------------------------------------------------------------
-function ReportsView({ C, isMobile, isOwner, waiterName }) {
+function ReportsView({ C, isMobile, isOwner, waiterName, menu = [] }) {
   const toast = useToast();
   const haptic = useHaptic();
   const G = goldOf(C);
@@ -4370,7 +4403,7 @@ function ReportsView({ C, isMobile, isOwner, waiterName }) {
     return () => unsub();
   }, [isOwner]);
 
-  const stats = useMemo(() => calcStats(orders, expenses), [orders, expenses]);
+  const stats = useMemo(() => calcStats(orders, expenses, menu), [orders, expenses, menu]);
   const rangeLabel = from === to ? from : from + " se " + to;
   const todayKey = invDateKey();
   const isTodayOnly = from === todayKey && to === todayKey;
@@ -4404,6 +4437,7 @@ function ReportsView({ C, isMobile, isOwner, waiterName }) {
       ] },
       { name: "Daily", rows: [["Date", "Orders", "Revenue", "Kharcha", "Profit"], ...s.daily.map((d) => [d.date, d.orders, d.revenue, d.expense, d.profit])] },
       { name: "Kharcha Category", rows: [["Category", "Amount"], ...s.catRows.map(([c, v]) => [c, v])] },
+      { name: "Sales Category", rows: [["Category", "Qty", "Amount"], ...s.categorySales.map((c) => [c.category, c.qty, c.amt])] },
       { name: "Items", rows: [["Item", "Qty", "Amount"], ...s.items.map((i) => [i.name, i.qty, i.amt])] },
       { name: "Waiters", rows: [["Waiter", "Orders", "Amount"], ...s.waiters.map((w) => [w.name, w.orders, w.amt])] },
       { name: "Kharcha", rows: [["Date", "Category", "Amount", "Mode", "Note", "By"], ...[...expenses].sort((a, b) => (a.date < b.date ? -1 : 1)).map((e) => [e.date || "", e.category || "", Number(e.amount) || 0, e.mode || "cash", e.note || "", e.by || ""])] },
@@ -4419,6 +4453,7 @@ function ReportsView({ C, isMobile, isOwner, waiterName }) {
       "<table>" + row("Revenue (paid)", rs(s.revenue)) + row("Kharcha", rs(s.expTotal)) + row(s.profit >= 0 ? "NET PROFIT" : "NET LOSS", rs(Math.abs(s.profit)), true) + row("Margin", (Math.round(s.margin * 10) / 10) + "%") + "</table>" +
       "<h3>Payment</h3><table>" + row("Cash", rs(s.pay.cash)) + row("UPI", rs(s.pay.upi)) + row("Card", rs(s.pay.card)) + row("Split (unallocated)", rs(s.pay.split)) + row("Due baaki", rs(s.duePending)) + row("Discount diya", rs(s.discount)) + row("GST", rs(s.gst)) + "</table>" +
       "<h3>Kharcha (category)</h3><table>" + (s.catRows.map(([c, v]) => row(esc(c), rs(v))).join("") || row("-", "-")) + "</table>" +
+      "<h3>Bikri (category)</h3><table>" + (s.categorySales.map((c) => row(esc(c.category), c.qty + " pcs / " + rs(c.amt))).join("") || row("-", "-")) + "</table>" +
       "<h3>Daily</h3><table><tr><th>Date</th><th>Orders</th><th>Revenue</th><th>Kharcha</th><th>Profit</th></tr>" + s.daily.map((d) => "<tr><td>" + d.date + "</td><td>" + d.orders + "</td><td>" + rs(d.revenue) + "</td><td>" + rs(d.expense) + "</td><td>" + (d.profit < 0 ? "-" : "") + rs(Math.abs(d.profit)) + "</td></tr>").join("") + "</table>" +
       "<h3>Top 10 items</h3><table><tr><th>Item</th><th>Qty</th><th>Amount</th></tr>" + s.items.slice(0, 10).map((i) => "<tr><td>" + esc(i.name) + "</td><td>" + i.qty + "</td><td>" + rs(i.amt) + "</td></tr>").join("") + "</table>" +
       "<div class='sub' style='margin-top:14px'>Generated " + new Date().toLocaleString("en-IN") + "</div>";
@@ -4443,7 +4478,7 @@ function ReportsView({ C, isMobile, isOwner, waiterName }) {
     let s = stats, freshExp = expenses;
     try {
       const [fo, fe] = await Promise.all([loadOrdersRange(todayKey, todayKey), loadExpensesRange(todayKey, todayKey)]);
-      s = calcStats(fo, fe); freshExp = fe;
+      s = calcStats(fo, fe, menu); freshExp = fe;
     } catch (e) { toast("Fresh data load nahi hua, Day Close roka gaya: " + e.message, "error"); return; }
     const cashExp = freshExp.filter((e) => (e.mode || "cash") === "cash").reduce((t, e) => t + (Number(e.amount) || 0), 0);
     let cashVendorPay = 0;
@@ -4562,6 +4597,25 @@ function ReportsView({ C, isMobile, isOwner, waiterName }) {
               </div>
             ))}
             {s.revenue > 0 && s.saman > 0 && <div style={{ fontSize: 12, color: C.gray, fontWeight: 700, marginTop: 8 }}>Saman / kaccha maal = bikri ka <b style={{ color: GT }}>{Math.round((s.saman / s.revenue) * 100)}%</b> (food cost)</div>}
+          </div>
+
+          <div style={box}>
+            <div style={boxTitle}>Category-wise Sales</div>
+            {s.categorySales.length === 0 && <div style={{ color: C.gray, fontSize: 13, textAlign: "center", padding: 10 }}>Koi paid sale nahi</div>}
+            {s.categorySales.map((c) => {
+              const maxCategory = s.categorySales[0]?.amt || 1;
+              return (
+                <div key={c.category} style={{ marginBottom: 10 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12, fontWeight: 700, color: C.ink, marginBottom: 3 }}>
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.category}</span>
+                    <span style={{ fontFamily: "monospace", color: C.gray, flexShrink: 0 }}>{c.qty} pcs - {inr(c.amt)}</span>
+                  </div>
+                  <div style={{ height: 6, background: C.line, borderRadius: 3, overflow: "hidden" }}>
+                    <div style={{ width: ((c.amt / maxCategory) * 100) + "%", height: "100%", background: C.green }} />
+                  </div>
+                </div>
+              );
+            })}
           </div>
 
           <div style={box}>
