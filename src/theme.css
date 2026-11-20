@@ -1,0 +1,287 @@
+:root {
+  --ep-primary: #e25938;
+  --ep-primary-dark: #c74429;
+  --ep-primary-soft: #fdebe6;
+  --ep-success: #16845b;
+  --ep-warning: #b76e00;
+  --ep-error: #c83b32;
+  --ep-bg: #f7f7f5;
+  --ep-surface: #ffffff;
+  --ep-surface-alt: #f1f2ef;
+  --ep-text: #1c2522;
+  --ep-text-muted: #66736f;
+  --ep-border: #dde2df;
+  --ep-shadow-sm: 0 2px 8px rgba(28, 37, 34, 0.08);
+  --ep-shadow-md: 0 10px 28px rgba(28, 37, 34, 0.12);
+  --ep-shadow-lg: 0 24px 60px rgba(28, 37, 34, 0.18);
+  --ep-radius-sm: 10px;
+  --ep-radius-md: 16px;
+  --ep-radius-lg: 24px;
+  --ep-space-1: 4px;
+  --ep-space-2: 8px;
+  --ep-space-3: 12px;
+  --ep-space-4: 16px;
+  --ep-space-5: 20px;
+  --ep-space-6: 24px;
+  --ep-font: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --ep-bg: #0b1110;
+  --ep-surface: #161f1d;
+  --ep-surface-alt: #202b28;
+  --ep-text: #f5f7f6;
+  --ep-text-muted: #aab6b2;
+  --ep-border: #303d39;
+  --ep-primary-soft: #3a2520;
+  --ep-shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.22);
+  --ep-shadow-md: 0 12px 32px rgba(0, 0, 0, 0.28);
+  --ep-shadow-lg: 0 24px 64px rgba(0, 0, 0, 0.38);
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  margin: 0;
+  font-family: var(--ep-font);
+}
+
+body {
+  background: var(--ep-bg);
+  color: var(--ep-text);
+}
+
+button,
+input,
+textarea,
+select {
+  font-family: var(--ep-font);
+}
+
+button,
+[role="button"],
+input,
+textarea,
+select {
+  min-height: 44px;
+}
+
+button:focus-visible,
+[role="button"]:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 3px solid rgba(226, 89, 56, 0.32);
+  outline-offset: 2px;
+}
+
+.ep-card {
+  background: var(--ep-surface);
+  border: 1px solid var(--ep-border);
+  border-radius: var(--ep-radius-md);
+  box-shadow: var(--ep-shadow-sm);
+  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+}
+
+.ep-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--ep-shadow-md);
+}
+
+.ep-chip {
+  min-height: 44px;
+  border: 1px solid var(--ep-border);
+  border-radius: 999px;
+  background: var(--ep-surface);
+  color: var(--ep-text);
+  padding: 0 var(--ep-space-4);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 180ms ease, color 180ms ease, border-color 180ms ease, transform 180ms ease;
+}
+
+.ep-chip[aria-pressed="true"] {
+  border-color: var(--ep-primary);
+  background: var(--ep-primary);
+  color: #ffffff;
+}
+
+.ep-chip:active,
+.ep-primary-button:active,
+.ep-quantity-button:active {
+  transform: scale(0.96);
+}
+
+.ep-primary-button {
+  min-height: 44px;
+  border: 0;
+  border-radius: var(--ep-radius-sm);
+  background: var(--ep-primary);
+  color: #ffffff;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background 180ms ease, transform 180ms ease, box-shadow 180ms ease;
+  box-shadow: 0 8px 18px rgba(226, 89, 56, 0.22);
+}
+
+.ep-primary-button:hover {
+  background: var(--ep-primary-dark);
+}
+
+.ep-skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--ep-surface-alt);
+  border-radius: var(--ep-radius-sm);
+}
+
+.ep-skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.32), transparent);
+  animation: ep-shimmer 1.25s infinite;
+}
+
+.ep-bottom-cart {
+  position: fixed;
+  z-index: 55;
+  left: 50%;
+  bottom: max(12px, env(safe-area-inset-bottom));
+  width: calc(100% - 24px);
+  max-width: 440px;
+  min-height: 60px;
+  transform: translateX(-50%);
+  border: 0;
+  border-radius: var(--ep-radius-md);
+  background: var(--ep-primary);
+  color: #ffffff;
+  box-shadow: 0 12px 32px rgba(226, 89, 56, 0.38);
+  padding: 0 var(--ep-space-5);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 800;
+  cursor: pointer;
+  animation: ep-slide-up 220ms ease-out;
+}
+
+.ep-slide-drawer {
+  animation: ep-slide-drawer 220ms ease-out;
+}
+
+.ep-status-progress {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin: 12px 0 18px;
+}
+
+.ep-status-progress__step {
+  position: relative;
+  min-height: 44px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 4px;
+  color: var(--ep-text-muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.ep-status-progress__step::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 8px;
+  height: 4px;
+  background: var(--ep-border);
+  border-radius: 999px;
+}
+
+.ep-status-progress__step::after {
+  content: "";
+  position: absolute;
+  left: calc(50% - 7px);
+  top: 3px;
+  width: 14px;
+  height: 14px;
+  border: 3px solid var(--ep-surface);
+  border-radius: 50%;
+  background: var(--ep-border);
+  box-shadow: 0 0 0 1px var(--ep-border);
+}
+
+.ep-status-progress__step[data-state="done"]::before,
+.ep-status-progress__step[data-state="done"]::after {
+  background: var(--ep-success);
+  box-shadow: 0 0 0 1px var(--ep-success);
+}
+
+.ep-status-progress__step[data-state="current"] {
+  color: var(--ep-primary);
+}
+
+.ep-status-progress__step[data-state="current"]::before,
+.ep-status-progress__step[data-state="current"]::after {
+  background: var(--ep-primary);
+  box-shadow: 0 0 0 1px var(--ep-primary);
+}
+
+.ep-toast {
+  position: fixed;
+  z-index: 99999;
+  left: 50%;
+  bottom: 84px;
+  width: calc(100% - 32px);
+  max-width: 440px;
+  transform: translateX(-50%);
+  border-radius: var(--ep-radius-md);
+  background: var(--ep-text);
+  color: var(--ep-surface);
+  box-shadow: var(--ep-shadow-lg);
+  padding: 14px 16px;
+  font-weight: 750;
+  animation: ep-slide-up 220ms ease-out;
+}
+
+@keyframes ep-shimmer {
+  to { transform: translateX(100%); }
+}
+
+@keyframes ep-slide-up {
+  from { opacity: 0; transform: translate(-50%, 16px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+@keyframes ep-slide-drawer {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (min-width: 768px) {
+  .ep-bottom-cart {
+    bottom: 20px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

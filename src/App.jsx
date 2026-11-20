@@ -2545,6 +2545,10 @@ function CustomerView({ menu, orders, placeOrder, bookEvent, gallery, offersList
   const [myOrderIds, setMyOrderIds] = useState([]);
   const [orderType, setOrderType] = useState("dine_in");
   const [language, setLanguage] = useState(() => localStorage.getItem("eatpark_language") || "hi");
+  useEffect(() => {
+    const theme = isDark ? "dark" : "light";
+    document.documentElement.setAttribute("data-theme", theme);
+  }, [isDark]);
   const [fulfillmentMode, setFulfillmentMode] = useState("dine_in");
   const [custName, setCustName] = useState(() => localStorage.getItem("enp_cust_name") || "");
   const [custPhone, setCustPhone] = useState(() => localStorage.getItem("enp_cust_phone") || "");
@@ -3779,7 +3783,8 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
           <div style={{ fontFamily: "'Outfit', sans-serif", fontWeight: 800, fontSize: 17, color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>Eat & Park</div>
           <div style={{ fontSize: 11, color: "#8B9BB4", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{RESTAURANT.tagline}</div>
         </div>
-        <button onClick={() => { const next = language === "hi" ? "en" : "hi"; setLanguage(next); localStorage.setItem("eatpark_language", next); }} title="Hindi / English" style={{ height: 40, borderRadius: 10, border: "1px solid #273449", background: "#161F2F", color: "#fff", padding: "0 9px", fontWeight: 800, fontSize: 12, cursor: "pointer", flexShrink: 0 }}>{language === "hi" ? "EN" : "हि"}</button>
+        <button onClick={() => { const next = language === "hi" ? "en" : "hi"; setLanguage(next); localStorage.setItem("eatpark_language", next); }} title="Hindi / English" aria-label="Switch Hindi or English" style={{ height: 44, borderRadius: 10, border: "1px solid #273449", background: "#161F2F", color: "#fff", padding: "0 9px", fontWeight: 800, fontSize: 12, cursor: "pointer", flexShrink: 0 }}>{language === "hi" ? "EN" : "हि"}</button>
+        <button onClick={() => setIsDark((d) => !d)} title={isDark ? "Light mode" : "Dark mode"} aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"} style={{ height: 44, width: 44, borderRadius: 10, border: "1px solid #273449", background: "#161F2F", color: "#fff", fontSize: 16, cursor: "pointer", flexShrink: 0 }}>{isDark ? "☀️" : "🌙"}</button>
         <select value={table} onChange={(e) => setTable(Number(e.target.value))} style={{ background: "#161F2F", color: "#fff", border: "1px solid #273449", borderRadius: 10, padding: "9px 8px", fontWeight: 800, fontSize: 13, outline: "none" }}>
           {Array.from({ length: 20 }, (_, i) => i + 1).map((n) => (<option key={n} value={n} style={{ color: "#000" }}>Table {n}</option>))}
         </select>
@@ -3899,7 +3904,7 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
             {visibleCategories.map((c) => {
               const on = category === c;
               return (
-                <button key={c} onClick={() => setCategory(c)} style={{ whiteSpace: "nowrap", flexShrink: 0, padding: "8px 16px", borderRadius: 999, border: "1px solid " + (on ? "#FF5A1F" : "#273449"), background: on ? "#FF5A1F" : "#161F2F", color: on ? "#fff" : "#8B9BB4", fontWeight: 700, fontSize: 13, cursor: "pointer", boxShadow: on ? "0 6px 16px rgba(255,90,31,0.3)" : "none" }}>{c}</button>
+                <button key={c} onClick={() => setCategory(c)} className="ep-chip" aria-pressed={on} style={{ background: on ? "#E25938" : "#161F2F", color: on ? "#fff" : "#B8C2BE", borderColor: on ? "#E25938" : "#273449", boxShadow: on ? "0 6px 16px rgba(226,89,56,0.28)" : "none" }}>{c}</button>
               );
             })}
           </div>
@@ -3948,7 +3953,7 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
             const qty = getCartQty(cart[item.id]);
             const fav = favorites.includes(item.id);
             return (
-              <div key={item.id} style={{ display: "flex", gap: 12, padding: 14, background: "#161F2F", border: "1px solid " + (qty > 0 ? "#FF5A1F" : "#273449"), borderRadius: 16, opacity: item.available ? 1 : 0.5, alignItems: "flex-start" }}>
+              <div key={item.id} className="ep-card" style={{ display: "flex", gap: 12, padding: 14, background: "var(--ep-surface)", border: "1px solid " + (qty > 0 ? "#E25938" : "var(--ep-border)"), borderRadius: 16, opacity: item.available ? 1 : 0.5, alignItems: "flex-start", color: "var(--ep-text)" }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
                     <VegDot veg={item.veg} />
@@ -3960,7 +3965,7 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
                   <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 16, fontWeight: 800, color: "#FF8C5A", marginBottom: 6 }}>{inr(item.price)}</div>
                   {item.desc && <div style={{ fontSize: 12, color: "#8B9BB4", lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{item.desc}</div>}
                 </div>
-                <div style={{ width: 104, flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center" }}>
+                <div style={{ width: 132, flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center" }}>
                   <div style={{ position: "relative", width: 104, height: 104 }}>
                     <div style={{ position: "absolute", inset: 0, borderRadius: 14, background: "#1E293B", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 34 }}>🍽️</div>
                     {item.image ? <img src={item.image} alt={item.name} loading="lazy" className="keep-color" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", borderRadius: 14, filter: item.available ? "none" : "grayscale(1)" }} onError={(e) => { e.target.style.display = "none"; }} /> : null}
@@ -3970,12 +3975,12 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
                     {!item.available ? (
                       <div style={{ background: "#451A1A", color: "#EF4444", borderRadius: 10, fontWeight: 800, fontSize: 11, padding: "9px 12px", whiteSpace: "nowrap" }}>Out of stock</div>
                     ) : qty === 0 ? (
-                      <button onClick={() => handleSetQty(item.id, 1)} style={{ width: 88, height: 36, background: "#0B111A", border: "1.5px solid #FF5A1F", borderRadius: 10, color: "#FF5A1F", fontWeight: 800, fontSize: 14, cursor: "pointer", boxShadow: "0 6px 14px rgba(0,0,0,0.35)" }}>ADD</button>
+                      <button onClick={() => handleSetQty(item.id, 1)} aria-label={`Add ${item.name} to cart`} className="ep-primary-button" style={{ width: 88, height: 44, background: "var(--ep-primary-soft)", border: "1.5px solid #E25938", color: "#E25938", borderRadius: 10, fontWeight: 800, fontSize: 14, cursor: "pointer", boxShadow: "0 6px 14px rgba(0,0,0,0.12)" }}>ADD</button>
                     ) : (
-                      <div style={{ width: 88, height: 36, background: "#FF5A1F", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "space-between", boxShadow: "0 6px 14px rgba(255,90,31,0.35)" }}>
-                        <button onClick={() => handleSetQty(item.id, qty - 1)} style={{ width: 30, height: 36, border: "none", background: "transparent", color: "#fff", fontSize: 20, fontWeight: 800, cursor: "pointer" }}>−</button>
+                      <div role="group" aria-label={`${item.name} quantity`} style={{ width: 132, height: 44, background: "#E25938", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "space-between", boxShadow: "0 6px 14px rgba(226,89,56,0.35)" }}>
+                        <button onClick={() => handleSetQty(item.id, qty - 1)} aria-label={`Remove one ${item.name}`} style={{ width: 44, height: 44, border: "none", background: "transparent", color: "#fff", fontSize: 20, fontWeight: 800, cursor: "pointer" }}>−</button>
                         <span style={{ color: "#fff", fontWeight: 800, fontSize: 15 }}>{qty}</span>
-                        <button onClick={() => handleSetQty(item.id, qty + 1)} style={{ width: 30, height: 36, border: "none", background: "transparent", color: "#fff", fontSize: 20, fontWeight: 800, cursor: "pointer" }}>+</button>
+                        <button onClick={() => handleSetQty(item.id, qty + 1)} aria-label={`Add one ${item.name}`} style={{ width: 44, height: 44, border: "none", background: "transparent", color: "#fff", fontSize: 20, fontWeight: 800, cursor: "pointer" }}>+</button>
                       </div>
                     )}
                   </div>
@@ -4008,7 +4013,7 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
       )}
 
       {cartCount > 0 && !cartOpen && !activeModal && (
-        <button onClick={() => setCartOpen(true)} style={{ position: "fixed", bottom: 20, left: "50%", transform: "translateX(-50%)", width: "calc(100% - 28px)", maxWidth: 440, background: "linear-gradient(135deg, #FF5A1F 0%, #E04814 100%)", color: "#fff", border: "none", borderRadius: 16, padding: "15px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", fontWeight: 800, fontSize: 16, cursor: "pointer", zIndex: 55, boxShadow: "0 12px 30px rgba(255,90,31,0.45)" }}>
+        <button onClick={() => setCartOpen(true)} className="ep-bottom-cart" aria-label={`Open cart with ${cartCount} items and total ${inr(finalTotal)}`}>
           <span>🛒 {cartCount} item{cartCount > 1 ? "s" : ""}</span><span>{inr(finalTotal)} ➔</span>
         </button>
       )}
@@ -4052,7 +4057,7 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
 
       {(cartOpen || activeModal) && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "flex-end", zIndex: 70 }} onClick={() => { setCartOpen(false); setActiveModal(null); setConfirmedBooking(null); }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", width: "100%", maxWidth: 480, margin: "0 auto", borderRadius: "24px 24px 0 0", padding: "24px 20px 30px", maxHeight: "85vh", overflowY: "auto" }} className="slide-up">
+          <div onClick={(e) => e.stopPropagation()} className="ep-slide-drawer" style={{ background: "var(--ep-surface)", width: "100%", maxWidth: 480, margin: "0 auto", borderRadius: "24px 24px 0 0", padding: "24px 20px 30px", maxHeight: "85vh", overflowY: "auto", boxShadow: "var(--ep-shadow-lg)" }}>
 
             {cartOpen && (
               <>
@@ -4296,6 +4301,14 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
               <div style={{ background: COLORS.paper, padding: "6px 12px", borderRadius: 10, fontSize: 12, fontWeight: 700, color: COLORS.copper }}>
                 {inr(getOrderTotal(o))}
               </div>
+            </div>
+
+            <div className="ep-status-progress" role="progressbar" aria-label="Order status" aria-valuemin={1} aria-valuemax={4} aria-valuenow={Math.max(1, Math.min(4, (["new","preparing","ready","served"].includes(o.status) ? ["new","preparing","ready","served"].indexOf(o.status) + 1 : o.status === "out_for_delivery" ? 3 : 1)))}>
+              {["Placed", "Preparing", "Ready", "Served"].map((label, idx) => {
+                const statusIndex = ["new","preparing","ready","served"].includes(o.status) ? ["new","preparing","ready","served"].indexOf(o.status) : o.status === "out_for_delivery" ? 2 : 0;
+                const state = idx < statusIndex ? "done" : idx === statusIndex ? "current" : "pending";
+                return <div key={label} className="ep-status-progress__step" data-state={state}>{label}</div>;
+              })}
             </div>
 
             {/* TIMELINE */}
@@ -8175,7 +8188,15 @@ const unsubBookings = !staffRole ? () => {} : onSnapshot(collection(db, "booking
   };
 
   if (loading) {
-    return (<div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: COLORS.paper, fontWeight: 700, fontSize: 18, color: COLORS.copper }}>🍽️ Loading Eat & Park POS...</div>);
+    return (
+      <div role="status" aria-label="Loading Eat and Park POS" style={{ minHeight: "100vh", maxWidth: 480, margin: "0 auto", padding: 16, background: "var(--ep-bg)" }}>
+        <div className="ep-skeleton" style={{ height: 64, marginBottom: 16 }} />
+        <div className="ep-skeleton" style={{ height: 44, marginBottom: 16 }} />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
+          {[0,1,2,3].map((n) => <div key={n} className="ep-skeleton" style={{ height: 150 }} />)}
+        </div>
+      </div>
+    );
   }
 
   return (

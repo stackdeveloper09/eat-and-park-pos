@@ -1785,7 +1785,7 @@ function KOTView({ C, isMobile, orders, setOrders, readOnly = false }) {
           const late = mins >= 15;
           const aging = Math.min(100, (mins / 20) * 100);
           return (
-            <div key={o.id} style={{ background: isNew ? C.redLight : C.amberLight, border: `2px solid ${late ? C.red : isNew ? C.red : C.amber}`, borderRadius: 12, padding: isMobile ? 12 : 16, animation: late ? "lateBlink 1.2s infinite" : "none", overflow: "hidden", position: "relative" }}>
+            <div key={o.id} className="ep-card" style={{ background: isNew ? C.redLight : C.amberLight, border: `2px solid ${late ? C.red : isNew ? C.red : C.amber}`, borderRadius: 12, padding: isMobile ? 12 : 16, animation: late ? "lateBlink 1.2s infinite" : "none", overflow: "hidden", position: "relative" }}>
               <div style={{ height: 4, background: C.line, borderRadius: 2, marginBottom: 12, overflow: "hidden" }}>
                 <div style={{ width: `${aging}%`, height: "100%", background: mins < 10 ? C.green : mins < 15 ? C.amber : C.red, transition: "width 0.5s" }} />
               </div>
