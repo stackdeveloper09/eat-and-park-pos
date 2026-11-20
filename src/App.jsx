@@ -4050,8 +4050,8 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
       )}
 
       {(cartOpen || activeModal) && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "flex-end", zIndex: 70 }} onClick={() => { setCartOpen(false); setActiveModal(null); setConfirmedBooking(null); }}>
-          <div onClick={(e) => e.stopPropagation()} className="ep-slide-drawer" style={{ background: "var(--ep-surface)", width: "100%", maxWidth: 480, margin: "0 auto", borderRadius: "24px 24px 0 0", padding: "24px 20px 30px", maxHeight: "85vh", overflowY: "auto", boxShadow: "var(--ep-shadow-lg)" }}>
+        <div className={cartOpen ? "ep-checkout-overlay" : undefined} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: cartOpen ? undefined : "flex-end", padding: cartOpen ? undefined : 0, zIndex: 70 }} onClick={() => { setCartOpen(false); setActiveModal(null); setConfirmedBooking(null); }}>
+          <div onClick={(e) => e.stopPropagation()} className={cartOpen ? "ep-slide-drawer ep-checkout-drawer" : "ep-slide-drawer"} style={{ background: "var(--ep-surface)", width: cartOpen ? undefined : "100%", maxWidth: cartOpen ? undefined : 480, margin: "0 auto", borderRadius: cartOpen ? undefined : "24px 24px 0 0", padding: cartOpen ? undefined : "24px 20px 30px", maxHeight: cartOpen ? undefined : "85vh", overflowY: "auto", boxShadow: "var(--ep-shadow-lg)" }}>
 
             {cartOpen && (
               <>
@@ -4061,12 +4061,12 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
   const qty = getCartQty(entry);
   const hasOverride = entry.priceOverride != null && entry.priceOverride !== item.price;
   return (
-    <div key={id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, padding: "12px", background: COLORS.paper, borderRadius: 12 }}>
+    <div key={id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 12, padding: "14px 16px", background: "#20283A", border: "1px solid #30394C", borderRadius: 14 }}>
       <div>
-        <div style={{ fontSize: 15, fontWeight: 700, color: COLORS.ink }}>{item.name}</div>
+        <div style={{ fontSize: 15, fontWeight: 700, color: "#F5F7FB" }}>{item.name}</div>
         {hasOverride && (
-          <div style={{ fontSize: 11, color: COLORS.error, fontWeight: 700, marginTop: 2 }}>
-            ⚡ Deal: ₹{entry.priceOverride} <span style={{ textDecoration: 'line-through', color: COLORS.textLight }}>₹{item.price}</span>
+          <div style={{ fontSize: 11, color: "#FF8A80", fontWeight: 700, marginTop: 4 }}>
+            ⚡ Deal: ₹{entry.priceOverride} <span style={{ textDecoration: 'line-through', color: "#AAB4C3" }}>₹{item.price}</span>
           </div>
         )}
       </div>
@@ -4076,9 +4076,9 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
 })}
 
                 <div style={{ display: "flex", gap: 12, marginTop: 20, marginBottom: 16 }}>
-                  {!guestMode && <button onClick={() => { setFulfillmentMode("dine_in"); setOrderType("dine_in"); setCustAddress(""); setCustExactAddress(""); setCustPinCode(""); }} style={{ flex: 1, padding: "12px", border: `2px solid ${fulfillmentMode === "dine_in" ? COLORS.copper : COLORS.line}`, background: fulfillmentMode === "dine_in" ? COLORS.copper : "#fff", color: fulfillmentMode === "dine_in" ? "#fff" : COLORS.ink, borderRadius: 12, fontWeight: 800, cursor: "pointer" }}>🍽️ Dine-in</button>}
-                  {!guestMode && <button onClick={() => { if (!parcelOpenNow()) { showToast(PARCEL_MSG, 'warning'); return; } setFulfillmentMode("takeaway"); setOrderType("parcel"); setCustAddress(""); setCustExactAddress(""); setCustPinCode(""); }} style={{ flex: 1, padding: "12px", border: `2px solid ${fulfillmentMode === "takeaway" ? COLORS.copper : COLORS.line}`, background: fulfillmentMode === "takeaway" ? COLORS.copper : "#fff", color: fulfillmentMode === "takeaway" ? "#fff" : COLORS.ink, borderRadius: 12, fontWeight: 800, cursor: "pointer" }}>🛍️ Takeaway</button>}
-                  {!guestMode && <button onClick={() => { if (!parcelOpenNow()) { showToast(PARCEL_MSG, 'warning'); return; } setFulfillmentMode("delivery"); setOrderType("parcel"); }} style={{ flex: 1, padding: "12px", border: `2px solid ${fulfillmentMode === "delivery" ? COLORS.copper : COLORS.line}`, background: fulfillmentMode === "delivery" ? COLORS.copper : "#fff", color: fulfillmentMode === "delivery" ? "#fff" : COLORS.ink, borderRadius: 12, fontWeight: 800, cursor: "pointer" }}>🛵 Delivery</button>}
+                  {!guestMode && <button onClick={() => { setFulfillmentMode("dine_in"); setOrderType("dine_in"); setCustAddress(""); setCustExactAddress(""); setCustPinCode(""); }} style={{ flex: 1, padding: "12px", border: `2px solid ${fulfillmentMode === "dine_in" ? COLORS.copper : "#30394C"}`, background: fulfillmentMode === "dine_in" ? COLORS.copper : "#161F2F", color: "#F5F7FB", borderRadius: 12, fontWeight: 800, cursor: "pointer" }}>🍽️ Dine-in</button>}
+                  {!guestMode && <button onClick={() => { if (!parcelOpenNow()) { showToast(PARCEL_MSG, 'warning'); return; } setFulfillmentMode("takeaway"); setOrderType("parcel"); setCustAddress(""); setCustExactAddress(""); setCustPinCode(""); }} style={{ flex: 1, padding: "12px", border: `2px solid ${fulfillmentMode === "takeaway" ? COLORS.copper : "#30394C"}`, background: fulfillmentMode === "takeaway" ? COLORS.copper : "#161F2F", color: "#F5F7FB", borderRadius: 12, fontWeight: 800, cursor: "pointer" }}>🛍️ Takeaway</button>}
+                  {!guestMode && <button onClick={() => { if (!parcelOpenNow()) { showToast(PARCEL_MSG, 'warning'); return; } setFulfillmentMode("delivery"); setOrderType("parcel"); }} style={{ flex: 1, padding: "12px", border: `2px solid ${fulfillmentMode === "delivery" ? COLORS.copper : "#30394C"}`, background: fulfillmentMode === "delivery" ? COLORS.copper : "#161F2F", color: "#F5F7FB", borderRadius: 12, fontWeight: 800, cursor: "pointer" }}>🛵 Delivery</button>}
                 </div>
 
                 <div style={{ marginBottom: 16 }}>
@@ -4092,7 +4092,7 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
                   </div>)}
                 </div>
 
-                <div style={{ display: guestMode ? "none" : "block", background: COLORS.paper2, padding: 16, borderRadius: 16, marginBottom: 16 }}>
+                <div style={{ display: guestMode ? "none" : "block", background: "#161F2F", border: "1px solid #273449", padding: 16, borderRadius: 16, marginBottom: 16 }}>
                   <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 10 }}>🔐 Quick OTP</div>
                   <div id="otp-recaptcha"></div>
                   {!isLoggedIn ? (
