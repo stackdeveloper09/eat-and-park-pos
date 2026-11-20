@@ -3636,7 +3636,7 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
   const inputStyle = { padding: "12px 16px", border: `1.5px solid ${COLORS.line}`, borderRadius: 12, fontSize: 16, width: "100%", boxSizing: "border-box" };
 
   return (
-    <div style={{ maxWidth: viewMode === "desktop" ? 1100 : 480, margin: "0 auto", paddingBottom: cartCount ? 120 : 60, background: "#0B111A", color: "#fff", minHeight: "100vh", position: "relative" }}>
+    <div className="ep-customer-menu" style={{ width: "100%", maxWidth: 1100, minWidth: 0, margin: "0 auto", padding: "0 12px", paddingBottom: cartCount ? 120 : 60, background: "var(--ep-bg)", color: "var(--text)", minHeight: "100vh", position: "relative", overflowX: "hidden" }}>
       {toast && <Toast message={toast} type={toastType} />}
 
       
@@ -3948,30 +3948,29 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
             <div style={{ fontSize: 13, lineHeight: 1.5 }}>{EMPTY_STATES[emptyReason].subtitle}</div>
           </div>
         )}
-        <div style={{ display: "grid", gridTemplateColumns: viewMode === "desktop" ? "repeat(auto-fill, minmax(340px, 1fr))" : "1fr", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 340px), 1fr))", alignItems: "stretch", gap: 12 }}>
           {filteredItems.map((item) => {
             const qty = getCartQty(cart[item.id]);
             const fav = favorites.includes(item.id);
             return (
-              <div key={item.id} className="ep-card" style={{ display: "flex", gap: 12, padding: 14, background: "var(--ep-surface)", border: "1px solid " + (qty > 0 ? "#E25938" : "var(--ep-border)"), borderRadius: 16, opacity: item.available ? 1 : 0.5, alignItems: "flex-start", color: "var(--ep-text)" }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+              <div key={item.id} className="ep-card" style={{ display: "flex", width: "100%", height: "100%", minWidth: 0, gap: 12, padding: 14, background: "var(--card-bg)", border: `1px solid ${qty > 0 ? "var(--ep-primary)" : "var(--border)"}`, borderRadius: 16, opacity: item.available ? 1 : 0.5, alignItems: "stretch", color: "var(--text)", textAlign: "left" }}>
+                <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap", minHeight: 20 }}>
                     <VegDot veg={item.veg} />
-                    {item.isBestseller && <span style={{ fontSize: 10, color: "#FF8C5A", fontWeight: 800, letterSpacing: "0.04em", textTransform: "uppercase" }}>★ Bestseller</span>}
-                    {searchQuery.trim() && <span style={{ fontSize: 10, color: "#8B9BB4", fontWeight: 700 }}>{item.category}</span>}
+                    {item.isBestseller && <span style={{ fontSize: 10, color: "var(--ep-primary)", fontWeight: 800, letterSpacing: "0.04em", textTransform: "uppercase" }}>★ Bestseller</span>}
                   </div>
-                  <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 16, fontWeight: 700, color: "#fff", lineHeight: 1.3, marginBottom: 3 }}>{item.name}</div>
-                  {item.portion && <div style={{ fontSize: 11, color: "#8B9BB4", fontWeight: 600, marginBottom: 4 }}>{item.portion}</div>}
-                  <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 16, fontWeight: 800, color: "#FF8C5A", marginBottom: 6 }}>{inr(item.price)}</div>
-                  {item.desc && <div style={{ fontSize: 12, color: "#8B9BB4", lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{item.desc}</div>}
+                  <div style={{ fontFamily: "var(--ep-font)", fontSize: 16, fontWeight: 800, color: "var(--text)", lineHeight: 1.3, marginBottom: 5, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{item.name}</div>
+                  {item.portion && <div style={{ display: "inline-flex", alignItems: "center", minHeight: 24, padding: "2px 9px", borderRadius: 999, background: "var(--ep-surface-alt)", color: "var(--text-muted)", border: "1px solid var(--border)", fontSize: 11, fontWeight: 700, marginBottom: 6 }}>{item.portion}</div>}
+                  {item.desc && <div style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{item.desc}</div>}
+                  <div style={{ fontFamily: "var(--ep-font)", fontSize: 16, fontWeight: 800, color: "var(--ep-primary)", marginTop: "auto", paddingTop: 8 }}>{inr(item.price)}</div>
                 </div>
-                <div style={{ width: 132, flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center" }}>
-                  <div style={{ position: "relative", width: 104, height: 104 }}>
-                    <div style={{ position: "absolute", inset: 0, borderRadius: 14, background: "#1E293B", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 34 }}>🍽️</div>
-                    {item.image ? <img src={item.image} alt={item.name} loading="lazy" className="keep-color" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", borderRadius: 14, filter: item.available ? "none" : "grayscale(1)" }} onError={(e) => { e.target.style.display = "none"; }} /> : null}
-                    <button onClick={() => toggleFavorite(item.id)} aria-label="Favorite" style={{ position: "absolute", top: 5, right: 5, width: 28, height: 28, borderRadius: "50%", border: "none", background: "rgba(11,17,26,0.7)", color: fav ? "#FFB800" : "#fff", fontSize: 15, cursor: "pointer" }}>{fav ? "★" : "☆"}</button>
+                <div style={{ width: 110, flex: "0 0 110px", display: "flex", flexDirection: "column", alignItems: "center", paddingBottom: 16 }}>
+                  <div style={{ position: "relative", width: 110, height: 110, flexShrink: 0 }}>
+                    <div style={{ position: "absolute", inset: 0, borderRadius: 14, background: "var(--ep-surface-alt)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 34 }}>🍽️</div>
+                    {item.image ? <img src={item.image} alt={item.name} loading="lazy" className="keep-color" style={{ position: "absolute", inset: 0, width: 110, height: 110, objectFit: "cover", borderRadius: 14, filter: item.available ? "none" : "grayscale(1)" }} onError={(e) => { e.target.style.display = "none"; }} /> : null}
+                    <button onClick={() => toggleFavorite(item.id)} aria-label={`Favorite ${item.name}`} style={{ position: "absolute", top: 4, right: 4, width: 40, height: 40, minHeight: 40, borderRadius: "50%", border: "none", background: "rgba(11,17,26,0.7)", color: fav ? "#FFB800" : "#fff", fontSize: 15, cursor: "pointer" }}>{fav ? "★" : "☆"}</button>
                   </div>
-                  <div style={{ marginTop: -17, position: "relative", zIndex: 1 }}>
+                  <div style={{ marginTop: -22, position: "relative", zIndex: 1 }}>
                     {!item.available ? (
                       <div style={{ background: "#451A1A", color: "#EF4444", borderRadius: 10, fontWeight: 800, fontSize: 11, padding: "9px 12px", whiteSpace: "nowrap" }}>Out of stock</div>
                     ) : qty === 0 ? (
