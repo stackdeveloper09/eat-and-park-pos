@@ -34,7 +34,7 @@ if (typeof window !== "undefined") {
 import React, { useState, useEffect, useRef, useCallback, useMemo, memo } from "react";
 import QRGenerator from './QRGenerator';
 import { db, auth, authReady } from "./firebase";
-import { isDeliveryOrder } from "./lib/orderRules";
+import { isDeliveryOrder, nextKitchenStatus } from "./lib/orderRules";
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, RecaptchaVerifier, linkWithPhoneNumber, PhoneAuthProvider, signInWithCredential, setPersistence, browserLocalPersistence } from "firebase/auth";
 import {
   collection, doc, setDoc, onSnapshot, updateDoc, deleteDoc,
@@ -5429,9 +5429,11 @@ ${billNotes ? `<div style="font-size:10px;margin-top:8px;border-top:1px dashed #
                       <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
                         {o.status === "out_for_delivery" ? (
                           <div style={{ flex: 1, padding: "10px 8px", borderRadius: 12, fontWeight: 800, fontSize: 13, border: "1px dashed " + COLORS.info, color: COLORS.info, textAlign: "center", display: "flex", alignItems: "center", justifyContent: "center" }}>With Rider</div>
+                        ) : status === "ready" && o.orderType === "parcel" && isDeliveryOrder(o) ? (
+                          <div style={{ flex: 1, padding: "10px 8px", borderRadius: 12, fontWeight: 800, fontSize: 13, border: "1px dashed " + COLORS.info, color: COLORS.info, textAlign: "center", display: "flex", alignItems: "center", justifyContent: "center" }}>Rider Pending</div>
                         ) : (
                           <button onClick={(e) => { e.stopPropagation(); advanceStatus(o.id, status); }} style={{ flex: 1, padding: "10px 8px", border: "none", borderRadius: 12, fontWeight: 800, fontSize: 13, cursor: "pointer", background: status === "ready" ? COLORS.sage : (status === "preparing" ? COLORS.copper : COLORS.ink), color: "#fff" }}>
-                            {status === "new" ? "👨‍🍳 Start Cooking" : status === "preparing" ? "✅ Mark Ready" : status === "ready" && o.orderType === "parcel" && isDeliveryOrder(o) ? "🛵 Send to Rider" : "🍽️ Mark Served"}
+                            {status === "new" ? "👨‍🍳 Start Cooking" : status === "preparing" ? "✅ Mark Ready" : "🍽️ Mark Served"}
                           </button>
                         )}
                         <button onClick={(e) => { e.stopPropagation(); printKotSlip(o); }} title="Print KOT (Kitchen)" style={{ background: isSelected ? 'rgba(255,255,255,0.25)' : COLORS.paper2, color: isSelected ? '#fff' : COLORS.ink, border: 'none', width: 44, height: 38, borderRadius: 12, fontSize: 18, cursor: 'pointer' }}>🍳</button>
@@ -8022,12 +8024,10 @@ const unsubBookings = !staffRole ? () => {} : onSnapshot(collection(db, "booking
   };
 
   const advanceStatus = async (orderId, currentStatus) => {
-const order = orders.find(o => o.id === orderId);
-    const idx = STATUS_FLOW.indexOf(currentStatus);
-    let nextStatus = STATUS_FLOW[Math.min(idx + 1, STATUS_FLOW.length - 1)];
-    if (currentStatus === "ready" && order?.orderType === "parcel" && !isDeliveryOrder(order)) nextStatus = "served";
-    if (currentStatus === "out_for_delivery") return;
-    if (nextStatus === currentStatus) return;
+    const order = orders.find(o => o.id === orderId);
+    if (!order) return;
+    const nextStatus = nextKitchenStatus({ ...order, status: currentStatus });
+    if (!nextStatus) return;
 
     const updateData = { status: nextStatus, ...(nextStatus === "served" ? { servedAt: Date.now() } : {}) };
     if (order?.kots?.length) {

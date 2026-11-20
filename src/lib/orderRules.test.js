@@ -1,6 +1,6 @@
 import { describe, test, expect } from "vitest";
 import {
-  isActiveOrder, isOpenDineIn, isOpenParcel, isDue, paidOrders, paidRevenue, buildPaidPatch, isDeliveryOrder, OPEN_WINDOW_MS,
+  isActiveOrder, isOpenDineIn, isOpenParcel, isDue, paidOrders, paidRevenue, buildPaidPatch, isDeliveryOrder, nextKitchenStatus, OPEN_WINDOW_MS,
 } from "./orderRules.js";
 
 const now = () => Date.now();
@@ -49,6 +49,27 @@ describe("order rules", () => {
       fulfillmentMode: "takeaway",
       customer: { address: "TAKEAWAY (At Table)" },
     }))).toBe(false);
+  });
+  test("ready customer delivery order waits for the rider panel", () => {
+    expect(nextKitchenStatus(mk({
+      orderType: "parcel",
+      fulfillmentMode: "delivery",
+      status: "ready",
+    }))).toBe(null);
+  });
+  test("ready takeaway parcel can be served by staff", () => {
+    expect(nextKitchenStatus(mk({
+      orderType: "parcel",
+      fulfillmentMode: "takeaway",
+      status: "ready",
+    }))).toBe("served");
+  });
+  test("ready dine-in order can be served by staff", () => {
+    expect(nextKitchenStatus(mk({ status: "ready" }))).toBe("served");
+  });
+  test("kitchen progression remains new to preparing to ready", () => {
+    expect(nextKitchenStatus(mk({ status: "new" }))).toBe("preparing");
+    expect(nextKitchenStatus(mk({ status: "preparing" }))).toBe("ready");
   });
   test(".filter(isOpenDineIn) index ki wajah se galat nahi hota", () => {
     const list = [mk({}), mk({}), mk({ paid: true })];

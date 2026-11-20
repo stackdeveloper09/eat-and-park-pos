@@ -13,6 +13,14 @@ export const isDeliveryOrder = (order) => {
   return Boolean(address) && !/^takeaway\b/i.test(address);
 };
 
+export const nextKitchenStatus = (order) => {
+  if (order.status === "new") return "preparing";
+  if (order.status === "preparing") return "ready";
+  if (order.status === "ready" && order.orderType === "parcel" && isDeliveryOrder(order)) return null;
+  if (order.status === "ready") return "served";
+  return null;
+};
+
 // Due = udhaar, abhi paisa nahi aaya
 export const isDue = (o) => o.paymentStatus === "due" && !o.paid && !isCancelled(o);
 

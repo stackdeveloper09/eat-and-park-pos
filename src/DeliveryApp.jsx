@@ -380,7 +380,7 @@ export default function DeliveryApp() {
             {selectedOrder.status !== "served" ? (
               <>
                 {/* STATUS: READY - Pickup Button */}
-{!["new", "preparing", "out_for_delivery", "served"].includes(selectedOrder.status) && (
+{selectedOrder.status === "ready" && (
 
                   <button onClick={() => markOutForDelivery(selectedOrder.id)} style={{ width: "100%", padding: 16, background: "#F59E0B", color: "#fff", border: "none", borderRadius: 12, fontWeight: 900, fontSize: 16, cursor: "pointer", marginBottom: 10, boxShadow: "0 4px 12px rgba(245,158,11,0.3)" }}>
                     🛵 Mark Out for Delivery
