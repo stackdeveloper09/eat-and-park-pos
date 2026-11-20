@@ -10,7 +10,7 @@ service cloud.firestore {
     function staffRole() {
       return get(/databases/$(db)/documents/staff/$(request.auth.uid)).data.role;
     }
-    function isStaff() { return hasStaffDoc() && staffRole() in ['admin', 'owner', 'manager', 'staff', 'waiter']; }
+    function isStaff() { return hasStaffDoc() && staffRole() in ['admin', 'owner', 'manager', 'staff', 'waiter', 'cashier', 'chef']; }
     function isAdmin() { return hasStaffDoc() && staffRole() in ['admin', 'owner', 'manager']; }
 
     // 🔥 NEW — delivery boy
@@ -155,14 +155,25 @@ service cloud.firestore {
     match /vendorPayments/{id} { allow read, write: if isAdmin(); }
     match /dayClose/{id}       { allow read, write: if isAdmin(); }
     match /feedback/{id} {
-      allow create: if isStaff();
+      allow create: if isStaff() || signedIn();
       allow read: if isAdmin();
+    }
+
+    match /couponUsage/{id} {
+      allow read: if isAdmin();
+      allow create: if signedIn();
+      allow update, delete: if isAdmin();
     }
 
     match /auditLogs/{id} {
       allow read: if isAdmin();
       allow create: if isStaff();
       allow update, delete: if false;
+    }
+    match /staffAttendance/{id} {
+      allow read: if isAdmin();
+      allow create: if isStaff();
+      allow update, delete: if isAdmin();
     }
   }
 }

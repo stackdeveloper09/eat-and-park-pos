@@ -839,6 +839,14 @@ const isOwner = ["owner", "admin", "manager"].includes(String(staffData?.role ||
             setUser(u);
             setStaffData(s.data());
             setWaiterName(s.data().name || "Staff");
+            addDoc(collection(db, "staffAttendance"), {
+              uid: u.uid,
+              name: s.data().name || "Staff",
+              role: s.data().role || "staff",
+              action: "login",
+              at: Date.now(),
+              date: invDateKey(),
+            }).catch(() => {});
           } else {
             console.warn("⚠️ staff account inactive or missing");
             await signOut(auth);
@@ -988,6 +996,16 @@ const isOwner = ["owner", "admin", "manager"].includes(String(staffData?.role ||
     try {
       Object.keys(localStorage).filter(k => k.startsWith("staff_draft_")).forEach(k => { try { localStorage.removeItem(k); } catch (e) {} });
     } catch (e) {}
+    if (user) {
+      addDoc(collection(db, "staffAttendance"), {
+        uid: user.uid,
+        name: staffData?.name || waiterName || "Staff",
+        role: staffData?.role || "staff",
+        action: "logout",
+        at: Date.now(),
+        date: invDateKey(),
+      }).catch(() => {});
+    }
     setCart({}); setSelectedTable(null); setBillOrder(null); setAddMoreMode(false);
     setEstItems([]); try { localStorage.removeItem("staff_estimate_items"); } catch (e) {}
     await signOut(auth); setUser(null); setStaffData(null);
@@ -1098,7 +1116,7 @@ const isOwner = ["owner", "admin", "manager"].includes(String(staffData?.role ||
           { id: "dashboard", label: "📊 Dashboard" }, { id: "history", label: "🕘 History" },
           { id: "inventory", label: "🧾 Saman" + (lowCount ? " (" + lowCount + ")" : "") }, { id: "audit", label: "📝 Audit" },
           { id: "expenses", label: "💸 Kharcha" }, { id: "bookings", label: "📅 Bookings" },
-          { id: "reports", label: "📈 Reports" }, { id: "import", label: "📥 Import" }, { id: "customers", label: "🎂 Customers" },
+          { id: "reports", label: "📈 Reports" }, { id: "attendance", label: "🕒 Attendance" }, { id: "import", label: "📥 Import" }, { id: "customers", label: "🎂 Customers" },
         ].map(tab => (
           <button key={tab.id} onClick={() => { haptic(); setActiveTab(tab.id); setSelectedTable(null); setOrdersRange(null); }} style={{ padding: isMobile ? "12px 12px" : "15px 20px", border: "none", background: "transparent", color: activeTab === tab.id ? C.gold : C.gray, fontWeight: 700, fontSize: isMobile ? 12 : 13, cursor: "pointer", borderBottom: activeTab === tab.id ? `3px solid ${C.gold}` : "3px solid transparent", whiteSpace: "nowrap", flexShrink: 0 }}>{tab.label}</button>
         ))}
@@ -1170,13 +1188,14 @@ const isOwner = ["owner", "admin", "manager"].includes(String(staffData?.role ||
             onBill={(order) => { haptic(); setBillOrder(order); setSelectedTable("parcel"); setCart({}); setAddMoreMode(false); }}
             onAdd={(order) => { haptic(); setBillOrder(order); setSelectedTable("parcel"); setCart({}); setAddMoreMode(true); }} />
         )}
-        {activeTab === "kot" && <KOTView C={C} isMobile={isMobile} orders={orders} setOrders={setOrders} readOnly={true} />}
+        {activeTab === "kot" && <KOTView C={C} isMobile={isMobile} orders={orders} setOrders={setOrders} readOnly={false} />}
 {activeTab === "inventory" && <InventoryPanel C={C} isMobile={isMobile} isOwner={isOwner} waiterName={waiterName} />}
         {activeTab === "stock" && <StockPanel C={C} isMobile={isMobile} menu={menu} />}
         {activeTab === "history" && <HistoryView C={C} isMobile={isMobile} isOwner={isOwner} />}
         {activeTab === "audit" && <AuditLogView C={C} isMobile={isMobile} />}
         {activeTab === "expenses" && <ExpensesView C={C} isMobile={isMobile} isOwner={isOwner} waiterName={waiterName} />}
         {activeTab === "reports" && <ReportsView C={C} isMobile={isMobile} isOwner={isOwner} waiterName={waiterName} menu={menu} />}
+        {activeTab === "attendance" && <AttendanceView C={C} isMobile={isMobile} isOwner={isOwner} />}
         {activeTab === "import" && <ImportView C={C} isMobile={isMobile} isOwner={isOwner} waiterName={waiterName} onDone={() => {}} />}
         {activeTab === "customers" && <CustomersView C={C} isMobile={isMobile} isOwner={isOwner} waiterName={waiterName} orders={orders} loyaltyUsers={loyaltyUsers} />}
         {activeTab === "dashboard" && (
@@ -1206,7 +1225,7 @@ const isOwner = ["owner", "admin", "manager"].includes(String(staffData?.role ||
               <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginTop: 4 }}>{staffData?.name || "Staff"}</div>
               <div style={{ fontSize: 12, color: C.gray, marginTop: 2 }}>{staffData?.role || "waiter"}</div>
             </div>
-            {[{ id: "parcel", label: "Parcel", icon: "🛍️" }, { id: "tables", label: "Tables", icon: "🍽️" }, { id: "orders", label: "Orders", icon: "📋" }, { id: "kot", label: "Kitchen", icon: "🍳" }, { id: "dashboard", label: "Dashboard", icon: "📊" }, { id: "history", label: "History", icon: "🕘" }, { id: "stock", label: "Stock", icon: "📦" }, { id: "bookings", label: "Bookings", icon: "📅" }, { id: "inventory", label: "Saman", icon: "🧾" }, { id: "audit", label: "Audit Log", icon: "📝" }, { id: "expenses", label: "Kharcha", icon: "💸" }, { id: "reports", label: "Reports / P&L", icon: "📈" }, { id: "import", label: "Bulk Import", icon: "📥" }, { id: "customers", label: "Customers", icon: "🎂" }].map(tab => (
+            {[{ id: "parcel", label: "Parcel", icon: "🛍️" }, { id: "tables", label: "Tables", icon: "🍽️" }, { id: "orders", label: "Orders", icon: "📋" }, { id: "kot", label: "Kitchen", icon: "🍳" }, { id: "dashboard", label: "Dashboard", icon: "📊" }, { id: "history", label: "History", icon: "🕘" }, { id: "stock", label: "Stock", icon: "📦" }, { id: "bookings", label: "Bookings", icon: "📅" }, { id: "inventory", label: "Saman", icon: "🧾" }, { id: "audit", label: "Audit Log", icon: "📝" }, { id: "expenses", label: "Kharcha", icon: "💸" }, { id: "reports", label: "Reports / P&L", icon: "📈" }, { id: "attendance", label: "Attendance", icon: "🕒" }, { id: "import", label: "Bulk Import", icon: "📥" }, { id: "customers", label: "Customers", icon: "🎂" }].map(tab => (
               <button key={tab.id} onClick={() => { haptic(); setActiveTab(tab.id); setSidebarOpen(false); setSelectedTable(null); setOrdersRange(null); }} style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 16px", border: "none", background: activeTab === tab.id ? C.goldLight : "transparent", color: activeTab === tab.id ? C.gold : C.ink, fontWeight: 700, fontSize: 14, borderRadius: 10, cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
                 <span style={{ fontSize: 18 }}>{tab.icon}</span><span>{tab.label}</span>
               </button>
@@ -4361,6 +4380,43 @@ function ExpensesView({ C, isMobile, isOwner, waiterName }) {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// STAFF ATTENDANCE
+// ---------------------------------------------------------------------------
+function AttendanceView({ C, isMobile, isOwner }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!isOwner) { setLoading(false); return; }
+    const unsub = onSnapshot(query(collection(db, "staffAttendance"), orderBy("at", "desc"), limit(200)),
+      (s) => { setRows(s.docs.map((d) => ({ id: d.id, ...d.data() }))); setLoading(false); },
+      () => setLoading(false));
+    return () => unsub();
+  }, [isOwner]);
+
+  if (!isOwner) return <div style={{ textAlign: "center", padding: 50, color: C.gray }}><div style={{ fontSize: 44 }}>🔒</div><div style={{ fontWeight: 800, marginTop: 8 }}>Attendance sirf owner dekh sakta hai</div></div>;
+  return (
+    <div>
+      <h2 style={{ margin: "0 0 14px", fontSize: isMobile ? 18 : 22, color: C.ink }}>Staff Attendance</h2>
+      {loading && <div style={{ color: C.gray, textAlign: "center", padding: 30 }}>Attendance load ho rahi hai...</div>}
+      {!loading && rows.length === 0 && <div style={{ color: C.gray, textAlign: "center", padding: 30 }}>Abhi koi attendance record nahi</div>}
+      {rows.map((r) => (
+        <div key={r.id} style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 10, padding: 12, marginBottom: 8, display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontWeight: 800, color: C.ink, fontSize: 13 }}>{r.name || "Staff"} <span style={{ color: C.gray, fontWeight: 700 }}>({r.role || "staff"})</span></div>
+            <div style={{ color: C.gray, fontSize: 11, marginTop: 3 }}>{r.date || ""}</div>
+          </div>
+          <div style={{ textAlign: "right", flexShrink: 0 }}>
+            <div style={{ color: r.action === "login" ? C.green : C.red, fontWeight: 900, fontSize: 12 }}>{r.action === "login" ? "LOGIN" : "LOGOUT"}</div>
+            <div style={{ color: C.gray, fontSize: 11, marginTop: 3 }}>{r.at ? new Date(r.at).toLocaleTimeString("en-IN") : ""}</div>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

@@ -2544,6 +2544,7 @@ function CustomerView({ menu, orders, placeOrder, bookEvent, gallery, offersList
   const [activeModal, setActiveModal] = useState(null);
   const [myOrderIds, setMyOrderIds] = useState([]);
   const [orderType, setOrderType] = useState("dine_in");
+  const [language, setLanguage] = useState(() => localStorage.getItem("eatpark_language") || "hi");
   const [fulfillmentMode, setFulfillmentMode] = useState("dine_in");
   const [custName, setCustName] = useState(() => localStorage.getItem("enp_cust_name") || "");
   const [custPhone, setCustPhone] = useState(() => localStorage.getItem("enp_cust_phone") || "");
@@ -2565,8 +2566,11 @@ function CustomerView({ menu, orders, placeOrder, bookEvent, gallery, offersList
   const [appliedDiscount, setAppliedDiscount] = useState(0);
   const [couponMin, setCouponMin] = useState(0);
   const [bookType, setBookType] = useState("table");
-  const [bookData, setBookData] = useState({ name: "", phone: "", date: "", time: "", guests: "" });
+  const [bookData, setBookData] = useState({ name: "", phone: "", date: "", time: "", guests: "", table: "" });
   const [confirmedBooking, setConfirmedBooking] = useState(null);
+  const [orderRating, setOrderRating] = useState(0);
+  const [orderComment, setOrderComment] = useState("");
+  const [ratingOrderId, setRatingOrderId] = useState("");
   const [favorites, setFavorites] = useLocalStorage('favorites', []);
   const [scheduleDate, setScheduleDate] = useState("");
   const [scheduleTime, setScheduleTime] = useState("");
@@ -3010,6 +3014,14 @@ const mine = orders.filter((o) => o.createdBy === uid && !o.waiter && !o.takenBy
       subtotal: total, finalTotal: total
     };
     await placeOrder(order);
+    if (appliedDiscount > 0 && couponCode.trim()) {
+      addDoc(collection(db, "couponUsage"), {
+        code: couponCode.toUpperCase().trim(),
+        orderId: order.id,
+        phone: custPhone || "",
+        usedAt: Date.now(),
+      }).catch(() => {});
+    }
     playNotificationSound();
     const typeLabel = ot === "parcel" ? "🛍️ *PARCEL ORDER*" : `🍽️ Table ${t}`;
     const waText = `🧑‍🍳 *WAITER ORDER* (#${orderId.slice(1, 5).toUpperCase()})\n${typeLabel} · Waiter: ${waiterName || "Staff"}\nCustomer: ${customerName}\n` + items.map(i => `• ${i.qty}x ${i.name}`).join("\n") + (orderNotes ? `\nNotes: ${orderNotes}` : "") + `\n\nTotal: ₹${total}`;
@@ -3273,10 +3285,37 @@ const handleWaiterPinSubmitOld = () => {
     );
   };
 
+  const submitOrderRating = async (order) => {
+    if (!orderRating) { showToast("Pehle stars rating do", "error"); return; }
+    try {
+      await addDoc(collection(db, "feedback"), {
+        orderId: order.id,
+        table: order.table || null,
+        rating: orderRating,
+        comment: orderComment.trim(),
+        items: (order.items || []).map((it) => ({ itemId: it.itemId, name: it.name })),
+        customer: custName || "Customer",
+        phone: custPhone || "",
+        createdAt: Date.now(),
+      });
+      setRatingOrderId(order.id);
+      setOrderRating(0);
+      setOrderComment("");
+      showToast("Thank you! Rating save ho gayi", "success");
+    } catch (e) {
+      showToast("Rating save nahi hui: " + (e.message || "error"), "error");
+    }
+  };
+
   const handleApplyCoupon = () => {
     const code = couponCode.toUpperCase().trim();
     const c = (coupons || []).find((x) => String(x.code).toUpperCase() === code);
     if (!c || !c.active) { showToast("❌ Invalid coupon", 'error'); return; }
+    const today = new Date();
+    const todayKey = toLocalISODate(today);
+    if (c.startDate && todayKey < c.startDate) { showToast("⏳ Coupon abhi valid nahi hai", 'warning'); return; }
+    if (c.endDate && todayKey > c.endDate) { showToast("⌛ Coupon expire ho chuka hai", 'warning'); return; }
+    if (Number(c.usageLimit) > 0 && Number(c.usedCount) >= Number(c.usageLimit)) { showToast("📛 Coupon ki usage limit khatam ho gayi", 'warning'); return; }
     if (c.firstOrderOnly && myOrderIds.length > 0) { showToast("💳 First order only", 'warning'); return; }
     if (Number(c.minCoins) > 0 && currentCoins < Number(c.minCoins)) { showToast(`👑 Requires ${c.minCoins}+ coins`, 'warning'); return; }
     const min = Number(c.min) || 0;
@@ -3349,7 +3388,7 @@ const handleWaiterPinSubmitOld = () => {
       const initialItems = cartItems.map(([id, entry]) => {
         const m = menu.find((x) => x.id === id);
         return {
-          itemId: id, name: m.name, portion: m.portion || "",
+          itemId: id, name: m.name, category: m.category || "Anya", portion: m.portion || "",
           price: Math.round((getCartLineTotal(entry, m) / Math.max(1, getCartQty(entry))) * 100) / 100, originalPrice: m.price,
           qty: getCartQty(entry), kotNumber: 1
         };
@@ -3375,6 +3414,7 @@ const handleWaiterPinSubmitOld = () => {
         rewardUsedCoins: claimedReward ? claimedReward.cost : 0,
         earnedCoins: newEarnedCoins,
         discount: appliedDiscount,
+        couponCode: appliedDiscount > 0 ? couponCode.toUpperCase().trim() : "",
         couponDiscountAmount: discountAmount,
         loyaltyDiscount, loyaltyTier: loyaltyTier.name, vipDiscount,
         deliveryFee, subtotal, finalTotal,
@@ -3453,9 +3493,26 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
     showToast("⚠️ Fill all fields", 'error'); 
     return; 
   }
+  if (bookType === "table" && !bookData.table) {
+    showToast("⚠️ Table select karo", 'error');
+    return;
+  }
+  if (bookType === "table") {
+    try {
+      const conflict = await getDocs(query(collection(db, "bookings"), where("date", "==", bookData.date), where("time", "==", bookData.time), where("table", "==", Number(bookData.table))));
+      if (conflict.docs.some((d) => d.data().status !== "cancelled")) {
+        showToast("⚠️ Ye table is date/time par already booked hai", 'error');
+        return;
+      }
+    } catch (e) {
+      showToast("⚠️ Booking availability check nahi hui", 'error');
+      return;
+    }
+  }
 
   const newBooking = { 
     ...bookData, 
+    table: bookType === "table" ? Number(bookData.table) : null,
     type: bookType, 
     id: uid("b"), 
     status: "pending", 
@@ -3722,6 +3779,7 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
           <div style={{ fontFamily: "'Outfit', sans-serif", fontWeight: 800, fontSize: 17, color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>Eat & Park</div>
           <div style={{ fontSize: 11, color: "#8B9BB4", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{RESTAURANT.tagline}</div>
         </div>
+        <button onClick={() => { const next = language === "hi" ? "en" : "hi"; setLanguage(next); localStorage.setItem("eatpark_language", next); }} title="Hindi / English" style={{ height: 40, borderRadius: 10, border: "1px solid #273449", background: "#161F2F", color: "#fff", padding: "0 9px", fontWeight: 800, fontSize: 12, cursor: "pointer", flexShrink: 0 }}>{language === "hi" ? "EN" : "हि"}</button>
         <select value={table} onChange={(e) => setTable(Number(e.target.value))} style={{ background: "#161F2F", color: "#fff", border: "1px solid #273449", borderRadius: 10, padding: "9px 8px", fontWeight: 800, fontSize: 13, outline: "none" }}>
           {Array.from({ length: 20 }, (_, i) => i + 1).map((n) => (<option key={n} value={n} style={{ color: "#000" }}>Table {n}</option>))}
         </select>
@@ -4197,7 +4255,7 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
 
             {activeModal === 'loyalty' && (<><ModalHeader title="VIP Loyalty 👑" onClose={() => setActiveModal(null)} /><div style={{ background: "linear-gradient(135deg, #1A1A1A 0%, #3C3C3C 100%)", borderRadius: 20, padding: 28, color: "#fff", textAlign: "center" }}><div style={{ fontSize: 48, marginBottom: 12 }}>💎</div><div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 26, fontWeight: 800, marginBottom: 10, color: COLORS.gold }}>Eat & Park Elite</div><div style={{ fontSize: 15, marginBottom: 24 }}>Become premium for <strong style={{ fontSize: 20, color: COLORS.gold }}>₹999/month</strong>. Get 20% off!</div><div style={{ background: "#fff", padding: 20, borderRadius: 16 }}><div style={{ color: COLORS.ink, fontWeight: 800, marginBottom: 10 }}>Scan to Join</div><img src={loyaltyQrSrc} alt="" style={{ width: 160, height: 160 }} /></div></div></>)}
 
-            {activeModal === 'booking' && (<><ModalHeader title={bookType === "party" ? "Party Booking 🎉" : "Table Booking 🍽️"} onClose={() => { setActiveModal(null); setConfirmedBooking(null); }} />{confirmedBooking ? (<div style={{ textAlign: "center", padding: "30px 0" }}><div style={{ fontSize: 56, marginBottom: 16 }}>✅</div><h3 style={{ fontSize: 28, fontWeight: 800, marginBottom: 10 }}>Request Sent!</h3><button onClick={() => { setActiveModal(null); setConfirmedBooking(null); }} style={{ background: COLORS.paper2, border: 'none', padding: '12px', borderRadius: 12, width: '100%', fontWeight: 800, cursor: 'pointer' }}>Close</button></div>) : (<div style={{ display: "flex", flexDirection: "column", gap: 14 }}><input type="text" placeholder="Name" value={bookData.name} onChange={(e) => setBookData({ ...bookData, name: e.target.value })} style={inputStyle} /><input type="tel" placeholder="Phone" value={bookData.phone} onChange={(e) => setBookData({ ...bookData, phone: e.target.value })} style={inputStyle} /><div style={{ display: "flex", gap: 14 }}><input type="date" value={bookData.date} onChange={(e) => setBookData({ ...bookData, date: e.target.value })} style={inputStyle} /><input type="time" value={bookData.time} onChange={(e) => setBookData({ ...bookData, time: e.target.value })} style={inputStyle} /></div><input type="number" placeholder="Guests" value={bookData.guests} onChange={(e) => setBookData({ ...bookData, guests: e.target.value })} style={inputStyle} /><button onClick={handleBooking} style={{ background: COLORS.copper, color: '#fff', border: 'none', borderRadius: 14, padding: '13px 20px', fontWeight: 800, cursor: 'pointer' }}>Send Request</button></div>)}</>)}
+            {activeModal === 'booking' && (<><ModalHeader title={bookType === "party" ? "Party Booking 🎉" : "Table Booking 🍽️"} onClose={() => { setActiveModal(null); setConfirmedBooking(null); }} />{confirmedBooking ? (<div style={{ textAlign: "center", padding: "30px 0" }}><div style={{ fontSize: 56, marginBottom: 16 }}>✅</div><h3 style={{ fontSize: 28, fontWeight: 800, marginBottom: 10 }}>Request Sent!</h3><button onClick={() => { setActiveModal(null); setConfirmedBooking(null); }} style={{ background: COLORS.paper2, border: 'none', padding: '12px', borderRadius: 12, width: '100%', fontWeight: 800, cursor: 'pointer' }}>Close</button></div>) : (<div style={{ display: "flex", flexDirection: "column", gap: 14 }}><input type="text" placeholder="Name" value={bookData.name} onChange={(e) => setBookData({ ...bookData, name: e.target.value })} style={inputStyle} /><input type="tel" placeholder="Phone" value={bookData.phone} onChange={(e) => setBookData({ ...bookData, phone: e.target.value })} style={inputStyle} /><div style={{ display: "flex", gap: 14 }}><input type="date" value={bookData.date} onChange={(e) => setBookData({ ...bookData, date: e.target.value })} style={inputStyle} /><input type="time" value={bookData.time} onChange={(e) => setBookData({ ...bookData, time: e.target.value })} style={inputStyle} /></div>{bookType === "table" && <select value={bookData.table} onChange={(e) => setBookData({ ...bookData, table: e.target.value })} style={inputStyle}><option value="">Table select karo</option>{Array.from({ length: 20 }, (_, i) => i + 1).map((n) => <option key={n} value={n}>Table {n}</option>)}</select>}<input type="number" placeholder="Guests" value={bookData.guests} onChange={(e) => setBookData({ ...bookData, guests: e.target.value })} style={inputStyle} /><button onClick={handleBooking} style={{ background: COLORS.copper, color: '#fff', border: 'none', borderRadius: 14, padding: '13px 20px', fontWeight: 800, cursor: 'pointer' }}>Send Request</button></div>)}</>)}
 
             {activeModal === 'track' && (
   <>
@@ -4287,6 +4345,20 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
                 );
               })}
             </div>
+
+            {o.status === "served" && ratingOrderId !== o.id && (
+              <div style={{ background: COLORS.paper, borderRadius: 12, padding: 12, marginBottom: 12 }}>
+                <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 8, color: COLORS.ink }}>Order ki rating dein</div>
+                <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                  {[1,2,3,4,5].map((n) => (
+                    <button key={n} onClick={() => setOrderRating(n)} style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 24, filter: orderRating >= n ? "none" : "grayscale(1) opacity(.35)" }}>⭐</button>
+                  ))}
+                </div>
+                <input value={orderComment} onChange={(e) => setOrderComment(e.target.value)} placeholder="Dish / service ke baare me comment" style={{ ...inputStyle, marginBottom: 8 }} />
+                <button onClick={() => submitOrderRating(o)} style={{ width: "100%", border: "none", borderRadius: 10, background: COLORS.copper, color: "#fff", padding: 10, fontWeight: 800, cursor: "pointer" }}>Submit Rating</button>
+              </div>
+            )}
+            {ratingOrderId === o.id && <div style={{ textAlign: "center", color: COLORS.sage, fontWeight: 800, fontSize: 12, marginBottom: 12 }}>⭐ Rating submitted - thank you!</div>}
 
             <div style={{ borderTop: `1px dashed ${COLORS.line}`, paddingTop: 15, display: 'flex', gap: 10 }}>
               <button onClick={() => setActiveModal(null)} style={{ flex: 1, background: "transparent", color: COLORS.copper, border: `2px solid ${COLORS.copper}`, borderRadius: 12, padding: "10px", fontWeight: 800, cursor: 'pointer', fontSize: 13 }}>Close</button>
@@ -5969,7 +6041,7 @@ function DussehraRateEditor({ items, onSave, unavail = [], toggleAvail }) {
 function CouponsAdmin({ coupons, onSave }) {
   const [draft, setDraft] = useState(coupons);
   const [dirty, setDirty] = useState(false);
-  const [add, setAdd] = useState({ code: "", discount: "", min: "" });
+  const [add, setAdd] = useState({ code: "", discount: "", min: "", usageLimit: "", endDate: "" });
   useEffect(() => { if (!dirty) setDraft(coupons); }, [coupons, dirty]);
 
   const fld = { padding: "9px 10px", border: `1.5px solid ${COLORS.line}`, borderRadius: 8, fontSize: 14, boxSizing: "border-box", fontFamily: "inherit" };
@@ -5979,7 +6051,11 @@ function CouponsAdmin({ coupons, onSave }) {
     code: String(x.code || "").toUpperCase().replace(/\s+/g, ""),
     discount: Number(x.discount) || 0,
     min: Number(x.min) || 0,
-    minCoins: Number(x.minCoins) || 0
+    minCoins: Number(x.minCoins) || 0,
+    usageLimit: Number(x.usageLimit) || 0,
+    usedCount: Number(x.usedCount) || 0,
+    startDate: x.startDate || "",
+    endDate: x.endDate || ""
   }));
   const check = (list) => {
     const codes = list.map((x) => x.code);
@@ -6008,11 +6084,11 @@ function CouponsAdmin({ coupons, onSave }) {
     setDraft(next); setDirty(false); onSave(next);
   };
   const addCoupon = () => {
-    const next = clean([...draft, { code: add.code, discount: add.discount, min: add.min, active: true, firstOrderOnly: false, minCoins: 0 }]);
+    const next = clean([...draft, { code: add.code, discount: add.discount, min: add.min, usageLimit: add.usageLimit, endDate: add.endDate, active: true, firstOrderOnly: false, minCoins: 0, usedCount: 0 }]);
     const err = check(next);
     if (err) { alert("⚠️ " + err); return; }
     setDraft(next); setDirty(false); onSave(next);
-    setAdd({ code: "", discount: "", min: "" });
+    setAdd({ code: "", discount: "", min: "", usageLimit: "", endDate: "" });
   };
 
   return (
@@ -6042,6 +6118,14 @@ function CouponsAdmin({ coupons, onSave }) {
               <label style={lbl}>Min Coins</label>
               <input type="number" min={0} value={c.minCoins || 0} onChange={(e) => edit(i, { minCoins: e.target.value })} style={{ ...fld, width: "100%", textAlign: "center" }} />
             </div>
+            <div style={{ width: 110 }}>
+              <label style={lbl}>Usage Limit</label>
+              <input type="number" min={0} value={c.usageLimit || 0} onChange={(e) => edit(i, { usageLimit: e.target.value })} style={{ ...fld, width: "100%", textAlign: "center" }} />
+            </div>
+            <div style={{ width: 132 }}>
+              <label style={lbl}>Valid Till</label>
+              <input type="date" value={c.endDate || ""} onChange={(e) => edit(i, { endDate: e.target.value })} style={{ ...fld, width: "100%" }} />
+            </div>
             <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 700, cursor: "pointer", paddingBottom: 10 }}>
               <input type="checkbox" checked={!!c.firstOrderOnly} onChange={(e) => edit(i, { firstOrderOnly: e.target.checked })} /> Sirf pehla order
             </label>
@@ -6063,6 +6147,8 @@ function CouponsAdmin({ coupons, onSave }) {
           <input placeholder="CODE" value={add.code} onChange={(e) => setAdd({ ...add, code: e.target.value.toUpperCase() })} style={{ ...fld, flex: 2, minWidth: 120 }} />
           <input type="number" placeholder="%" value={add.discount} onChange={(e) => setAdd({ ...add, discount: e.target.value })} style={{ ...fld, width: 80 }} />
           <input type="number" placeholder="Min ₹" value={add.min} onChange={(e) => setAdd({ ...add, min: e.target.value })} style={{ ...fld, width: 90 }} />
+          <input type="number" min={0} placeholder="Usage limit" value={add.usageLimit} onChange={(e) => setAdd({ ...add, usageLimit: e.target.value })} style={{ ...fld, width: 110 }} />
+          <input type="date" value={add.endDate} onChange={(e) => setAdd({ ...add, endDate: e.target.value })} style={{ ...fld, width: 132 }} />
           <button onClick={addCoupon} style={{ ...fld, background: COLORS.sage, color: "#fff", border: "none", fontWeight: 800, cursor: "pointer" }}>+ Add</button>
         </div>
       </div>
