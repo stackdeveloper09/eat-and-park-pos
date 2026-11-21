@@ -10,9 +10,13 @@
   font-family: Inter, "Segoe UI", system-ui, sans-serif;
 }
 
-.attendance-login,
-.attendance-dashboard {
+.attendance-login {
   width: min(100%, 460px);
+  margin: auto;
+}
+
+.attendance-dashboard {
+  width: min(100%, 900px);
   margin: auto;
 }
 

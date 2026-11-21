@@ -56,13 +56,65 @@ describe("other collections", () => {
   test("owner can write dayClose", () => assertSucceeds(setDoc(doc(as("o1"), "dayClose/2026-10-30"), { revenue: 1 })));
   test("admin can list staff profiles for payroll", () => assertSucceeds(getDocs(collection(as("a1"), "staff"))));
   test("waiter cannot list staff profiles", () => assertFails(getDocs(collection(as("w1"), "staff"))));
+  test("admin can create an Auth-UID staff profile", () => assertSucceeds(setDoc(doc(as("a1"), "staff/new1"), {
+    name: "New Staff", role: "staff", monthlySalary: 24000, active: true,
+  })));
+  test("waiter cannot create a staff profile", () => assertFails(setDoc(doc(as("w1"), "staff/new2"), {
+    name: "New Staff", role: "staff", monthlySalary: 24000, active: true,
+  })));
+  test("admin can save GPS settings and the new radius is enforced", async () => {
+    await assertSucceeds(setDoc(doc(as("a1"), "settings/restaurant"), {
+      lat: 28.6139, lng: 77.209, radius: 150,
+    }));
+    await assertSucceeds(addDoc(collection(as("w1"), "staffAttendance"), {
+      uid: "w1", name: "Waiter", role: "waiter", action: "present",
+      at: Date.now(), date: "2026-11-21", distanceMeters: 120,
+    }));
+    await assertSucceeds(setDoc(doc(as("a1"), "settings/restaurant"), {
+      lat: 28.6139, lng: 77.209, radius: 100,
+    }));
+  });
+  test("admin can manually mark staff attendance", () => assertSucceeds(addDoc(collection(as("a1"), "attendance"), {
+    staffId: "w1", date: "2026-11-21", status: "Present", markedBy: "Admin",
+  })));
+  test("waiter cannot manually mark attendance", () => assertFails(addDoc(collection(as("w1"), "attendance"), {
+    staffId: "w1", date: "2026-11-21", status: "Present", markedBy: "Admin",
+  })));
+  test("staff can request an advance and admin can approve it", async () => {
+    const request = await addDoc(collection(as("w1"), "advances"), {
+      staffId: "w1",
+      staffName: "Waiter",
+      amount: 1000,
+      reason: "Travel",
+      status: "Pending",
+      createdAt: Date.now(),
+      month: "2026-11",
+    });
+    await assertSucceeds(getDocs(query(collection(as("w1"), "advances"), where("staffId", "==", "w1"))));
+    await assertSucceeds(getDocs(query(collection(as("a1"), "advances"), where("status", "==", "Pending"))));
+    await assertSucceeds(updateDoc(doc(as("a1"), "advances", request.id), {
+      status: "Approved", approvedBy: "a1", approvedAt: Date.now(),
+    }));
+    await assertFails(updateDoc(doc(as("w1"), "advances", request.id), { status: "Approved" }));
+  });
   test("admin can save a staff salary", () => assertSucceeds(setDoc(doc(as("a1"), "staffPayroll/w1"), {
     uid: "w1", monthlySalary: 30000, updatedAt: Date.now(), updatedBy: "a1",
   })));
+  test("staff can read their own salary", () => assertSucceeds(getDoc(doc(as("w1"), "staffPayroll/w1"))));
   test("waiter cannot write staff salary", () => assertFails(setDoc(doc(as("w1"), "staffPayroll/w1"), {
     uid: "w1", monthlySalary: 30000, updatedAt: Date.now(), updatedBy: "w1",
   })));
   test("staff can mark attendance only for self and inside the radius", async () => {
+    await assertSucceeds(addDoc(collection(as("w1"), "attendance"), {
+      staffId: "w1", date: "2026-11-21", status: "Present", distanceMeters: 80,
+    }));
+    await assertSucceeds(getDocs(query(collection(as("w1"), "attendance"), where("staffId", "==", "w1"))));
+    await assertFails(addDoc(collection(as("w1"), "attendance"), {
+      staffId: "a1", date: "2026-11-21", status: "Present", distanceMeters: 80,
+    }));
+    await assertFails(addDoc(collection(as("w1"), "attendance"), {
+      staffId: "w1", date: "2026-11-21", status: "Present", distanceMeters: 120,
+    }));
     await assertSucceeds(addDoc(collection(as("w1"), "staffAttendance"), {
       uid: "w1", name: "Waiter", role: "waiter", action: "present",
       at: Date.now(), date: "2026-11-21", distanceMeters: 80,
