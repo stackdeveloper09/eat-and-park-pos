@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { beforeAll, afterAll, describe, test } from "vitest";
 import { initializeTestEnvironment, assertFails, assertSucceeds } from "@firebase/rules-unit-testing";
-import { doc, getDoc, setDoc, updateDoc, addDoc, deleteDoc, collection, getDocs } from "firebase/firestore";
+import { doc, getDoc, setDoc, updateDoc, addDoc, deleteDoc, collection, getDocs, query, where } from "firebase/firestore";
 
 let env;
 const as = (uid) => env.authenticatedContext(uid).firestore();
@@ -18,6 +18,7 @@ beforeAll(async () => {
     await setDoc(doc(db, "staff/w1"), { role: "waiter" });
     await setDoc(doc(db, "staff/a1"), { role: "admin" });
     await setDoc(doc(db, "staff/o1"), { role: "owner" });
+    await setDoc(doc(db, "staff/d1"), { role: "delivery" });
     await setDoc(doc(db, "settings/privatePins"), { pin: "x" });
     await setDoc(doc(db, "settings/menu"), { items: [] });
     await setDoc(doc(db, "orders/paid1"), { paid: true, status: "served", finalTotal: 100, createdBy: "c1" });
@@ -53,4 +54,35 @@ describe("other collections", () => {
   test("waiter cannot write inventory", () => assertFails(setDoc(doc(as("w1"), "inventory/items"), { list: [] })));
   test("waiter cannot read dayClose", () => assertFails(getDoc(doc(as("w1"), "dayClose/2026-10-30"))));
   test("owner can write dayClose", () => assertSucceeds(setDoc(doc(as("o1"), "dayClose/2026-10-30"), { revenue: 1 })));
+  test("admin can list staff profiles for payroll", () => assertSucceeds(getDocs(collection(as("a1"), "staff"))));
+  test("waiter cannot list staff profiles", () => assertFails(getDocs(collection(as("w1"), "staff"))));
+  test("admin can save a staff salary", () => assertSucceeds(setDoc(doc(as("a1"), "staffPayroll/w1"), {
+    uid: "w1", monthlySalary: 30000, updatedAt: Date.now(), updatedBy: "a1",
+  })));
+  test("waiter cannot write staff salary", () => assertFails(setDoc(doc(as("w1"), "staffPayroll/w1"), {
+    uid: "w1", monthlySalary: 30000, updatedAt: Date.now(), updatedBy: "w1",
+  })));
+  test("staff can mark attendance only for self and inside the radius", async () => {
+    await assertSucceeds(addDoc(collection(as("w1"), "staffAttendance"), {
+      uid: "w1", name: "Waiter", role: "waiter", action: "present",
+      at: Date.now(), date: "2026-11-21", distanceMeters: 80,
+    }));
+    await assertSucceeds(getDocs(query(collection(as("w1"), "staffAttendance"), where("uid", "==", "w1"))));
+    await assertFails(addDoc(collection(as("w1"), "staffAttendance"), {
+      uid: "w1", name: "Waiter", role: "waiter", action: "present",
+      at: Date.now(), date: "2026-11-21", distanceMeters: 120,
+    }));
+    await assertFails(addDoc(collection(as("w1"), "staffAttendance"), {
+      uid: "a1", name: "Admin", role: "admin", action: "present",
+      at: Date.now(), date: "2026-11-21", distanceMeters: 80,
+    }));
+  });
+  test("admin can create an approved staff advance", () => assertSucceeds(addDoc(collection(as("a1"), "staffAdvances"), {
+    uid: "w1", amount: 1000, month: "2026-11", status: "approved",
+    createdAt: Date.now(), approvedBy: "a1",
+  })));
+  test("delivery staff can mark their own attendance", () => assertSucceeds(addDoc(collection(as("d1"), "staffAttendance"), {
+    uid: "d1", name: "Rider", role: "delivery", action: "present",
+    at: Date.now(), date: "2026-11-21", distanceMeters: 80,
+  })));
 });

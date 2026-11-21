@@ -2,6 +2,7 @@ import { tryRecover } from "./recover";
 /* eslint-disable */
 import React, { useState, useEffect, useMemo, useRef, useContext, createContext, useCallback } from "react";
 import { db, auth } from "./firebase";
+import StaffPayroll from "./Staff";
 import { assertEditable, resolveVendorId } from "./lib/guards";
 import { PAID_STATUSES, OPEN_WINDOW_MS, isOpenParcel, isOpenDineIn, isActiveOrder, paidOrders, paidRevenue, buildPaidPatch, isDeliveryOrder, nextKitchenStatus } from "./lib/orderRules";
 import { paymentBreakdown, partialPayment, splitPayment } from "./lib/billing";
@@ -1104,8 +1105,8 @@ const isOwner = ["owner", "admin", "manager"].includes(String(staffData?.role ||
           { id: "dashboard", label: "📊 Dashboard" }, { id: "history", label: "🕘 History" },
           { id: "inventory", label: "🧾 Saman" + (lowCount ? " (" + lowCount + ")" : "") }, { id: "audit", label: "📝 Audit" },
           { id: "expenses", label: "💸 Kharcha" }, { id: "bookings", label: "📅 Bookings" },
-          { id: "reports", label: "📈 Reports" }, { id: "attendance", label: "🕒 Attendance" }, { id: "import", label: "📥 Import" }, { id: "customers", label: "🎂 Customers" },
-        ].map(tab => (
+          { id: "reports", label: "📈 Reports" }, { id: "attendance", label: "👥 Staff & Payroll" }, { id: "import", label: "📥 Import" }, { id: "customers", label: "🎂 Customers" },
+        ].filter(tab => tab.id !== "attendance" || isOwner).map(tab => (
           <button key={tab.id} onClick={() => { haptic(); setActiveTab(tab.id); setSelectedTable(null); setOrdersRange(null); }} style={{ padding: isMobile ? "12px 12px" : "15px 20px", border: "none", background: "transparent", color: activeTab === tab.id ? C.gold : C.gray, fontWeight: 700, fontSize: isMobile ? 12 : 13, cursor: "pointer", borderBottom: activeTab === tab.id ? `3px solid ${C.gold}` : "3px solid transparent", whiteSpace: "nowrap", flexShrink: 0 }}>{tab.label}</button>
         ))}
       </div>
@@ -1213,7 +1214,7 @@ const isOwner = ["owner", "admin", "manager"].includes(String(staffData?.role ||
               <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginTop: 4 }}>{staffData?.name || "Staff"}</div>
               <div style={{ fontSize: 12, color: C.gray, marginTop: 2 }}>{staffData?.role || "waiter"}</div>
             </div>
-            {[{ id: "parcel", label: "Parcel", icon: "🛍️" }, { id: "tables", label: "Tables", icon: "🍽️" }, { id: "orders", label: "Orders", icon: "📋" }, { id: "kot", label: "Kitchen", icon: "🍳" }, { id: "dashboard", label: "Dashboard", icon: "📊" }, { id: "history", label: "History", icon: "🕘" }, { id: "stock", label: "Stock", icon: "📦" }, { id: "bookings", label: "Bookings", icon: "📅" }, { id: "inventory", label: "Saman", icon: "🧾" }, { id: "audit", label: "Audit Log", icon: "📝" }, { id: "expenses", label: "Kharcha", icon: "💸" }, { id: "reports", label: "Reports / P&L", icon: "📈" }, { id: "attendance", label: "Attendance", icon: "🕒" }, { id: "import", label: "Bulk Import", icon: "📥" }, { id: "customers", label: "Customers", icon: "🎂" }].map(tab => (
+            {[{ id: "parcel", label: "Parcel", icon: "🛍️" }, { id: "tables", label: "Tables", icon: "🍽️" }, { id: "orders", label: "Orders", icon: "📋" }, { id: "kot", label: "Kitchen", icon: "🍳" }, { id: "dashboard", label: "Dashboard", icon: "📊" }, { id: "history", label: "History", icon: "🕘" }, { id: "stock", label: "Stock", icon: "📦" }, { id: "bookings", label: "Bookings", icon: "📅" }, { id: "inventory", label: "Saman", icon: "🧾" }, { id: "audit", label: "Audit Log", icon: "📝" }, { id: "expenses", label: "Kharcha", icon: "💸" }, { id: "reports", label: "Reports / P&L", icon: "📈" }, { id: "attendance", label: "Staff & Payroll", icon: "👥" }, { id: "import", label: "Bulk Import", icon: "📥" }, { id: "customers", label: "Customers", icon: "🎂" }].filter(tab => tab.id !== "attendance" || isOwner).map(tab => (
               <button key={tab.id} onClick={() => { haptic(); setActiveTab(tab.id); setSidebarOpen(false); setSelectedTable(null); setOrdersRange(null); }} style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 16px", border: "none", background: activeTab === tab.id ? C.goldLight : "transparent", color: activeTab === tab.id ? C.gold : C.ink, fontWeight: 700, fontSize: 14, borderRadius: 10, cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
                 <span style={{ fontSize: 18 }}>{tab.icon}</span><span>{tab.label}</span>
               </button>
@@ -4380,28 +4381,33 @@ function AttendanceView({ C, isMobile, isOwner }) {
     if (!isOwner) { setLoading(false); return; }
     const unsub = onSnapshot(query(collection(db, "staffAttendance"), orderBy("at", "desc"), limit(200)),
       (s) => { setRows(s.docs.map((d) => ({ id: d.id, ...d.data() }))); setLoading(false); },
-      () => setLoading(false));
+      (error) => { console.error("Attendance records load failed:", error); setLoading(false); });
     return () => unsub();
   }, [isOwner]);
 
-  if (!isOwner) return <div style={{ textAlign: "center", padding: 50, color: C.gray }}><div style={{ fontSize: 44 }}>🔒</div><div style={{ fontWeight: 800, marginTop: 8 }}>Attendance sirf owner dekh sakta hai</div></div>;
+  if (!isOwner) return <div style={{ textAlign: "center", padding: 50, color: C.gray }}><div style={{ fontSize: 44 }}>🔒</div><div style={{ fontWeight: 800, marginTop: 8 }}>Staff payroll sirf owner dekh sakta hai</div></div>;
   return (
     <div>
-      <h2 style={{ margin: "0 0 14px", fontSize: isMobile ? 18 : 22, color: C.ink }}>Staff Attendance</h2>
+      <h2 style={{ margin: "0 0 14px", fontSize: isMobile ? 18 : 22, color: C.ink }}>Staff Attendance & Payroll</h2>
       {loading && <div style={{ color: C.gray, textAlign: "center", padding: 30 }}>Attendance load ho rahi hai...</div>}
       {!loading && rows.length === 0 && <div style={{ color: C.gray, textAlign: "center", padding: 30 }}>Abhi koi attendance record nahi</div>}
-      {rows.map((r) => (
-        <div key={r.id} style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 10, padding: 12, marginBottom: 8, display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontWeight: 800, color: C.ink, fontSize: 13 }}>{r.name || "Staff"} <span style={{ color: C.gray, fontWeight: 700 }}>({r.role || "staff"})</span></div>
-            <div style={{ color: C.gray, fontSize: 11, marginTop: 3 }}>{r.date || ""}</div>
+      {rows.map((r) => {
+        const actionLabel = r.action === "present" ? "PRESENT" : r.action === "login" ? "LOGIN" : "LOGOUT";
+        const actionColor = r.action === "present" ? C.green : r.action === "login" ? C.blue : C.gray;
+        return (
+          <div key={r.id} style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 10, padding: 12, marginBottom: 8, display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 800, color: C.ink, fontSize: 13 }}>{r.name || "Staff"} <span style={{ color: C.gray, fontWeight: 700 }}>({r.role || "staff"})</span></div>
+              <div style={{ color: C.gray, fontSize: 11, marginTop: 3 }}>{r.date || ""}{r.action === "present" && Number.isFinite(r.distanceMeters) ? ` · ${r.distanceMeters}m from restaurant` : ""}</div>
+            </div>
+            <div style={{ textAlign: "right", flexShrink: 0 }}>
+              <div style={{ color: actionColor, fontWeight: 900, fontSize: 12 }}>{actionLabel}</div>
+              <div style={{ color: C.gray, fontSize: 11, marginTop: 3 }}>{r.at ? new Date(r.at).toLocaleTimeString("en-IN") : ""}</div>
+            </div>
           </div>
-          <div style={{ textAlign: "right", flexShrink: 0 }}>
-            <div style={{ color: r.action === "login" ? C.green : C.red, fontWeight: 900, fontSize: 12 }}>{r.action === "login" ? "LOGIN" : "LOGOUT"}</div>
-            <div style={{ color: C.gray, fontSize: 11, marginTop: 3 }}>{r.at ? new Date(r.at).toLocaleTimeString("en-IN") : ""}</div>
-          </div>
-        </div>
-      ))}
+        );
+      })}
+      <StaffPayroll C={C} isMobile={isMobile} />
     </div>
   );
 }

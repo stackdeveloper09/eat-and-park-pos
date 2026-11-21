@@ -1,5 +1,5 @@
-const CACHE_NAME = "eat-and-park-shell-v1";
-const APP_PAGES = ["/", "/staff", "/delivery"];
+const CACHE_NAME = "eat-and-park-shell-v2";
+const APP_PAGES = ["/", "/staff", "/delivery", "/attendance"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil((async () => {
@@ -24,6 +24,7 @@ self.addEventListener("install", (event) => {
       "/manifest.json",
       "/staff-manifest.json",
       "/delivery-manifest.json",
+      "/attendance-manifest.json",
       "/icons/customer-180.png",
       "/icons/customer-192.png",
       "/icons/customer-512.png",

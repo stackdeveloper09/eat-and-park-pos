@@ -3,6 +3,7 @@ import fs from 'fs';
 const apps = {
   staff:    { manifest: '/staff-manifest.json',    title: 'Eat & Park Staff',    icon: '/icons/staff-180.png' },
   delivery: { manifest: '/delivery-manifest.json', title: 'Eat & Park Delivery', icon: '/icons/delivery-180.png' },
+  attendance: { manifest: '/attendance-manifest.json', title: 'Eat & Park Attendance', icon: '/icons/staff-180.png' },
 };
 
 const base = fs.readFileSync('dist/index.html', 'utf8');

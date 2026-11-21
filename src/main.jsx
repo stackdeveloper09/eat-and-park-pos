@@ -5,12 +5,14 @@ import './index.css'
 import './theme.css'
 import App from './App.jsx'
 import StaffApp from './StaffApp.jsx'
+import AttendanceApp from './AttendanceApp.jsx'
 
-// 🎯 URL check — agar /staff hai to StaffApp khule, warna purani App
-const isStaffUrl = window.location.pathname === '/staff' || window.location.pathname.startsWith('/staff/');
+const path = window.location.pathname.replace(/\/+$/, '') || '/';
+const isAttendanceUrl = path === '/attendance' || path.startsWith('/attendance/');
+const isStaffUrl = path === '/staff' || path.startsWith('/staff/');
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
-    {isStaffUrl ? <StaffApp /> : <App />}
+    {isAttendanceUrl ? <AttendanceApp /> : isStaffUrl ? <StaffApp /> : <App />}
   </StrictMode>,
 )
