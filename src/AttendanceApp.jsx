@@ -67,6 +67,39 @@ function logFirestoreAccessError(label, error, expectedUid) {
 }
 
 const MAX_GPS_ACCURACY_METERS = 60; // chahiye to kam/zyada karo
+
+function buildPayslipPdf(items) {
+  const esc = (s) => String(s ?? "").replace(/[^\x20-\x7E]/g, "?").replace(/([\\()])/g, "\\$1");
+  let content = "";
+  items.forEach((item) => {
+    if (item.line) {
+      content += `0.6 w 50 ${item.line} m 545 ${item.line} l S\n`;
+      return;
+    }
+    const size = item.size || 11;
+    content += `BT /${item.bold ? "F2" : "F1"} ${size} Tf ${item.x} ${item.y} Td (${esc(item.text)}) Tj ET\n`;
+  });
+  const objs = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>",
+    `<< /Length ${content.length} >>\nstream\n${content}endstream`,
+  ];
+  let pdf = "%PDF-1.4\n";
+  const offsets = [];
+  objs.forEach((obj, index) => {
+    offsets.push(pdf.length);
+    pdf += `${index + 1} 0 obj\n${obj}\nendobj\n`;
+  });
+  const xrefStart = pdf.length;
+  pdf += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n`
+    + offsets.map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("")
+    + `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF`;
+  return new Blob([pdf], { type: "application/pdf" });
+}
+
 const AUTO_CLOSE_GRACE_MINUTES = 120;
 
 function shiftEndMillis(date, shift) {
@@ -584,56 +617,69 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
     });
   }, [attendanceRecords, dataLoaded, shifts, staffUid, now]);
 
-  const downloadPayslip = () => {
-    const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-    const rows = [
-      ["Per day salary", formatCurrency(salaryCalculation.perDaySalary)],
-      ["Present days", selectedPresentDays],
-      ["Paid leave days", selectedPaidLeaveDays],
-      ["Gross salary", formatCurrency(salaryCalculation.grossSalary)],
-      ["Advance (approved)", `- ${formatCurrency(salaryCalculation.totalApprovedAdvance)}`],
-      ["Carry forward", formatCurrency(salaryCarryIn)],
-      ["Net payable", formatCurrency(salaryPayable)],
-      ["Paid", formatCurrency(salaryPaid)],
-      ["Balance", formatCurrency(salaryBalance)],
-      ["Status", salaryStatus],
+  const downloadPayslip = async () => {
+    const money = (v) => `Rs. ${Number(v || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const items = [
+      { text: "Eat & Park", x: 50, y: 790, size: 22, bold: true },
+      { text: `Salary Slip - ${selectedMonth}`, x: 50, y: 768, size: 12 },
+      { line: 755 },
     ];
-    const payments = selectedMonthPayments
-      .map((p) => `<tr><td>${esc(p.date || "-")}${p.note ? ` · ${esc(p.note)}` : ""}</td><td class="r">${esc(formatCurrency(Number(p.amount || 0)))}</td></tr>`)
-      .join("");
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Payslip ${esc(selectedMonth)}</title>
-<style>
-body{font-family:Arial,sans-serif;padding:24px;color:#111}
-h1{margin:0;font-size:22px} .sub{color:#555;margin:4px 0 18px}
-table{width:100%;border-collapse:collapse;margin-bottom:18px}
-td{padding:8px 6px;border-bottom:1px solid #ddd;font-size:14px}
-.r{text-align:right} .tot td{font-weight:bold;font-size:15px}
-h3{margin:16px 0 6px;font-size:15px}
-</style></head><body>
-<h1>Eat &amp; Park</h1>
-<div class="sub">Salary Slip · ${esc(selectedMonth)}</div>
-<table>
-<tr><td>Name</td><td class="r">${esc(displayName)}</td></tr>
-<tr><td>Role</td><td class="r">${esc(staff?.role || "staff")}</td></tr>
-<tr><td>Monthly salary</td><td class="r">${esc(formatCurrency(salaryMonthlyAmount))}</td></tr>
-</table>
-<table>${rows.map(([l, v], i) => `<tr class="${i === 6 || i === 8 ? "tot" : ""}"><td>${esc(l)}</td><td class="r">${esc(v)}</td></tr>`).join("")}</table>
-<h3>Payments</h3>
-<table>${payments || '<tr><td colspan="2">No payments</td></tr>'}</table>
-<div class="sub">Generated on ${esc(new Date().toLocaleDateString("en-IN"))}</div>
-</body></html>`;
-    const frame = document.createElement("iframe");
-    frame.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0";
-    document.body.appendChild(frame);
-    const w = frame.contentWindow;
-    w.document.open();
-    w.document.write(html);
-    w.document.close();
-    setTimeout(() => {
-      w.focus();
-      w.print();
-      setTimeout(() => frame.remove(), 60000);
-    }, 300);
+    let y = 733;
+    const addRow = (label, value, bold = false) => {
+      const valueText = String(value);
+      items.push({ text: label, x: 50, y, size: 12, bold });
+      items.push({ text: valueText, x: 545 - valueText.length * 6.2, y, size: 12, bold });
+      y -= 22;
+    };
+    addRow("Name", displayName);
+    addRow("Role", staff?.role || "staff");
+    addRow("Monthly salary", money(salaryMonthlyAmount));
+    items.push({ line: y + 10 });
+    y -= 10;
+    addRow("Per day salary", money(salaryCalculation.perDaySalary));
+    addRow("Present days", selectedPresentDays);
+    addRow("Paid leave days", selectedPaidLeaveDays);
+    addRow("Gross salary", money(salaryCalculation.grossSalary));
+    addRow("Advance (approved)", `- ${money(salaryCalculation.totalApprovedAdvance)}`);
+    addRow("Carry forward", money(salaryCarryIn));
+    addRow("Net payable", money(salaryPayable), true);
+    addRow("Paid", money(salaryPaid));
+    addRow("Balance", money(salaryBalance), true);
+    addRow("Status", salaryStatus);
+    items.push({ line: y + 10 });
+    y -= 14;
+    items.push({ text: "Payments", x: 50, y, size: 13, bold: true });
+    y -= 22;
+    if (selectedMonthPayments.length === 0) {
+      items.push({ text: "No payments", x: 50, y, size: 11 });
+    } else {
+      selectedMonthPayments.slice(0, 15).forEach((payment) => {
+        addRow(`${payment.date || "-"}${payment.note ? ` - ${payment.note}` : ""}`.slice(0, 50), money(payment.amount));
+      });
+    }
+    items.push({ text: `Generated on ${new Date().toLocaleDateString("en-IN")}`, x: 50, y: 40, size: 9 });
+
+    try {
+      const blob = buildPayslipPdf(items);
+      const fileName = `Payslip_${selectedMonth}.pdf`;
+      const file = new File([blob], fileName, { type: "application/pdf" });
+      if (navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title: fileName });
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (error) {
+      if (error?.name === "AbortError") return;
+      console.error("Payslip download failed:", error);
+      setProfileError(`Payslip download nahi hua: ${getErrorMessage(error)}`);
+    }
   };
 
   const login = async (event) => {
