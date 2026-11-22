@@ -1,12 +1,3 @@
-Haan bhai, yeh raha aapka Final Copy-Paste Code.
-
-Permission-denied isliye aa raha tha kyunki jab humne where("orderType", "==", "parcel") hataya, toh Firebase ne socha ki aap saare orders (including doosre staff/users ka data) fetch karna chahte hain. Lekin aapke Firestore Security Rules ne usko block kar diya.
-
-Maine query mein wapas where clause add kar diya hai taaki rules pass ho jayein, aur baaki saare features (Live Time, Alarm on Ready, ₹0 fix, PAID/UNPAID badges) bhi isme perfectly kaam karenge.
-
-Aap is code ko directly copy karke apni file mein replace kar dein:
-
-```javascript
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { db, auth } from "./firebase";
 import { isDeliveryOrder } from "./lib/orderRules";
@@ -523,4 +514,3 @@ export default function DeliveryApp() {
     </div>
   );
 }
-```
