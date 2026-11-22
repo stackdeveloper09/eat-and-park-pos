@@ -14,6 +14,7 @@ const timeAgo = (ts) => {
   if (h < 24) return h + "h ago";
   return Math.floor(h / 24) + "d ago";
 };
+
 const toMillis = (value) => {
   if (typeof value === "number") return value;
   if (value && typeof value.toMillis === "function") return value.toMillis();
@@ -22,8 +23,58 @@ const toMillis = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-const alertAudio = new Audio("https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3");
-alertAudio.volume = 1.0;
+let alertAudio = null;
+try {
+  alertAudio = new Audio("https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3");
+  alertAudio.volume = 1.0;
+} catch (e) {
+  alertAudio = null;
+}
+
+const playAlert = () => {
+  try {
+    if (!alertAudio) return;
+    alertAudio.currentTime = 0;
+    alertAudio.play().catch(() => {});
+    if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 500]);
+  } catch (e) {
+    /* ignore */
+  }
+};
+
+const statusLabel = (o) => {
+  if (o.status === "out_for_delivery") return "ON THE WAY";
+  if (o.status === "ready") return "READY TO PICK";
+  if (o.status === "preparing") return "COOKING";
+  if (o.status === "served") return "DELIVERED";
+  return "NEW ORDER";
+};
+
+const inputStyle = {
+  width: "100%",
+  padding: 14,
+  marginBottom: 10,
+  borderRadius: 10,
+  border: "1px solid #273449",
+  background: "#0B111A",
+  color: "#fff",
+  boxSizing: "border-box",
+};
+
+const navStyle = (active, color) => ({
+  display: "flex",
+  alignItems: "center",
+  gap: 12,
+  padding: 14,
+  background: active ? "#273449" : "transparent",
+  border: "none",
+  borderRadius: 10,
+  color: color || (active ? "#F59E0B" : "#fff"),
+  fontWeight: 700,
+  fontSize: 14,
+  cursor: "pointer",
+  textAlign: "left",
+});
 
 export default function DeliveryApp() {
   const [user, setUser] = useState(null);
@@ -31,24 +82,29 @@ export default function DeliveryApp() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loginError, setLoginError] = useState("");
-  
+
   const [activeOrders, setActiveOrders] = useState([]);
-  const [historyOrders, setHistoryOrders] = useState([]);
-  
+  const [servedOrders, setServedOrders] = useState([]);
+
   const [page, setPage] = useState("orders"); // orders | dashboard | history
   const [menuOpen, setMenuOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState(null);
+  const [busyId, setBusyId] = useState("");
 
   const prevOrdersRef = useRef([]);
   const isFirstLoad = useRef(true);
 
+  const myId = user ? (user.email || user.uid) : "";
+
   // Unlock audio on first user interaction
   useEffect(() => {
     const unlock = () => {
-      alertAudio.play().then(() => {
-        alertAudio.pause();
-        alertAudio.currentTime = 0;
-      }).catch(() => {});
+      if (alertAudio) {
+        alertAudio.play().then(() => {
+          alertAudio.pause();
+          alertAudio.currentTime = 0;
+        }).catch(() => {});
+      }
       document.removeEventListener("click", unlock);
       document.removeEventListener("touchstart", unlock);
     };
@@ -60,135 +116,147 @@ export default function DeliveryApp() {
     };
   }, []);
 
-  // Auth Check
+  // Auth check
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
+      if (!u) {
+        setUser(null);
+        setLoading(false);
+        return;
+      }
       try {
-      if (u) {
-        try {
-          const s = await getDoc(doc(db, "staff", u.uid));
-          if (s.exists() && s.data().role === "delivery" && s.data().active !== false) {
-            setUser(u);
-          } else {
-            await signOut(auth);
-            setLoginError("Ye account delivery boy ka nahi hai.");
-          }
-        } catch (e) { console.error(e); }
-      } else { setUser(null); }
-      setLoading(false);
+        const s = await getDoc(doc(db, "staff", u.uid));
+        const data = s.exists() ? s.data() : null;
+        if (data && data.role === "delivery" && data.active !== false) {
+          setUser(u);
+          setLoginError("");
+        } else {
+          await signOut(auth);
+          setLoginError("Ye account delivery boy ka nahi hai.");
+        }
+      } catch (e) {
+        console.error("Delivery staff verify failed:", e);
+        await signOut(auth).catch(() => {});
+        setLoginError("Account verify nahi hua: " + (e.code || e.message));
       } finally {
-        setLoading(false); // FIX-LOADING-ALWAYS
+        setLoading(false);
       }
     });
     return () => unsub();
   }, []);
 
-  // Fetch Orders
+  // Fetch parcel orders
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      setActiveOrders([]);
+      setServedOrders([]);
+      setSelectedOrder(null);
+      prevOrdersRef.current = [];
+      isFirstLoad.current = true;
+      return undefined;
+    }
+    prevOrdersRef.current = [];
+    isFirstLoad.current = true;
+
     const q = query(collection(db, "orders"), where("orderType", "==", "parcel"));
     const unsub = onSnapshot(q, (snap) => {
-    const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-
-
-      
-      // Strict Filter: Sirf valid delivery orders (No Walk-ins, No missing address/phone)
-            const validOrders = all.filter(o =>
-              o.status !== "cancelled" && isDeliveryOrder(o)
-            );
-
+      const all = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      const validOrders = all.filter((o) => o.status !== "cancelled" && isDeliveryOrder(o));
 
       const active = validOrders
-        .filter(o => o.status !== "served")
+        .filter((o) => o.status !== "served")
         .sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
-      
-      // 🔔 Notification Alert Logic
+
       if (!isFirstLoad.current) {
-        const newOrders = active.filter(o => !prevOrdersRef.current.includes(o.id));
-        if (newOrders.length > 0) {
-          try {
-            alertAudio.currentTime = 0;
-            alertAudio.play().catch(e => console.log("Audio blocked", e));
-            if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 500]);
-          } catch (e) {}
-        }
+        const hasNew = active.some((o) => !prevOrdersRef.current.includes(o.id));
+        if (hasNew) playAlert();
       }
-      
-      prevOrdersRef.current = active.map(o => o.id);
+      prevOrdersRef.current = active.map((o) => o.id);
       isFirstLoad.current = false;
-      
       setActiveOrders(active);
 
-      const hist = validOrders
-        .filter(o => o.status === "served")
-        .sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt))
-        .slice(0, 50);
-            setHistoryOrders(hist);
+      const served = validOrders
+        .filter((o) => o.status === "served")
+        .sort((a, b) => toMillis(b.deliveredAt || b.createdAt) - toMillis(a.deliveredAt || a.createdAt));
+      setServedOrders(served);
     }, (err) => {
       console.error("Delivery orders listener:", err.code, err.message);
       alert("Orders load nahi ho rahe: " + (err.code || err.message));
     });
     return () => unsub();
-
   }, [user]);
 
   // Keep open modal in sync with live order data
   useEffect(() => {
     if (!selectedOrder) return;
-    const fresh = [...activeOrders, ...historyOrders].find(o => o.id === selectedOrder.id);
+    const fresh = [...activeOrders, ...servedOrders].find((o) => o.id === selectedOrder.id);
     if (fresh) setSelectedOrder(fresh);
     // eslint-disable-next-line
-  }, [activeOrders, historyOrders]);
+  }, [activeOrders, servedOrders]);
 
-  // Stats for Dashboard
+  const historyOrders = useMemo(() => servedOrders.slice(0, 50), [servedOrders]);
 
+  // Dashboard stats: sirf is delivery boy ki aaj ki deliveries
   const stats = useMemo(() => {
-    const today = new Date().setHours(0,0,0,0);
-    const myHist = historyOrders.filter(o => o.deliveredAt >= today);
-    const cash = myHist.reduce((s, o) => s + (Number(o.finalTotal) || 0), 0);
-    return { count: myHist.length, cash };
-  }, [historyOrders]);
+    const startOfDay = new Date().setHours(0, 0, 0, 0);
+    const mine = servedOrders.filter((o) => o.deliveredBy === myId && toMillis(o.deliveredAt) >= startOfDay);
+    const total = mine.reduce((s, o) => s + (Number(o.finalTotal) || 0), 0);
+    return { count: mine.length, total };
+  }, [servedOrders, myId]);
 
   const handleLogin = async (e) => {
     e.preventDefault();
     setLoginError("");
-    try { 
+    try {
       await setPersistence(auth, browserLocalPersistence);
-      await signInWithEmailAndPassword(auth, email.trim(), password); 
-    }
-    catch (err) {
+      await signInWithEmailAndPassword(auth, email.trim(), password);
+    } catch (err) {
       const msg =
         err.code === "auth/network-request-failed" ? "Internet check karo" :
         err.code === "auth/too-many-requests" ? "Bahut try ho gaye, thodi der baad" :
         err.code === "auth/invalid-email" ? "Email format galat hai" :
-        "Email ya password galat hai."; // FIX-LOGIN-ERRORS
+        "Email ya password galat hai.";
       setLoginError(msg);
     }
   };
 
   const markOutForDelivery = async (orderId) => {
+    if (busyId) return;
     if (!window.confirm("Kya aapne restaurant se order pick up kar liya hai?")) return;
+    setBusyId(orderId);
     try {
       await updateDoc(doc(db, "orders", orderId), { status: "out_for_delivery" });
-    } catch (e) { alert("Error: " + e.message); }
+    } catch (e) {
+      alert("Error: " + (e.code || e.message));
+    } finally {
+      setBusyId("");
+    }
   };
 
   const markDelivered = async (orderId) => {
+    if (busyId) return;
     if (!window.confirm("Kya aapne order deliver kar diya aur paisa collect kar liya?")) return;
+    setBusyId(orderId);
     try {
       await updateDoc(doc(db, "orders", orderId), {
         status: "served",
         paid: true,
         paymentStatus: "paid",
         deliveredAt: Date.now(),
-        deliveredBy: user.email || user.uid
+        deliveredBy: myId,
       });
       setSelectedOrder(null);
       alert("Order delivered successfully! 🎉");
-    } catch (e) { alert("Error: " + e.message); }
+    } catch (e) {
+      alert("Error: " + (e.code || e.message));
+    } finally {
+      setBusyId("");
+    }
   };
 
-  if (loading) return <div style={{ padding: 50, textAlign: "center", color: "#fff", background: "#0B111A", minHeight: "100vh" }}>Loading...</div>;
+  if (loading) {
+    return <div style={{ padding: 50, textAlign: "center", color: "#fff", background: "#0B111A", minHeight: "100vh" }}>Loading...</div>;
+  }
 
   if (!user) {
     return (
@@ -199,8 +267,8 @@ export default function DeliveryApp() {
             <h2 style={{ color: "#fff", margin: "10px 0" }}>Delivery Partner</h2>
           </div>
           <form onSubmit={handleLogin}>
-            <input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} style={{ width: "100%", padding: 14, marginBottom: 10, borderRadius: 10, border: "1px solid #273449", background: "#0B111A", color: "#fff", boxSizing: "border-box" }} required />
-            <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} style={{ width: "100%", padding: 14, marginBottom: 10, borderRadius: 10, border: "1px solid #273449", background: "#0B111A", color: "#fff", boxSizing: "border-box" }} required />
+            <input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} style={inputStyle} required />
+            <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} style={inputStyle} required />
             {loginError && <div style={{ color: "#EF4444", fontSize: 13, marginBottom: 10 }}>{loginError}</div>}
             <button type="submit" style={{ width: "100%", padding: 14, borderRadius: 10, background: "#F59E0B", color: "#fff", border: "none", fontWeight: 800, fontSize: 16, cursor: "pointer" }}>Login</button>
           </form>
@@ -210,49 +278,46 @@ export default function DeliveryApp() {
   }
 
   const ordersToShow = page === "history" ? historyOrders : activeOrders;
+  const userName = (user.email || "delivery").split("@")[0];
 
   return (
     <div style={{ minHeight: "100vh", background: "#0B111A", color: "#fff", paddingBottom: 20 }}>
-      
-      {/* HEADER & HAMBURGER MENU */}
+
+      {/* HEADER */}
       <div style={{ background: "#F59E0B", padding: "15px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", position: "sticky", top: 0, zIndex: 10, boxShadow: "0 4px 12px rgba(0,0,0,0.2)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 15 }}>
-          <button onClick={() => setMenuOpen(true)} style={{ background: "transparent", border: "none", color: "#fff", fontSize: 24, cursor: "pointer", padding: 0 }}>
-            ☰
-          </button>
+          <button onClick={() => setMenuOpen(true)} style={{ background: "transparent", border: "none", color: "#fff", fontSize: 24, cursor: "pointer", padding: 0 }}>☰</button>
           <div style={{ fontWeight: 900, fontSize: 18 }}>Delivery Panel</div>
         </div>
-        <div style={{ fontSize: 12, background: "rgba(0,0,0,0.15)", padding: "6px 12px", borderRadius: 8, fontWeight: 700 }}>
-          {user.email.split('@')[0]}
-        </div>
+        <div style={{ fontSize: 12, background: "rgba(0,0,0,0.15)", padding: "6px 12px", borderRadius: 8, fontWeight: 700 }}>{userName}</div>
       </div>
 
-      {/* SIDEBAR / DRAWER */}
+      {/* SIDEBAR */}
       {menuOpen && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 100, display: "flex" }} onClick={() => setMenuOpen(false)}>
-          <div onClick={e => e.stopPropagation()} style={{ width: 260, background: "#161F2F", height: "100%", display: "flex", flexDirection: "column", padding: 20, animation: "slideInLeft 0.2s ease-out" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: 260, background: "#161F2F", height: "100%", display: "flex", flexDirection: "column", padding: 20 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 30, paddingBottom: 20, borderBottom: "1px solid #273449" }}>
               <div style={{ width: 45, height: 45, background: "#F59E0B", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, color: "#fff" }}>🛵</div>
               <div>
-                <div style={{ fontWeight: 800, fontSize: 15 }}>{user.email.split('@')[0]}</div>
+                <div style={{ fontWeight: 800, fontSize: 15 }}>{userName}</div>
                 <div style={{ fontSize: 11, color: "#8B9BB4" }}>Delivery Partner</div>
               </div>
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <button onClick={() => { setPage("orders"); setMenuOpen(false); }} style={{ display: "flex", alignItems: "center", gap: 12, padding: 14, background: page === "orders" ? "#273449" : "transparent", border: "none", borderRadius: 10, color: page === "orders" ? "#F59E0B" : "#fff", fontWeight: 700, fontSize: 14, cursor: "pointer", textAlign: "left" }}>
+              <button onClick={() => { setPage("orders"); setMenuOpen(false); }} style={navStyle(page === "orders")}>
                 <span style={{ fontSize: 18 }}>📦</span> Active Orders ({activeOrders.length})
               </button>
-              <button onClick={() => { setPage("history"); setMenuOpen(false); }} style={{ display: "flex", alignItems: "center", gap: 12, padding: 14, background: page === "history" ? "#273449" : "transparent", border: "none", borderRadius: 10, color: page === "history" ? "#F59E0B" : "#fff", fontWeight: 700, fontSize: 14, cursor: "pointer", textAlign: "left" }}>
+              <button onClick={() => { setPage("history"); setMenuOpen(false); }} style={navStyle(page === "history")}>
                 <span style={{ fontSize: 18 }}>🕘</span> Order History
               </button>
-              <button onClick={() => { setPage("dashboard"); setMenuOpen(false); }} style={{ display: "flex", alignItems: "center", gap: 12, padding: 14, background: page === "dashboard" ? "#273449" : "transparent", border: "none", borderRadius: 10, color: page === "dashboard" ? "#F59E0B" : "#fff", fontWeight: 700, fontSize: 14, cursor: "pointer", textAlign: "left" }}>
+              <button onClick={() => { setPage("dashboard"); setMenuOpen(false); }} style={navStyle(page === "dashboard")}>
                 <span style={{ fontSize: 18 }}>📊</span> Dashboard
               </button>
-              
-              <div style={{ borderTop: "1px solid #273449", margin: "10px 0" }}></div>
-              
-              <button onClick={() => signOut(auth)} style={{ display: "flex", alignItems: "center", gap: 12, padding: 14, background: "transparent", border: "none", borderRadius: 10, color: "#EF4444", fontWeight: 700, fontSize: 14, cursor: "pointer", textAlign: "left" }}>
+
+              <div style={{ borderTop: "1px solid #273449", margin: "10px 0" }} />
+
+              <button onClick={() => signOut(auth)} style={navStyle(false, "#EF4444")}>
                 <span style={{ fontSize: 18 }}>🚪</span> Logout
               </button>
             </div>
@@ -262,8 +327,7 @@ export default function DeliveryApp() {
 
       {/* MAIN CONTENT */}
       <div style={{ padding: 15, maxWidth: 600, margin: "0 auto" }}>
-        
-        {/* DASHBOARD PAGE */}
+
         {page === "dashboard" && (
           <div>
             <h2 style={{ fontSize: 20, marginBottom: 20 }}>Today's Stats</h2>
@@ -275,20 +339,19 @@ export default function DeliveryApp() {
               </div>
               <div style={{ background: "#161F2F", padding: 20, borderRadius: 16, border: "1px solid #273449" }}>
                 <div style={{ fontSize: 28, marginBottom: 5 }}>💵</div>
-                <div style={{ fontSize: 12, color: "#8B9BB4", fontWeight: 700 }}>Cash Collected</div>
-                <div style={{ fontSize: 24, fontWeight: 900, color: "#F59E0B", marginTop: 4 }}>₹{stats.cash}</div>
+                <div style={{ fontSize: 12, color: "#8B9BB4", fontWeight: 700 }}>Order Value</div>
+                <div style={{ fontSize: 24, fontWeight: 900, color: "#F59E0B", marginTop: 4 }}>₹{stats.total}</div>
               </div>
             </div>
           </div>
         )}
 
-        {/* ORDERS LIST PAGE (Active/History) */}
         {page !== "dashboard" && (
           <>
             <h2 style={{ fontSize: 18, marginBottom: 15, color: "#fff" }}>
               {page === "orders" ? "Active Orders" : "Recent Deliveries"}
             </h2>
-            
+
             {ordersToShow.length === 0 && (
               <div style={{ textAlign: "center", padding: 50, color: "#8B9BB4" }}>
                 <div style={{ fontSize: 40, marginBottom: 10 }}>😴</div>
@@ -297,16 +360,15 @@ export default function DeliveryApp() {
             )}
 
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              {ordersToShow.map(o => (
+              {ordersToShow.map((o) => (
                 <div key={o.id} onClick={() => setSelectedOrder(o)} style={{ background: "#161F2F", border: "1px solid #273449", padding: 14, borderRadius: 14, cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", boxShadow: "0 4px 12px rgba(0,0,0,0.1)" }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                      <span style={{ fontWeight: 900, color: "#F59E0B", fontSize: 15 }}>#{o.id.slice(1,5).toUpperCase()}</span>
-                      <span style={{ fontSize: 10, color: "#8B9BB4", background: "#273449", padding: "2px 6px", borderRadius: 4 }}>
-                        {o.status === "out_for_delivery" ? "ON THE WAY" : o.status === "ready" ? "READY TO PICK" : o.status === "preparing" ? "COOKING" : o.status === "served" ? "DELIVERED" : "NEW ORDER"}
-
+                      <span style={{ fontWeight: 900, color: "#F59E0B", fontSize: 15 }}>#{o.id.slice(1, 5).toUpperCase()}</span>
+                      <span style={{ fontSize: 10, color: "#8B9BB4", background: "#273449", padding: "2px 6px", borderRadius: 4 }}>{statusLabel(o)}</span>
+                      <span style={{ fontSize: 10, color: "#8B9BB4" }}>
+                        {page === "history" ? timeAgo(toMillis(o.deliveredAt || o.createdAt)) : timeAgo(toMillis(o.createdAt))}
                       </span>
-                      <span style={{ fontSize: 10, color: "#8B9BB4" }}>{timeAgo(o.createdAt)}</span>
                     </div>
                     <div style={{ fontWeight: 700, fontSize: 15, color: "#fff", marginBottom: 4 }}>{o.customer?.name}</div>
                     <div style={{ fontSize: 12, color: "#8B9BB4", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 220 }}>
@@ -316,8 +378,7 @@ export default function DeliveryApp() {
                   <div style={{ textAlign: "right", marginLeft: 10 }}>
                     <div style={{ fontWeight: 900, fontSize: 18, color: o.paid ? "#10B981" : "#F59E0B" }}>₹{o.finalTotal}</div>
                     <div style={{ fontSize: 9, color: o.paid ? "#10B981" : "#F59E0B", marginTop: 2, fontWeight: 700, background: o.paid ? "rgba(16,185,129,0.15)" : "rgba(245,158,11,0.15)", padding: "2px 6px", borderRadius: 4 }}>
-{o.paid ? "PAID" : o.status === "served" ? "DONE" : "COLLECT"}
-
+                      {o.paid ? "PAID" : o.status === "served" ? "DONE" : "COLLECT"}
                     </div>
                   </div>
                 </div>
@@ -330,22 +391,22 @@ export default function DeliveryApp() {
       {/* ORDER DETAILS MODAL */}
       {selectedOrder && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 100, display: "flex", alignItems: "flex-end" }}>
-          <div style={{ background: "#161F2F", width: "100%", maxWidth: 600, margin: "0 auto", borderRadius: "24px 24px 0 0", padding: 20, maxHeight: "92vh", overflowY: "auto", animation: "slideUp 0.3s ease-out" }}>
-            
+          <div style={{ background: "#161F2F", width: "100%", maxWidth: 600, margin: "0 auto", borderRadius: "24px 24px 0 0", padding: 20, maxHeight: "92vh", overflowY: "auto" }}>
+
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 15 }}>
-              <div style={{ fontSize: 20, fontWeight: 900 }}>Order #{selectedOrder.id.slice(1,5).toUpperCase()}</div>
+              <div style={{ fontSize: 20, fontWeight: 900 }}>Order #{selectedOrder.id.slice(1, 5).toUpperCase()}</div>
               <button onClick={() => setSelectedOrder(null)} style={{ background: "#273449", border: "none", color: "#fff", width: 32, height: 32, borderRadius: 16, fontSize: 16, cursor: "pointer" }}>✕</button>
             </div>
 
-            {/* CUSTOMER DETAILS */}
+            {/* CUSTOMER */}
             <div style={{ background: "#0B111A", padding: 15, borderRadius: 12, marginBottom: 15 }}>
               <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 5 }}>{selectedOrder.customer?.name}</div>
               <div style={{ color: "#8B9BB4", marginBottom: 10, fontWeight: 700 }}>📞 {selectedOrder.customer?.phone}</div>
               <div style={{ color: "#fff", marginBottom: 15, lineHeight: 1.4, fontSize: 14 }}>
-                📍 {selectedOrder.customer?.exactAddress || selectedOrder.customer?.address} {selectedOrder.customer?.pincode ? "(PIN: "
- + selectedOrder.customer.pincode + ")" : ""}
+                📍 {selectedOrder.customer?.exactAddress || selectedOrder.customer?.address}
+                {selectedOrder.customer?.pincode ? " (PIN: " + selectedOrder.customer.pincode + ")" : ""}
               </div>
-              
+
               <div style={{ display: "flex", gap: 10 }}>
                 {selectedOrder.customer?.address?.includes("Lat:") && (
                   <button onClick={() => {
@@ -355,7 +416,7 @@ export default function DeliveryApp() {
                     🗺️ Open Maps
                   </button>
                 )}
-                <a href={"tel:" + selectedOrder.customer?.phone} style={{ flex: 1, padding: 12, background: "#10B981", color: "#fff", border: "none", borderRadius: 8, fontWeight: 800, fontSize: 14, textAlign: "center", textDecoration: "none" }}>
+                <a href={"tel:" + (selectedOrder.customer?.phone || "")} style={{ flex: 1, padding: 12, background: "#10B981", color: "#fff", borderRadius: 8, fontWeight: 800, fontSize: 14, textAlign: "center", textDecoration: "none" }}>
                   📞 Call Customer
                 </a>
               </div>
@@ -376,25 +437,21 @@ export default function DeliveryApp() {
               </div>
             </div>
 
-            {/* ACTION BUTTONS */}
+            {/* ACTIONS */}
             {selectedOrder.status !== "served" ? (
               <>
-                {/* STATUS: READY - Pickup Button */}
-{selectedOrder.status === "ready" && (
-
-                  <button onClick={() => markOutForDelivery(selectedOrder.id)} style={{ width: "100%", padding: 16, background: "#F59E0B", color: "#fff", border: "none", borderRadius: 12, fontWeight: 900, fontSize: 16, cursor: "pointer", marginBottom: 10, boxShadow: "0 4px 12px rgba(245,158,11,0.3)" }}>
-                    🛵 Mark Out for Delivery
+                {selectedOrder.status === "ready" && (
+                  <button disabled={Boolean(busyId)} onClick={() => markOutForDelivery(selectedOrder.id)} style={{ width: "100%", padding: 16, background: "#F59E0B", color: "#fff", border: "none", borderRadius: 12, fontWeight: 900, fontSize: 16, cursor: "pointer", marginBottom: 10, opacity: busyId ? 0.6 : 1 }}>
+                    {busyId === selectedOrder.id ? "Please wait..." : "🛵 Mark Out for Delivery"}
                   </button>
                 )}
 
-                {/* STATUS: OUT FOR DELIVERY - Deliver Button */}
                 {selectedOrder.status === "out_for_delivery" && (
-                  <button onClick={() => markDelivered(selectedOrder.id)} style={{ width: "100%", padding: 16, background: "#10B981", color: "#fff", border: "none", borderRadius: 12, fontWeight: 900, fontSize: 16, cursor: "pointer", boxShadow: "0 4px 12px rgba(16,185,129,0.3)" }}>
-                    ✅ Delivered & Collected ₹{selectedOrder.finalTotal}
+                  <button disabled={Boolean(busyId)} onClick={() => markDelivered(selectedOrder.id)} style={{ width: "100%", padding: 16, background: "#10B981", color: "#fff", border: "none", borderRadius: 12, fontWeight: 900, fontSize: 16, cursor: "pointer", opacity: busyId ? 0.6 : 1 }}>
+                    {busyId === selectedOrder.id ? "Please wait..." : "✅ Delivered & Collected ₹" + selectedOrder.finalTotal}
                   </button>
                 )}
 
-                {/* STATUS: NEW OR PREPARING - Wait Message */}
                 {(selectedOrder.status === "new" || selectedOrder.status === "preparing") && (
                   <div style={{ textAlign: "center", padding: 16, background: "rgba(245, 158, 11, 0.1)", border: "1px dashed #F59E0B", color: "#F59E0B", borderRadius: 12, fontWeight: 800, fontSize: 14 }}>
                     👨‍🍳 Kitchen me khana ban raha hai... Ready hone ka wait karein.
