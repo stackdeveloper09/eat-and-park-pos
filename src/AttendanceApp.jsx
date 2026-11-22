@@ -66,6 +66,17 @@ function logFirestoreAccessError(label, error, expectedUid) {
   });
 }
 
+const MAX_GPS_ACCURACY_METERS = 60; // chahiye to kam/zyada karo
+const AUTO_CLOSE_GRACE_MINUTES = 120;
+
+function shiftEndMillis(date, shift) {
+  if (!shift?.endTime || !shift?.startTime) return null;
+  let end = new Date(`${date}T${shift.endTime}:00+05:30`).getTime();
+  if (Number.isNaN(end)) return null;
+  if (shift.endTime <= shift.startTime) end += 24 * 60 * 60 * 1000; // night shift
+  return end;
+}
+
 export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
   const [user, setUser] = useState(null);
   const [staff, setStaff] = useState(null);
@@ -547,6 +558,84 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
     setProfileError(`Restaurant settings load nahi hui: ${getErrorMessage(error)}`);
   }), []);
 
+  const autoClosedRef = useRef(new Set());
+  useEffect(() => {
+    if (!staffUid || Object.values(dataLoaded).some((loaded) => !loaded)) return;
+    attendanceRecords.forEach((record) => {
+      if (!record.date || !record.checkInAt || record.checkOutAt) return;
+      if (record.source === "manual" || record.source === "leave") return;
+      const shift = shifts[record.shiftId];
+      const end = shiftEndMillis(record.date, shift);
+      if (!end || Date.now() < end + AUTO_CLOSE_GRACE_MINUTES * 60 * 1000) return;
+      const key = `${staffUid}_${record.date}`;
+      if (autoClosedRef.current.has(key)) return;
+      autoClosedRef.current.add(key);
+      updateDoc(doc(db, "attendance", key), {
+        checkOutAt: end,
+        incomplete: true,
+        earlyLeave: false,
+        workedMinutes: calculateWorkedMinutes(record.checkInAt, end, shift),
+        autoClosed: true,
+        autoClosedAt: Date.now(),
+      }).catch((error) => {
+        autoClosedRef.current.delete(key);
+        console.error("Auto close checkout failed:", error);
+      });
+    });
+  }, [attendanceRecords, dataLoaded, shifts, staffUid, now]);
+
+  const downloadPayslip = () => {
+    const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+    const rows = [
+      ["Per day salary", formatCurrency(salaryCalculation.perDaySalary)],
+      ["Present days", selectedPresentDays],
+      ["Paid leave days", selectedPaidLeaveDays],
+      ["Gross salary", formatCurrency(salaryCalculation.grossSalary)],
+      ["Advance (approved)", `- ${formatCurrency(salaryCalculation.totalApprovedAdvance)}`],
+      ["Carry forward", formatCurrency(salaryCarryIn)],
+      ["Net payable", formatCurrency(salaryPayable)],
+      ["Paid", formatCurrency(salaryPaid)],
+      ["Balance", formatCurrency(salaryBalance)],
+      ["Status", salaryStatus],
+    ];
+    const payments = selectedMonthPayments
+      .map((p) => `<tr><td>${esc(p.date || "-")}${p.note ? ` · ${esc(p.note)}` : ""}</td><td class="r">${esc(formatCurrency(Number(p.amount || 0)))}</td></tr>`)
+      .join("");
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Payslip ${esc(selectedMonth)}</title>
+<style>
+body{font-family:Arial,sans-serif;padding:24px;color:#111}
+h1{margin:0;font-size:22px} .sub{color:#555;margin:4px 0 18px}
+table{width:100%;border-collapse:collapse;margin-bottom:18px}
+td{padding:8px 6px;border-bottom:1px solid #ddd;font-size:14px}
+.r{text-align:right} .tot td{font-weight:bold;font-size:15px}
+h3{margin:16px 0 6px;font-size:15px}
+</style></head><body>
+<h1>Eat &amp; Park</h1>
+<div class="sub">Salary Slip · ${esc(selectedMonth)}</div>
+<table>
+<tr><td>Name</td><td class="r">${esc(displayName)}</td></tr>
+<tr><td>Role</td><td class="r">${esc(staff?.role || "staff")}</td></tr>
+<tr><td>Monthly salary</td><td class="r">${esc(formatCurrency(salaryMonthlyAmount))}</td></tr>
+</table>
+<table>${rows.map(([l, v], i) => `<tr class="${i === 6 || i === 8 ? "tot" : ""}"><td>${esc(l)}</td><td class="r">${esc(v)}</td></tr>`).join("")}</table>
+<h3>Payments</h3>
+<table>${payments || '<tr><td colspan="2">No payments</td></tr>'}</table>
+<div class="sub">Generated on ${esc(new Date().toLocaleDateString("en-IN"))}</div>
+</body></html>`;
+    const frame = document.createElement("iframe");
+    frame.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0";
+    document.body.appendChild(frame);
+    const w = frame.contentWindow;
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+    setTimeout(() => {
+      w.focus();
+      w.print();
+      setTimeout(() => frame.remove(), 60000);
+    }, 300);
+  };
+
   const login = async (event) => {
     event.preventDefault();
     setLoginError("");
@@ -625,6 +714,12 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
         return;
       }
 
+      if (!Number.isFinite(position.coords.accuracy) || position.coords.accuracy > MAX_GPS_ACCURACY_METERS) {
+        const msg = `GPS signal weak hai (accuracy ${Math.round(position.coords.accuracy || 0)}m). Khule jagah jaake ya Precise Location ON karke dobara try karo.`;
+        setAttendanceError(msg);
+        window.alert(msg);
+        return;
+      }
       const currentDate = indiaDateKey(new Date());
       if (todayAttendance?.checkOutAt == null && todayAttendance?.checkInAt) {
         setNotice(t("checkedInAlready"));
@@ -661,6 +756,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
         status: result?.status || "Present",
         source: "gps",
         distanceMeters: Math.round(distance * 100) / 100,
+        accuracyMeters: Math.round(position.coords.accuracy),
         checkInAt,
         incomplete: result?.incomplete ?? true,
         late: result?.late ?? false,
@@ -732,6 +828,12 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
         return;
       }
 
+      if (!Number.isFinite(position.coords.accuracy) || position.coords.accuracy > MAX_GPS_ACCURACY_METERS) {
+        const msg = `GPS signal weak hai (accuracy ${Math.round(position.coords.accuracy || 0)}m). Dobara try karo.`;
+        setAttendanceError(msg);
+        window.alert(msg);
+        return;
+      }
       const checkOutAt = Date.now();
       const shift = shifts[todayAttendance.shiftId] || shifts.staff?.[todayAttendance.shiftId];
       const result = shift ? autoStatus(todayAttendance.checkInAt, shift, checkOutAt) : null;
@@ -1405,6 +1507,11 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
               <span className={`attendance-salary-badge status-${salaryStatus.toLowerCase()}`}>{t(`salaryStatus${salaryStatus}`)}</span>
               <span style={{ color: "#9ba8ba", fontSize: 12 }}>{selectedMonth}</span>
             </div>
+          )}
+          {restaurantSettings.showStaffSalary !== false && (
+            <button type="button" onClick={downloadPayslip} style={{ ...dashboardButtonStyle, marginTop: 14, width: "100%" }}>
+              Payslip download (PDF)
+            </button>
           )}
           <h3 style={{ fontSize: 14, margin: "20px 0 8px" }}>{t("paymentHistory")} · {selectedMonth}</h3>
           {selectedMonthPayments.length === 0
