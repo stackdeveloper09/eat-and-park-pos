@@ -56,9 +56,20 @@ function timestampMillis(value) {
   return 0;
 }
 
+function logFirestoreAccessError(label, error, expectedUid) {
+  const currentUser = auth.currentUser;
+  console.error(label, error, {
+    projectId: db.app.options.projectId,
+    authUserPresent: Boolean(currentUser),
+    authUserAnonymous: currentUser?.isAnonymous ?? null,
+    authUidMatchesStaffUid: Boolean(currentUser?.uid && currentUser.uid === expectedUid),
+  });
+}
+
 export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
   const [user, setUser] = useState(null);
   const [staff, setStaff] = useState(null);
+  const [authInitialized, setAuthInitialized] = useState(false);
   const [payroll, setPayroll] = useState(null);
   const [salaryPayments, setSalaryPayments] = useState([]);
   const [salaryCarryForwards, setSalaryCarryForwards] = useState([]);
@@ -119,8 +130,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
   const [gpsSettingsError, setGpsSettingsError] = useState("");
   const [now, setNow] = useState(() => new Date());
   const today = indiaDateKey(now);
-  const staffUid = user?.uid
-    || (currentUserProp?.uid && auth.currentUser?.uid === currentUserProp.uid ? currentUserProp.uid : null);
+  const staffUid = user?.uid || null;
   const suppliedName = currentUserProp?.uid && currentUserProp.uid === staffUid ? currentUserProp.name : "";
   const displayName = staff?.name || suppliedName || user?.email?.split("@")[0] || "Staff";
   const t = (key) => ATTENDANCE_STRINGS[language][key] || key;
@@ -267,6 +277,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
   useEffect(() => {
     const active = { value: true };
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      if (active.value) setAuthInitialized(true);
       if (!currentUser) {
         if (active.value) {
           setUser(null);
@@ -279,6 +290,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
           setAdvanceRecords([]);
           setLegacyAdvanceRecords([]);
           setLeaveRequests([]);
+          setNotifications([]);
           setOptimisticAttendance(null);
           setProfileError("");
           setLoading(false);
@@ -288,6 +300,8 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
 
       if (active.value) setLoading(true);
       if (active.value) {
+        setUser(null);
+        setStaff(null);
         setAttendanceRecords([]);
         setLegacyAttendanceRecords([]);
         setAdvanceRecords([]);
@@ -385,7 +399,13 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
   }), []);
 
   useEffect(() => {
-    if (!staffUid) return undefined;
+    if (
+      !authInitialized ||
+      !user?.uid ||
+      !staff ||
+      auth.currentUser?.uid !== user.uid ||
+      staffUid !== user.uid
+    ) return undefined;
 
     const unsubscribeAttendance = onSnapshot(
       query(collection(db, "attendance"), where("staffId", "==", staffUid)),
@@ -457,7 +477,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
       },
       (error) => {
         markDataLoaded("payments");
-        console.error("Staff salary payment history load failed:", error);
+        logFirestoreAccessError("Staff salary payment history load failed:", error, staffUid);
         setProfileError(`Salary payments load nahi hue: ${getErrorMessage(error)}`);
       },
     );
@@ -469,7 +489,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
       },
       (error) => {
         markDataLoaded("carryForwards");
-        console.error("Staff carry-forward load failed:", error);
+        logFirestoreAccessError("Staff carry-forward load failed:", error, staffUid);
         setProfileError(`Carry-forward load nahi hua: ${getErrorMessage(error)}`);
       },
     );
@@ -482,12 +502,18 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
       },
       (error) => {
         markDataLoaded("leaves");
-        console.error("Staff leave requests load failed:", error);
+        logFirestoreAccessError("Staff leave requests load failed:", error, staffUid);
         setProfileError(`Leave requests load nahi hui: ${getErrorMessage(error)}`);
       },
     );
+    const notificationsCollection = collection(db, "notifications");
+    const canReadAllNotifications = ["admin", "owner"]
+      .includes(String(staff.role || "").toLowerCase());
+    const notificationsQuery = canReadAllNotifications
+      ? notificationsCollection
+      : query(notificationsCollection, where("userId", "==", staffUid));
     const unsubscribeNotifications = onSnapshot(
-      query(collection(db, "notifications"), where("userId", "==", staffUid)),
+      notificationsQuery,
       (snapshot) => {
         setNotifications(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() }))
           .sort((a, b) => timestampMillis(b.createdAt) - timestampMillis(a.createdAt)));
@@ -495,7 +521,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
       },
       (error) => {
         markDataLoaded("notifications");
-        console.error("Staff notifications load failed:", error);
+        logFirestoreAccessError("Staff notifications load failed:", error, staffUid);
         setProfileError(`Notifications load nahi hui: ${getErrorMessage(error)}`);
       },
     );
@@ -511,7 +537,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
       unsubscribeLeaves();
       unsubscribeNotifications();
     };
-  }, [staffUid]);
+  }, [authInitialized, staff, staffUid, user]);
 
   useEffect(() => onSnapshot(doc(db, "settings", "restaurant"), (snapshot) => {
     setRestaurantSettings(snapshot.exists() ? snapshot.data() : {});
@@ -525,15 +551,22 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
     setLoginError("");
     setLoading(true);
     try {
+      setUser(null);
+      setStaff(null);
+      if (auth.currentUser) await signOut(auth);
       await setPersistence(auth, browserLocalPersistence);
-      await signInWithEmailAndPassword(auth, email.trim(), password);
+      await signInWithEmailAndPassword(auth, email.trim().toLowerCase(), password);
     } catch (error) {
       console.error("Attendance login failed:", error);
-      const message = error?.code === "auth/invalid-credential"
-        || error?.code === "auth/user-not-found"
-        || error?.code === "auth/wrong-password"
-        ? t("emailPasswordError")
-        : getErrorMessage(error);
+      const loginErrorMessages = {
+        "auth/invalid-credential": t("emailPasswordError"),
+        "auth/user-not-found": t("accountNotFoundError"),
+        "auth/wrong-password": t("wrongPasswordError"),
+        "auth/operation-not-allowed": t("emailPasswordProviderDisabled"),
+        "auth/too-many-requests": t("tooManyLoginAttempts"),
+        "auth/network-request-failed": t("loginNetworkError"),
+      };
+      const message = loginErrorMessages[error?.code] || getErrorMessage(error);
       setLoginError(message);
       setLoading(false);
     }
@@ -787,7 +820,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
       });
       setLeaveForm((form) => ({ ...form, reason: "" }));
     } catch (error) {
-      console.error("Leave request submit failed:", error);
+      logFirestoreAccessError("Leave request submit failed:", error, staffUid);
       setProfileError(`Leave request submit nahi hui: ${getErrorMessage(error)}`);
     } finally {
       setSubmittingLeave(false);
@@ -870,7 +903,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
   };
 
   const markNotificationRead = async (notification) => {
-    if (notification.read === true) return;
+    if (notification.read === true || notification.userId !== staffUid) return;
     try {
       await updateDoc(doc(db, "notifications", notification.id), { read: true });
     } catch (error) {
@@ -1421,6 +1454,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
                 type="button"
                 key={notification.id}
                 onClick={() => markNotificationRead(notification)}
+                disabled={notification.userId !== staffUid}
                 className={`attendance-notification ${notification.read ? "" : "is-unread"}`}
               >
                 <span><strong>{notification.title}</strong><small>{notification.message}</small></span>

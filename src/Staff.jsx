@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { auth, db } from "./firebase";
+import { auth, db, functions } from "./firebase";
+import { httpsCallable } from "firebase/functions";
 import {
   addDoc,
   collection,
@@ -143,7 +144,10 @@ export default function Staff({ C, isMobile }) {
   const [actionError, setActionError] = useState("");
   const [busyId, setBusyId] = useState("");
   const [newStaff, setNewStaff] = useState({
+    accountMode: "create",
     uid: "",
+    email: "",
+    password: "",
     name: "",
     role: "staff",
     monthlySalary: "",
@@ -530,30 +534,65 @@ export default function Staff({ C, isMobile }) {
     event.preventDefault();
     setActionError("");
     const uid = newStaff.uid.trim();
+    const email = newStaff.email.trim().toLowerCase();
     const name = newStaff.name.trim();
-    const monthlySalary = Number(newStaff.monthlySalary);
-    if (!uid || !name || !Number.isFinite(monthlySalary) || monthlySalary < 0) {
-      setActionError("Firebase Auth UID, name, aur valid non-negative salary required hain.");
+    const monthlySalary = newStaff.monthlySalary.trim() ? Number(newStaff.monthlySalary) : NaN;
+    const validRole = ROLES.some((role) => role.value === newStaff.role);
+    if (
+      !name ||
+      !validRole ||
+      !Number.isFinite(monthlySalary) ||
+      monthlySalary < 0 ||
+      (newStaff.accountMode === "create"
+        ? (!email || newStaff.password.length < 12)
+        : !uid)
+    ) {
+      setActionError("Name, role, valid salary, aur account ke required details sahi bharein.");
       return;
     }
     setBusyId("add-staff");
     try {
-      await runTransaction(db, async (transaction) => {
-        const staffRef = doc(db, "staff", uid);
-        if ((await transaction.get(staffRef)).exists()) {
-          throw new Error("Is Auth UID ka staff profile pehle se maujood hai.");
-        }
-        transaction.set(staffRef, {
+      if (newStaff.accountMode === "create") {
+        await httpsCallable(functions, "createStaffAccount")({
+          email,
+          password: newStaff.password,
           name,
           role: newStaff.role,
           monthlySalary,
           active: newStaff.active,
           shiftId: newStaff.shiftId || "",
         });
+      } else {
+        await runTransaction(db, async (transaction) => {
+          const staffRef = doc(db, "staff", uid);
+          if ((await transaction.get(staffRef)).exists()) {
+            throw new Error("Is Auth UID ka staff profile pehle se maujood hai.");
+          }
+          transaction.set(staffRef, {
+            name,
+            role: newStaff.role,
+            monthlySalary,
+            active: newStaff.active,
+            shiftId: newStaff.shiftId || "",
+          });
+        });
+      }
+      setNewStaff({
+        accountMode: "create",
+        uid: "",
+        email: "",
+        password: "",
+        name: "",
+        role: "staff",
+        monthlySalary: "",
+        active: true,
+        shiftId: "morning",
       });
-      setNewStaff({ uid: "", name: "", role: "staff", monthlySalary: "", active: true, shiftId: "morning" });
     } catch (error) {
-      setActionError(`Staff member add nahi hua: ${getErrorMessage(error)}`);
+      const message = error?.code === "functions/not-found"
+        ? "createStaffAccount Cloud Function deploy karein, phir dobara try karein."
+        : getErrorMessage(error);
+      setActionError(`Staff member add nahi hua: ${message}`);
       console.error("Staff member add failed:", error);
     } finally {
       setBusyId("");
@@ -1272,7 +1311,7 @@ export default function Staff({ C, isMobile }) {
           <form onSubmit={handleAddStaff} style={{ ...cardStyle, display: "grid", alignContent: "start", gap: 12 }}>
             <h3 style={{ margin: 0, color: C.ink, fontSize: 16 }}>Add staff profile</h3>
             <div style={{ color: C.gray, fontSize: 12 }}>
-              Firebase Authentication account pehle banayein; yahan uska UID use karein.
+              Naya Firebase Auth account server-side create hota hai. Temporary password staff ke saath privately share karein.
             </div>
             <label style={labelStyle}>
               Name
@@ -1296,9 +1335,29 @@ export default function Staff({ C, isMobile }) {
               </select>
             </label>
             <label style={labelStyle}>
-              Firebase Auth UID
-              <input required value={newStaff.uid} onChange={(event) => setNewStaff((form) => ({ ...form, uid: event.target.value }))} style={inputStyle} />
+              Firebase account setup
+              <select value={newStaff.accountMode} onChange={(event) => setNewStaff((form) => ({ ...form, accountMode: event.target.value }))} style={inputStyle}>
+                <option value="create">Create new Auth account</option>
+                <option value="existing">Link existing Auth UID</option>
+              </select>
             </label>
+            {newStaff.accountMode === "create" ? (
+              <>
+                <label style={labelStyle}>
+                  Staff email
+                  <input required type="email" autoComplete="email" value={newStaff.email} onChange={(event) => setNewStaff((form) => ({ ...form, email: event.target.value }))} style={inputStyle} />
+                </label>
+                <label style={labelStyle}>
+                  Temporary password (12+ characters)
+                  <input required type="password" autoComplete="new-password" minLength={12} value={newStaff.password} onChange={(event) => setNewStaff((form) => ({ ...form, password: event.target.value }))} style={inputStyle} />
+                </label>
+              </>
+            ) : (
+              <label style={labelStyle}>
+                Existing Firebase Auth UID
+                <input required value={newStaff.uid} onChange={(event) => setNewStaff((form) => ({ ...form, uid: event.target.value }))} style={inputStyle} />
+              </label>
+            )}
             <label style={{ display: "flex", alignItems: "center", gap: 9, color: C.ink, fontSize: 13, fontWeight: 700 }}>
               <input type="checkbox" checked={newStaff.active} onChange={(event) => setNewStaff((form) => ({ ...form, active: event.target.checked }))} />
               Active staff

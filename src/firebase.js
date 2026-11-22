@@ -1,6 +1,7 @@
 // src/firebase.js
 import { initializeApp } from "firebase/app";
 import { getAuth, setPersistence, browserLocalPersistence, onAuthStateChanged } from "firebase/auth";
+import { getFunctions } from "firebase/functions";
 import { initializeFirestore, memoryLocalCache } from "firebase/firestore";
 
 const firebaseConfig = {
@@ -16,6 +17,7 @@ const app = initializeApp(firebaseConfig);
 
 // Auth Fix (Vite build white-screen issue)
 export const auth = getAuth(app);
+export const functions = getFunctions(app);
 setPersistence(auth, browserLocalPersistence).catch((error) => {
   console.error("Auth persistence error:", error);
 });

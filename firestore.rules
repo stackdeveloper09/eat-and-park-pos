@@ -315,7 +315,8 @@ service cloud.firestore {
     }
 
     match /notifications/{id} {
-      allow read: if signedIn() && resource.data.userId == request.auth.uid;
+      allow read: if isAdminOrOwner()
+        || (signedIn() && resource.data.userId == request.auth.uid);
       allow create: if isAdmin()
         && request.resource.data.keys().hasOnly(['userId', 'title', 'message', 'read', 'createdAt'])
         && request.resource.data.keys().hasAll(['userId', 'title', 'message', 'read', 'createdAt'])

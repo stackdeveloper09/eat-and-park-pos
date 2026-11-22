@@ -266,6 +266,32 @@ describe("other collections", () => {
       userId: "w1", title: "Test", message: "Message", read: false, createdAt: Date.now(),
     }));
   });
+  test("admins and owners can list all notifications without gaining cross-staff write access", async () => {
+    await assertSucceeds(getDocs(collection(as("a1"), "notifications")));
+    await assertSucceeds(getDocs(collection(as("o1"), "notifications")));
+    await assertFails(getDocs(collection(as("w1"), "notifications")));
+    await assertSucceeds(getDocs(query(collection(as("w1"), "notifications"), where("userId", "==", "w1"))));
+    await assertFails(getDocs(query(collection(as("w1"), "notifications"), where("userId", "==", "c1"))));
+    await assertFails(updateDoc(doc(as("o1"), "notifications/for-w1"), { read: true }));
+  });
+  test("attendance portal list queries are scoped to the authenticated UID", async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await setDoc(doc(db, "salaryPayments/query-w1"), { staffId: "w1" });
+      await setDoc(doc(db, "salaryCarryForwards/query-w1"), { staffId: "w1" });
+      await setDoc(doc(db, "leaveRequests/query-w1"), { staffId: "w1" });
+      await setDoc(doc(db, "notifications/query-w1"), { userId: "w1" });
+    });
+    const waiterDb = as("w1");
+    await assertSucceeds(getDocs(query(collection(waiterDb, "salaryPayments"), where("staffId", "==", "w1"))));
+    await assertSucceeds(getDocs(query(collection(waiterDb, "salaryCarryForwards"), where("staffId", "==", "w1"))));
+    await assertSucceeds(getDocs(query(collection(waiterDb, "leaveRequests"), where("staffId", "==", "w1"))));
+    await assertSucceeds(getDocs(query(collection(waiterDb, "notifications"), where("userId", "==", "w1"))));
+    await assertFails(getDocs(query(collection(waiterDb, "salaryPayments"), where("staffId", "==", "c1"))));
+    await assertFails(getDocs(query(collection(waiterDb, "salaryCarryForwards"), where("staffId", "==", "c1"))));
+    await assertFails(getDocs(query(collection(waiterDb, "leaveRequests"), where("staffId", "==", "c1"))));
+    await assertFails(getDocs(query(collection(waiterDb, "notifications"), where("userId", "==", "c1"))));
+  });
   test("staff can mark attendance only for self and inside the radius", async () => {
     await assertSucceeds(setDoc(doc(as("w1"), "attendance/w1_2026-11-21"), {
       staffId: "w1", date: "2026-11-21", status: "Present", source: "gps",

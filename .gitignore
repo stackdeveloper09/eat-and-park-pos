@@ -34,6 +34,7 @@ fix_app.py
 .vercel
 .env*
 serviceAccountKey*.json
+/functions/staff-auth-reset-links*.json
 firestore-debug.log
 *.bak*
 *.backup
