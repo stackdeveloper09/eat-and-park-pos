@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { auth, db } from "./firebase";
 import {
+  addDoc,
   collection,
   doc,
   getDocs,
@@ -15,8 +16,11 @@ import {
 import {
   ATTENDANCE_RADIUS_METERS,
   attendanceDayValue,
+  calculateSalaryBalance,
   calculateStaffSalary,
+  dateRangeInclusive,
   daysInMonth,
+  isValidDateKey,
   RESTAURANT_LOCATION,
 } from "./lib/staffPayroll";
 
@@ -26,6 +30,7 @@ const TABS = [
   { id: "staff", label: "Staff Management" },
   { id: "gps", label: "GPS Settings" },
   { id: "advances", label: "Advance Requests" },
+  { id: "leaves", label: "Leave Requests" },
   { id: "payroll", label: "Payroll & Attendance" },
 ];
 
@@ -73,6 +78,7 @@ function normalizedAttendanceStatus(record) {
 }
 
 function attendanceSource(record) {
+  if (record.source === "leave") return "leave";
   return record.source === "gps" || record.distanceMeters != null || record.action === "present"
     ? "gps"
     : "manual";
@@ -97,9 +103,29 @@ export default function Staff({ C, isMobile }) {
   const [staffDrafts, setStaffDrafts] = useState({});
   const [staffSaveStates, setStaffSaveStates] = useState({});
   const [selectedMemberId, setSelectedMemberId] = useState("");
+  const [paymentMemberId, setPaymentMemberId] = useState("");
+  const [paymentForm, setPaymentForm] = useState({
+    amount: "",
+    date: todayKey(),
+    note: "",
+    carryForward: false,
+  });
+  const [advanceForm, setAdvanceForm] = useState({
+    staffId: "",
+    amount: "",
+    date: todayKey(),
+    note: "",
+  });
+  const [advanceFilterStaff, setAdvanceFilterStaff] = useState("all");
+  const [advanceFilterMonth, setAdvanceFilterMonth] = useState(currentMonthKey);
+  const [advanceNoteDrafts, setAdvanceNoteDrafts] = useState({});
+  const [leaveNoteDrafts, setLeaveNoteDrafts] = useState({});
   const [legacyPayroll, setLegacyPayroll] = useState({});
   const [advanceRequests, setAdvanceRequests] = useState([]);
   const [legacyAdvances, setLegacyAdvances] = useState([]);
+  const [salaryPayments, setSalaryPayments] = useState([]);
+  const [salaryCarryForwards, setSalaryCarryForwards] = useState([]);
+  const [leaveRequests, setLeaveRequests] = useState([]);
   const [manualAttendance, setManualAttendance] = useState([]);
   const [gpsAttendance, setGpsAttendance] = useState([]);
   const [gpsAttendanceLoading, setGpsAttendanceLoading] = useState(true);
@@ -141,6 +167,11 @@ export default function Staff({ C, isMobile }) {
         const firstActiveMember = staffList.find((member) => member.active !== false);
         return firstActiveMember ? { ...form, staffId: firstActiveMember.id } : form;
       });
+      setAdvanceForm((form) => {
+        if (form.staffId) return form;
+        const firstActiveMember = staffList.find((member) => member.active !== false);
+        return firstActiveMember ? { ...form, staffId: firstActiveMember.id } : form;
+      });
       setLoadError("");
     }, (error) => {
       console.error("Staff list load failed:", error);
@@ -162,33 +193,58 @@ export default function Staff({ C, isMobile }) {
   }, []);
 
   useEffect(() => {
-    const advanceQuery = (collectionName) => query(
-      collection(db, collectionName),
-      where("status", "in", ["Pending", "pending", "Approved", "approved"]),
-    );
-    const unsubscribeRequests = onSnapshot(advanceQuery("advances"), (snapshot) => {
-      setAdvanceRequests(snapshot.docs.map((entry) => ({
-        id: entry.id,
-        source: "advances",
-        ...entry.data(),
-      })));
+    const unsubscribeRequests = onSnapshot(collection(db, "advances"), (snapshot) => {
+      setAdvanceRequests(snapshot.docs.map((entry) => {
+        const data = entry.data();
+        return {
+          id: entry.id,
+          ...data,
+          collectionName: "advances",
+          source: data.source || "request",
+        };
+      }));
     }, (error) => {
       console.error("Advance requests load failed:", error);
       setLoadError(`Advance requests load nahi hui: ${getErrorMessage(error)}`);
     });
-    const unsubscribeLegacy = onSnapshot(advanceQuery("staffAdvances"), (snapshot) => {
-      setLegacyAdvances(snapshot.docs.map((entry) => ({
-        id: entry.id,
-        source: "staffAdvances",
-        ...entry.data(),
-      })));
+    const unsubscribeLegacy = onSnapshot(collection(db, "staffAdvances"), (snapshot) => {
+      setLegacyAdvances(snapshot.docs.map((entry) => {
+        const data = entry.data();
+        return {
+          id: entry.id,
+          ...data,
+          collectionName: "staffAdvances",
+          source: data.source || "request",
+        };
+      }));
     }, (error) => {
       console.error("Legacy staff advances load failed:", error);
       setLoadError(`Payroll advances load nahi hui: ${getErrorMessage(error)}`);
     });
+    const unsubscribePayments = onSnapshot(collection(db, "salaryPayments"), (snapshot) => {
+      setSalaryPayments(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() })));
+    }, (error) => {
+      console.error("Salary payments load failed:", error);
+      setLoadError(`Salary payments load nahi hui: ${getErrorMessage(error)}`);
+    });
+    const unsubscribeCarryForwards = onSnapshot(collection(db, "salaryCarryForwards"), (snapshot) => {
+      setSalaryCarryForwards(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() })));
+    }, (error) => {
+      console.error("Salary carry-forward load failed:", error);
+      setLoadError(`Carry-forward balances load nahi hue: ${getErrorMessage(error)}`);
+    });
+    const unsubscribeLeaves = onSnapshot(collection(db, "leaveRequests"), (snapshot) => {
+      setLeaveRequests(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() })));
+    }, (error) => {
+      console.error("Leave requests load failed:", error);
+      setLoadError(`Leave requests load nahi hui: ${getErrorMessage(error)}`);
+    });
     return () => {
       unsubscribeRequests();
       unsubscribeLegacy();
+      unsubscribePayments();
+      unsubscribeCarryForwards();
+      unsubscribeLeaves();
     };
   }, []);
 
@@ -266,7 +322,8 @@ export default function Staff({ C, isMobile }) {
         source: attendanceSource(record),
       };
       const current = recordsByStaffDate.get(key);
-      if (!current || (current.source === "gps" && normalized.source === "manual")) {
+      const sourcePriority = { gps: 0, manual: 1, leave: 2 };
+      if (!current || sourcePriority[normalized.source] > sourcePriority[current.source]) {
         recordsByStaffDate.set(key, normalized);
       }
     });
@@ -326,11 +383,94 @@ export default function Staff({ C, isMobile }) {
   }), [activeMembers, legacyPayroll]);
   const selectedMember = members.find((member) => member.id === selectedMemberId) || null;
 
+  const allAdvances = useMemo(
+    () => [...advanceRequests, ...legacyAdvances],
+    [advanceRequests, legacyAdvances],
+  );
+  const payrollRows = useMemo(() => payrollMembers.map((member) => {
+    const stats = attendanceStatsByStaff.get(member.id) || { presentDays: 0, paidLeaveDays: 0 };
+    const approvedAdvance = approvedAdvanceTotals.get(member.id) || 0;
+    const monthlySalary = Number(legacyPayroll[member.id]?.monthlySalary ?? member.monthlySalary ?? 0);
+    const salary = calculateStaffSalary({
+      monthlySalary,
+      presentDays: stats.presentDays,
+      paidLeaveDays: stats.paidLeaveDays,
+      totalApprovedAdvance: approvedAdvance,
+      daysInPayPeriod: daysInMonth(month),
+    });
+    const carryForwardIn = salaryCarryForwards
+      .filter((entry) => entry.staffId === member.id
+        && entry.month === month
+        && String(entry.status || "active").toLowerCase() === "active")
+      .reduce((total, entry) => total + Number(entry.amount || 0), 0);
+    const paid = salaryPayments
+      .filter((payment) => payment.staffId === member.id
+        && payment.month === month
+        && String(payment.status || "paid").toLowerCase() !== "cancelled")
+      .reduce((total, payment) => total + Number(payment.amount || 0), 0);
+    const payable = salary.finalPayable + carryForwardIn;
+    const { balanceDue } = calculateSalaryBalance(payable, paid);
+    return {
+      member,
+      monthlySalary,
+      stats,
+      salary,
+      approvedAdvance,
+      carryForwardIn,
+      payable,
+      paid,
+      balanceDue,
+      status: balanceDue === 0 ? "Paid" : paid > 0 ? "Partial" : "Unpaid",
+    };
+  }), [
+    attendanceStatsByStaff,
+    approvedAdvanceTotals,
+    legacyPayroll,
+    month,
+    payrollMembers,
+    salaryCarryForwards,
+    salaryPayments,
+  ]);
+  const payrollSummary = useMemo(() => payrollRows.reduce((summary, row) => ({
+    gross: summary.gross + row.salary.grossSalary,
+    advances: summary.advances + row.approvedAdvance,
+    paid: summary.paid + row.paid,
+    payable: summary.payable + row.balanceDue,
+  }), { gross: 0, advances: 0, paid: 0, payable: 0 }), [payrollRows]);
+
+  const advanceHistory = useMemo(() => allAdvances.filter((advance) => (
+    (advanceFilterStaff === "all" || getStaffId(advance) === advanceFilterStaff)
+    && (advanceFilterMonth === "all" || getRecordMonth(advance) === advanceFilterMonth)
+  )).sort((a, b) => String(b.date || getRecordMonth(b)).localeCompare(String(a.date || getRecordMonth(a)))), [
+    advanceFilterMonth,
+    advanceFilterStaff,
+    allAdvances,
+  ]);
+  const approvedAdvanceSummary = useMemo(() => {
+    const byStaff = new Map();
+    allAdvances.forEach((advance) => {
+      if (String(advance.status || "").toLowerCase() !== "approved") return;
+      const staffId = getStaffId(advance);
+      if (!staffId) return;
+      const amount = Number(advance.amount || 0);
+      if (!Number.isFinite(amount) || amount < 0) return;
+      const current = byStaff.get(staffId) || { month: 0, overall: 0 };
+      current.overall += amount;
+      if (getRecordMonth(advance) === month) current.month += amount;
+      byStaff.set(staffId, current);
+    });
+    return {
+      byStaff,
+      month: [...byStaff.values()].reduce((total, entry) => total + entry.month, 0),
+      overall: [...byStaff.values()].reduce((total, entry) => total + entry.overall, 0),
+    };
+  }, [allAdvances, month]);
+
   const pendingRequests = useMemo(
-    () => [...advanceRequests, ...legacyAdvances]
+    () => allAdvances
       .filter((advance) => String(advance.status || "").toLowerCase() === "pending")
       .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0)),
-    [advanceRequests, legacyAdvances],
+    [allAdvances],
   );
 
   const reportError = (context, error) => {
@@ -433,22 +573,309 @@ export default function Staff({ C, isMobile }) {
     );
   };
 
-  const handleApproveAdvance = async (advance) => {
+  const handleAdvanceDecision = async (advance, status) => {
     const adminUid = auth.currentUser?.uid;
     if (!adminUid) {
-      window.alert("Admin session expire ho gaya. Dobara sign in karein.");
+      setActionError("Admin session expire ho gaya. Dobara sign in karein.");
       return;
     }
     setActionError("");
-    setBusyId(`advance-${advance.source}-${advance.id}`);
+    const operationId = `advance-${advance.id}`;
+    setBusyId(operationId);
     try {
-      await updateDoc(doc(db, advance.source, advance.id), {
+      const update = status === "Approved"
+        ? { status, approvedBy: adminUid, approvedAt: Date.now() }
+        : {
+          status,
+          rejectedBy: adminUid,
+          rejectedAt: Date.now(),
+          adminNote: (advanceNoteDrafts[advance.id] || "").trim(),
+        };
+      await updateDoc(doc(db, advance.collectionName, advance.id), update);
+    } catch (error) {
+      reportError(`Advance ${status === "Approved" ? "approve" : "reject"} nahi hua`, error);
+    } finally {
+      setBusyId("");
+    }
+  };
+
+  const handleAddManualAdvance = async (event) => {
+    event.preventDefault();
+    const amount = Number(advanceForm.amount);
+    const member = members.find((entry) => entry.id === advanceForm.staffId);
+    const note = advanceForm.note.trim();
+    if (!member || !Number.isFinite(amount) || amount <= 0 || amount > 10000000
+      || !isValidDateKey(advanceForm.date) || note.length > 500) {
+      setActionError("Staff, valid date, aur ₹0 se zyada (maximum ₹1 crore) ka advance enter karein.");
+      return;
+    }
+    const adminUid = auth.currentUser?.uid;
+    if (!adminUid) {
+      setActionError("Admin session expire ho gaya. Dobara sign in karein.");
+      return;
+    }
+    setActionError("");
+    setBusyId("manual-advance");
+    try {
+      await addDoc(collection(db, "advances"), {
+        staffId: member.id,
+        staffName: displayStaffName(member),
+        amount,
+        date: advanceForm.date,
+        month: advanceForm.date.slice(0, 7),
+        note,
+        reason: note || "Manual advance",
+        source: "manual",
         status: "Approved",
+        createdAt: Date.now(),
         approvedBy: adminUid,
         approvedAt: Date.now(),
       });
+      setAdvanceForm((form) => ({ ...form, amount: "", note: "" }));
     } catch (error) {
-      reportError("Advance approve nahi hua", error);
+      reportError("Manual advance save nahi hua", error);
+    } finally {
+      setBusyId("");
+    }
+  };
+
+  const handleCancelAdvance = async (advance) => {
+    if (!window.confirm("Is advance ko cancel karein? Record history mein rahega.")) return;
+    const staffId = getStaffId(advance);
+    const advanceMonth = getRecordMonth(advance);
+    const salaryAlreadyPaid = salaryPayments.some((payment) => (
+      payment.staffId === staffId
+      && payment.month === advanceMonth
+      && String(payment.status || "paid").toLowerCase() !== "cancelled"
+      && Number(payment.amount) > 0
+    ));
+    if (salaryAlreadyPaid
+      && String(advance.status || "").toLowerCase() === "approved"
+      && !window.confirm("Is month ke salary payment mein ye advance already adjust hua ho sakta hai. Phir bhi cancel karein?")) return;
+    const adminUid = auth.currentUser?.uid;
+    if (!adminUid) {
+      setActionError("Admin session expire ho gaya. Dobara sign in karein.");
+      return;
+    }
+    setBusyId(`cancel-advance-${advance.id}`);
+    setActionError("");
+    try {
+      await updateDoc(doc(db, advance.collectionName, advance.id), {
+        status: "Cancelled",
+        cancelledBy: adminUid,
+        cancelledAt: Date.now(),
+      });
+    } catch (error) {
+      reportError("Advance cancel nahi hua", error);
+    } finally {
+      setBusyId("");
+    }
+  };
+
+  const commitAttendanceOperations = async (operations) => {
+    for (let offset = 0; offset < operations.length; offset += 450) {
+      const batch = writeBatch(db);
+      operations.slice(offset, offset + 450).forEach((operation) => {
+        if (operation.type === "delete") batch.delete(operation.ref);
+        else batch.set(operation.ref, operation.data);
+      });
+      await batch.commit();
+    }
+  };
+
+  const removeLeaveAttendance = async (leave) => {
+    const dates = dateRangeInclusive(leave.fromDate, leave.toDate);
+    const operations = [];
+    for (const date of dates) {
+      const snapshot = await getDocs(query(collection(db, "attendance"), where("date", "==", date)));
+      snapshot.docs.forEach((entry) => {
+        const record = entry.data();
+        if (getStaffId(record) === leave.staffId
+          && record.source === "leave"
+          && record.leaveRequestId === leave.id) {
+          operations.push({ type: "delete", ref: entry.ref });
+        }
+      });
+    }
+    await commitAttendanceOperations(operations);
+  };
+
+  const handleLeaveDecision = async (leave, nextStatus) => {
+    const adminUid = auth.currentUser?.uid;
+    if (!adminUid) {
+      setActionError("Admin session expire ho gaya. Dobara sign in karein.");
+      return;
+    }
+    setActionError("");
+    setBusyId(`leave-${leave.id}`);
+    try {
+      if (nextStatus === "approved") {
+        const dates = dateRangeInclusive(leave.fromDate, leave.toDate);
+        const attendanceOps = [];
+        const presentConflicts = [];
+        const status = leave.type === "Paid Leave"
+          ? "Paid Leave"
+          : leave.type === "Half Day" ? "Half Day" : "Absent";
+        for (const date of dates) {
+          const [attendanceSnapshot, gpsSnapshot] = await Promise.all([
+            getDocs(query(collection(db, "attendance"), where("date", "==", date))),
+            getDocs(query(collection(db, "staffAttendance"), where("date", "==", date))),
+          ]);
+          const sameStaff = attendanceSnapshot.docs.filter((entry) => getStaffId(entry.data()) === leave.staffId);
+          const hasPresent = [...sameStaff, ...gpsSnapshot.docs.filter((entry) => getStaffId(entry.data()) === leave.staffId)]
+            .some((entry) => normalizedAttendanceStatus(entry.data()) === "Present");
+          if (hasPresent) presentConflicts.push(date);
+          const canonicalRef = doc(db, "attendance", `${leave.staffId}_${date}`);
+          attendanceOps.push({
+            type: "set",
+            ref: canonicalRef,
+            data: {
+              staffId: leave.staffId,
+              date,
+              status,
+              markedBy: "Admin",
+              source: "leave",
+              leaveRequestId: leave.id,
+            },
+          });
+          sameStaff.forEach((entry) => {
+            if (entry.id !== canonicalRef.id) attendanceOps.push({ type: "delete", ref: entry.ref });
+          });
+        }
+        if (presentConflicts.length
+          && !window.confirm(`Attendance already marked Present on ${presentConflicts.join(", ")}. Replace with leave status?`)) return;
+        await commitAttendanceOperations(attendanceOps);
+      } else {
+        await removeLeaveAttendance(leave);
+      }
+
+      const decision = {
+        status: nextStatus,
+        adminNote: (leaveNoteDrafts[leave.id] || "").trim(),
+        decidedBy: adminUid,
+        decidedAt: Date.now(),
+      };
+      if (nextStatus === "cancelled") {
+        decision.cancelledBy = adminUid;
+        decision.cancelledAt = Date.now();
+      }
+      await updateDoc(doc(db, "leaveRequests", leave.id), decision);
+    } catch (error) {
+      reportError(`Leave request ${nextStatus} nahi hui`, error);
+    } finally {
+      setBusyId("");
+    }
+  };
+
+  const openPaymentModal = (row) => {
+    setPaymentMemberId(row.member.id);
+    setPaymentForm({
+      amount: String(row.balanceDue),
+      date: todayKey(),
+      note: "",
+      carryForward: false,
+    });
+  };
+
+  const handleCreateSalaryPayment = async (event) => {
+    event.preventDefault();
+    const row = payrollRows.find((entry) => entry.member.id === paymentMemberId);
+    const amount = Number(paymentForm.amount);
+    const date = paymentForm.date;
+    const note = paymentForm.note.trim();
+    const adminUid = auth.currentUser?.uid;
+    if (!row || !adminUid || !Number.isFinite(amount) || amount < 0
+      || amount > row.balanceDue || !isValidDateKey(date) || note.length > 500
+      || (amount === 0 && !paymentForm.carryForward)) {
+      setActionError("Payment amount valid balance se zyada nahi ho sakta; zero payment ke liye carry-forward select karein.");
+      return;
+    }
+    const remaining = Math.max(0, row.balanceDue - amount);
+    const carryRef = doc(db, "salaryCarryForwards", `${row.member.id}_${month}`);
+    const existingCarry = salaryCarryForwards.find((entry) => entry.id === carryRef.id);
+    setActionError("");
+    setBusyId("salary-payment");
+    try {
+      const batch = writeBatch(db);
+      if (amount > 0) {
+        const paymentRef = doc(collection(db, "salaryPayments"));
+        batch.set(paymentRef, {
+          staffId: row.member.id,
+          month,
+          amount,
+          date,
+          note,
+          createdBy: adminUid,
+          createdAt: Date.now(),
+          status: "paid",
+        });
+      }
+      if (remaining > 0 && paymentForm.carryForward) {
+        batch.set(carryRef, {
+          staffId: row.member.id,
+          fromMonth: month,
+          month: nextMonthKey(month),
+          amount: remaining,
+          status: "active",
+          createdBy: existingCarry?.createdBy || adminUid,
+          createdAt: existingCarry?.createdAt || Date.now(),
+          updatedAt: Date.now(),
+          updatedBy: adminUid,
+        });
+      } else if (existingCarry && String(existingCarry.status || "active").toLowerCase() === "active") {
+        batch.update(carryRef, {
+          status: "cancelled",
+          cancelledAt: Date.now(),
+          cancelledBy: adminUid,
+          updatedAt: Date.now(),
+          updatedBy: adminUid,
+        });
+      }
+      await batch.commit();
+      setPaymentMemberId("");
+    } catch (error) {
+      reportError("Salary payment save nahi hui", error);
+    } finally {
+      setBusyId("");
+    }
+  };
+
+  const handleCancelSalaryPayment = async (payment) => {
+    if (!window.confirm("Is salary payment ko cancel karein? Payment history mein rahegi aur balance dobara calculate hoga.")) return;
+    const adminUid = auth.currentUser?.uid;
+    if (!adminUid) {
+      setActionError("Admin session expire ho gaya. Dobara sign in karein.");
+      return;
+    }
+    const row = payrollRows.find((entry) => entry.member.id === payment.staffId);
+    const outgoingCarry = salaryCarryForwards.find((entry) => (
+      entry.staffId === payment.staffId && entry.fromMonth === payment.month
+      && String(entry.status || "active").toLowerCase() === "active"
+    ));
+    setBusyId(`cancel-payment-${payment.id}`);
+    setActionError("");
+    try {
+      const batch = writeBatch(db);
+      batch.update(doc(db, "salaryPayments", payment.id), {
+        status: "cancelled",
+        cancelledBy: adminUid,
+        cancelledAt: Date.now(),
+      });
+      if (row && outgoingCarry) {
+        const paidAfterCancellation = salaryPayments
+          .filter((entry) => entry.staffId === payment.staffId
+            && entry.month === payment.month
+            && entry.id !== payment.id
+            && String(entry.status || "paid").toLowerCase() !== "cancelled")
+          .reduce((total, entry) => total + Number(entry.amount || 0), 0);
+        const updatedBalance = Math.max(0, row.payable - paidAfterCancellation);
+        batch.update(doc(db, "salaryCarryForwards", outgoingCarry.id), updatedBalance > 0
+          ? { amount: updatedBalance, updatedAt: Date.now(), updatedBy: adminUid }
+          : { status: "cancelled", cancelledAt: Date.now(), cancelledBy: adminUid, updatedAt: Date.now(), updatedBy: adminUid });
+      }
+      await batch.commit();
+    } catch (error) {
+      reportError("Salary payment cancel nahi hui", error);
     } finally {
       setBusyId("");
     }
@@ -806,36 +1233,201 @@ export default function Staff({ C, isMobile }) {
       )}
 
       {activeTab === "advances" && (
-        <section style={cardStyle}>
-          <h3 style={{ margin: "0 0 12px", color: C.ink, fontSize: 16 }}>Pending advance requests ({pendingRequests.length})</h3>
-          {pendingRequests.length === 0
-            ? <div style={{ color: C.gray, fontSize: 13 }}>No pending advance requests.</div>
-            : (
-              <div style={{ display: "grid", gap: 10 }}>
-                {pendingRequests.map((advance) => {
-                  const staffId = getStaffId(advance);
-                  const member = members.find((entry) => entry.id === staffId);
-                  const requestBusy = busyId === `advance-${advance.source}-${advance.id}`;
-                  return (
-                    <article key={`${advance.source}-${advance.id}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, padding: 13, border: `1px solid ${C.line}`, borderRadius: 11 }}>
-                      <div>
-                        <div style={{ color: C.ink, fontWeight: 800 }}>{member?.name || advance.staffName || advance.name || staffId || "Unknown staff"}</div>
-                        <div style={{ color: C.gray, fontSize: 12, marginTop: 4 }}>
-                          {advance.reason || "No reason provided"}
-                          {advance.month ? ` · ${advance.month}` : ""}
-                        </div>
-                      </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                        <strong style={{ color: C.gold }}>{formatCurrency(Number(advance.amount || 0))}</strong>
-                        <button type="button" disabled={requestBusy} onClick={() => handleApproveAdvance(advance)} style={buttonStyle}>
-                          {requestBusy ? "Approving..." : "Approve"}
-                        </button>
-                      </div>
-                    </article>
-                  );
-                })}
+        <section style={{ display: "grid", gap: 14 }}>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(3, 1fr)", gap: 10 }}>
+            {[
+              ["Approved advances · selected month", approvedAdvanceSummary.month],
+              ["Approved advances · overall", approvedAdvanceSummary.overall],
+              ["Pending requests", pendingRequests.length],
+            ].map(([label, value]) => (
+              <div key={label} style={{ ...cardStyle, padding: 13 }}>
+                <div style={{ color: C.gray, fontSize: 11 }}>{label}</div>
+                <strong style={{ display: "block", color: C.gold, fontSize: 17, marginTop: 5 }}>
+                  {typeof value === "number" && label !== "Pending requests" ? formatCurrency(value) : value}
+                </strong>
               </div>
-            )}
+            ))}
+          </div>
+
+          <form onSubmit={handleAddManualAdvance} style={{ ...cardStyle, display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(4, minmax(0, 1fr)) auto", gap: 10, alignItems: "end" }}>
+            <label style={labelStyle}>
+              Staff
+              <select required value={advanceForm.staffId} onChange={(event) => setAdvanceForm((form) => ({ ...form, staffId: event.target.value }))} style={inputStyle}>
+                <option value="">Select staff</option>
+                {activeMembers.map((member) => <option key={member.id} value={member.id}>{displayStaffName(member)}</option>)}
+              </select>
+            </label>
+            <label style={labelStyle}>
+              Amount (₹)
+              <input required type="number" min="0.01" max="10000000" step="0.01" value={advanceForm.amount} onChange={(event) => setAdvanceForm((form) => ({ ...form, amount: event.target.value }))} style={inputStyle} />
+            </label>
+            <label style={labelStyle}>
+              Date
+              <input required type="date" value={advanceForm.date} onChange={(event) => setAdvanceForm((form) => ({ ...form, date: event.target.value }))} style={inputStyle} />
+            </label>
+            <label style={labelStyle}>
+              Note
+              <input maxLength={500} value={advanceForm.note} onChange={(event) => setAdvanceForm((form) => ({ ...form, note: event.target.value }))} style={inputStyle} />
+            </label>
+            <button type="submit" disabled={busyId === "manual-advance"} style={buttonStyle}>
+              {busyId === "manual-advance" ? "Saving..." : "Add approved advance"}
+            </button>
+          </form>
+
+          <section style={cardStyle}>
+            <h3 style={{ margin: "0 0 12px", color: C.ink, fontSize: 16 }}>Pending staff requests ({pendingRequests.length})</h3>
+            {pendingRequests.length === 0
+              ? <div style={{ color: C.gray, fontSize: 13 }}>No pending advance requests.</div>
+              : (
+                <div style={{ display: "grid", gap: 10 }}>
+                  {pendingRequests.map((advance) => {
+                    const staffId = getStaffId(advance);
+                    const member = members.find((entry) => entry.id === staffId);
+                    const requestBusy = busyId === `advance-${advance.id}`;
+                    return (
+                      <article key={`${advance.collectionName}-${advance.id}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, padding: 13, border: `1px solid ${C.line}`, borderRadius: 11 }}>
+                        <div>
+                          <div style={{ color: C.ink, fontWeight: 800 }}>{member ? displayStaffName(member) : advance.staffName || advance.name || staffId || "Unknown staff"}</div>
+                          <div style={{ color: C.gray, fontSize: 12, marginTop: 4 }}>
+                            {advance.reason || advance.note || "No note"} · {advance.date || advance.month || ""}
+                          </div>
+                          <input
+                            aria-label={`Admin note for ${displayStaffName(member)}`}
+                            placeholder="Optional admin note"
+                            value={advanceNoteDrafts[advance.id] || ""}
+                            onChange={(event) => setAdvanceNoteDrafts((current) => ({ ...current, [advance.id]: event.target.value }))}
+                            style={{ ...inputStyle, marginTop: 7, maxWidth: 340, padding: "7px 8px" }}
+                          />
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <strong style={{ color: C.gold }}>{formatCurrency(Number(advance.amount || 0))}</strong>
+                          <button type="button" disabled={requestBusy} onClick={() => handleAdvanceDecision(advance, "Approved")} style={buttonStyle}>
+                            {requestBusy ? "Saving..." : "Approve"}
+                          </button>
+                          <button type="button" disabled={requestBusy} onClick={() => handleAdvanceDecision(advance, "Rejected")} style={{ ...buttonStyle, background: "#5B2630", color: "#FCA5A5" }}>
+                            Reject
+                          </button>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+          </section>
+
+          <section style={cardStyle}>
+            <h3 style={{ margin: "0 0 12px", color: C.ink, fontSize: 16 }}>Approved advance totals by staff</h3>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", color: C.ink, fontSize: 12 }}>
+                <thead><tr style={{ textAlign: "left", color: C.gray }}>
+                  {["Staff", `${month} approved`, "Overall approved"].map((heading) => <th key={heading} style={{ padding: 9, borderBottom: `1px solid ${C.line}` }}>{heading}</th>)}
+                </tr></thead>
+                <tbody>{members.map((member) => {
+                  const total = approvedAdvanceSummary.byStaff.get(member.id) || { month: 0, overall: 0 };
+                  return <tr key={member.id}><td style={{ padding: 9, borderBottom: `1px solid ${C.line}` }}>{displayStaffName(member)}</td><td style={{ padding: 9, borderBottom: `1px solid ${C.line}` }}>{formatCurrency(total.month)}</td><td style={{ padding: 9, borderBottom: `1px solid ${C.line}` }}>{formatCurrency(total.overall)}</td></tr>;
+                })}</tbody>
+              </table>
+            </div>
+          </section>
+
+          <section style={cardStyle}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
+              <h3 style={{ margin: 0, color: C.ink, fontSize: 16 }}>Advance history ({advanceHistory.length})</h3>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <select aria-label="Filter advances by staff" value={advanceFilterStaff} onChange={(event) => setAdvanceFilterStaff(event.target.value)} style={{ ...inputStyle, width: 180 }}>
+                  <option value="all">All staff</option>
+                  {members.map((member) => <option key={member.id} value={member.id}>{displayStaffName(member)}</option>)}
+                </select>
+                <select aria-label="Filter advances by month" value={advanceFilterMonth} onChange={(event) => setAdvanceFilterMonth(event.target.value)} style={{ ...inputStyle, width: 150 }}>
+                  <option value="all">All months</option>
+                  {[...new Set(allAdvances.map(getRecordMonth).filter(Boolean))].sort().reverse().map((entryMonth) => <option key={entryMonth} value={entryMonth}>{entryMonth}</option>)}
+                </select>
+              </div>
+            </div>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 700, color: C.ink, fontSize: 12 }}>
+                <thead><tr style={{ textAlign: "left", color: C.gray }}>
+                  {["Date", "Staff", "Amount", "Status", "Source", "Note", "Action"].map((heading) => <th key={heading} style={{ padding: 9, borderBottom: `1px solid ${C.line}`, whiteSpace: "nowrap" }}>{heading}</th>)}
+                </tr></thead>
+                <tbody>
+                  {advanceHistory.map((advance) => {
+                    const member = members.find((entry) => entry.id === getStaffId(advance));
+                    const cancelled = String(advance.status || "").toLowerCase() === "cancelled";
+                    const rowBusy = busyId === `cancel-advance-${advance.id}`;
+                    return (
+                      <tr key={`${advance.collectionName}-${advance.id}`}>
+                        <td style={{ padding: 9, borderBottom: `1px solid ${C.line}`, whiteSpace: "nowrap" }}>{advance.date || advance.month || "—"}</td>
+                        <td style={{ padding: 9, borderBottom: `1px solid ${C.line}` }}>{member ? displayStaffName(member) : advance.staffName || advance.name || getStaffId(advance)}</td>
+                        <td style={{ padding: 9, borderBottom: `1px solid ${C.line}`, whiteSpace: "nowrap" }}>{formatCurrency(Number(advance.amount || 0))}</td>
+                        <td style={{ padding: 9, borderBottom: `1px solid ${C.line}` }}>{advance.status || "Pending"}</td>
+                        <td style={{ padding: 9, borderBottom: `1px solid ${C.line}` }}>{advance.source || "request"}</td>
+                        <td style={{ padding: 9, borderBottom: `1px solid ${C.line}` }}>{advance.note || advance.reason || "—"}</td>
+                        <td style={{ padding: 9, borderBottom: `1px solid ${C.line}` }}>
+                          {!cancelled && <button type="button" disabled={rowBusy} onClick={() => handleCancelAdvance(advance)} style={{ ...buttonStyle, padding: "6px 9px", background: "#5B2630", color: "#FCA5A5" }}>{rowBusy ? "..." : "Cancel"}</button>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {!advanceHistory.length && <tr><td colSpan={7} style={{ padding: 14, color: C.gray, textAlign: "center" }}>No advances match these filters.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+      )}
+
+      {activeTab === "leaves" && (
+        <section style={{ ...cardStyle, display: "grid", gap: 12 }}>
+          <h3 style={{ margin: 0, color: C.ink, fontSize: 16 }}>Staff leave requests ({leaveRequests.length})</h3>
+          {leaveRequests.length === 0
+            ? <div style={{ color: C.gray, fontSize: 13 }}>No leave requests yet.</div>
+            : [...leaveRequests].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).map((leave) => {
+              const member = members.find((entry) => entry.id === leave.staffId);
+              const status = String(leave.status || "pending").toLowerCase();
+              const decisionBusy = busyId === `leave-${leave.id}`;
+              const statusColor = status === "approved" ? C.green
+                : status === "rejected" || status === "cancelled" ? "#FCA5A5" : C.gold;
+              return (
+                <article key={leave.id} style={{ padding: 13, border: `1px solid ${C.line}`, borderRadius: 11, display: "grid", gap: 8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                    <div>
+                      <strong style={{ color: C.ink }}>{member ? displayStaffName(member) : leave.staffName || leave.staffId}</strong>
+                      <div style={{ color: C.gray, fontSize: 12, marginTop: 4 }}>{leave.fromDate} – {leave.toDate} · {leave.type}</div>
+                      <div style={{ color: C.gray, fontSize: 12, marginTop: 3 }}>{leave.reason}</div>
+                    </div>
+                    <strong style={{ color: statusColor, textTransform: "capitalize" }}>{status}</strong>
+                  </div>
+                  {leave.adminNote && <div style={{ color: C.gray, fontSize: 12 }}>Admin note: {leave.adminNote}</div>}
+                  {status === "pending" && (
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                      <input
+                        aria-label={`Admin note for ${leave.staffName || leave.staffId}`}
+                        maxLength={500}
+                        placeholder="Optional admin note"
+                        value={leaveNoteDrafts[leave.id] || ""}
+                        onChange={(event) => setLeaveNoteDrafts((current) => ({ ...current, [leave.id]: event.target.value }))}
+                        style={{ ...inputStyle, maxWidth: 360 }}
+                      />
+                      <button type="button" disabled={decisionBusy} onClick={() => handleLeaveDecision(leave, "approved")} style={buttonStyle}>
+                        {decisionBusy ? "Saving..." : "Approve"}
+                      </button>
+                      <button type="button" disabled={decisionBusy} onClick={() => handleLeaveDecision(leave, "rejected")} style={{ ...buttonStyle, background: "#5B2630", color: "#FCA5A5" }}>
+                        Reject
+                      </button>
+                    </div>
+                  )}
+                  {status === "approved" && (
+                    <button type="button" disabled={decisionBusy} onClick={() => {
+                      if (window.confirm("Approved leave cancel karein aur is request se bane attendance records hata dein?")) {
+                        handleLeaveDecision(leave, "cancelled");
+                      }
+                    }} style={{ ...buttonStyle, justifySelf: "start", background: "#5B2630", color: "#FCA5A5" }}>
+                      {decisionBusy ? "Cancelling..." : "Cancel approved leave"}
+                    </button>
+                  )}
+                </article>
+              );
+            })}
         </section>
       )}
 
@@ -861,6 +1453,20 @@ export default function Staff({ C, isMobile }) {
                 style={{ ...inputStyle, width: 170 }}
               />
             </label>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, 1fr)", gap: 9, marginBottom: 14 }}>
+            {[
+              ["Total Gross", payrollSummary.gross],
+              ["Total Advances", payrollSummary.advances],
+              ["Total Paid", payrollSummary.paid],
+              ["Total Payable", payrollSummary.payable],
+            ].map(([label, amount]) => (
+              <div key={label} style={cardStyle}>
+                <div style={{ color: C.gray, fontSize: 11 }}>{label} · {month}</div>
+                <strong style={{ display: "block", color: label === "Total Payable" ? C.gold : C.ink, fontSize: 17, marginTop: 5 }}>{formatCurrency(amount)}</strong>
+              </div>
+            ))}
           </div>
 
           <form onSubmit={handleMarkAttendance} style={{ ...cardStyle, display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(180px, 1fr) minmax(150px, 190px) minmax(140px, 180px) auto", gap: 10, alignItems: "end", marginBottom: 14 }}>
@@ -893,25 +1499,18 @@ export default function Staff({ C, isMobile }) {
             <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1050, color: C.ink, fontSize: 12 }}>
               <thead>
                 <tr style={{ background: C.cardAlt, textAlign: "left", color: C.gray }}>
-                  {["Staff", "Present days", "Paid leave", "Earned leaves", "Paid days", "Monthly salary", "Per day", "Gross salary", "Approved advances", "Carry forward advance", "Final payable"].map((heading) => (
+                  {["Staff", "Present days", "Paid leave", "Earned leaves", "Paid days", "Monthly salary", "Per day", "Gross salary", "Approved advances", "Carry forward advance", "Final payable", "Paid", "Balance due", "Status", "Payment"].map((heading) => (
                     <th key={heading} style={{ padding: 11, borderBottom: `1px solid ${C.line}`, whiteSpace: "nowrap" }}>{heading}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {payrollMembers.map((member) => {
-                  const stats = attendanceStatsByStaff.get(member.id) || { presentDays: 0, paidLeaveDays: 0 };
+                {payrollRows.map((payrollRow) => {
+                  const { member, monthlySalary, stats, salary, approvedAdvance } = payrollRow;
                   const { presentDays, paidLeaveDays } = stats;
-                  const approvedAdvance = approvedAdvanceTotals.get(member.id) || 0;
-                  const monthlySalary = Number(legacyPayroll[member.id]?.monthlySalary ?? member.monthlySalary ?? 0);
-                  const salary = calculateStaffSalary({
-                    monthlySalary,
-                    presentDays,
-                    paidLeaveDays,
-                    totalApprovedAdvance: approvedAdvance,
-                    daysInPayPeriod: daysInMonth(month),
-                  });
                   const dateValue = presentDays.toLocaleString("en-IN", { maximumFractionDigits: 1 });
+                  const statusColor = payrollRow.status === "Paid" ? C.green
+                    : payrollRow.status === "Partial" ? C.gold : "#FCA5A5";
                   return (
                     <tr
                       key={member.id}
@@ -935,13 +1534,31 @@ export default function Staff({ C, isMobile }) {
                       <td style={{ padding: 10, borderBottom: `1px solid ${C.line}`, whiteSpace: "nowrap" }}>{formatCurrency(salary.perDaySalary)}</td>
                       <td style={{ padding: 10, borderBottom: `1px solid ${C.line}`, whiteSpace: "nowrap" }}>{formatCurrency(salary.grossSalary)}</td>
                       <td style={{ padding: 10, borderBottom: `1px solid ${C.line}`, whiteSpace: "nowrap" }}>− {formatCurrency(approvedAdvance)}</td>
-                      <td style={{ padding: 10, borderBottom: `1px solid ${C.line}`, whiteSpace: "nowrap", color: salary.carryForwardAdvance > 0 ? "#FCA5A5" : C.gray }}>{formatCurrency(salary.carryForwardAdvance)}</td>
-                      <td style={{ padding: 10, borderBottom: `1px solid ${C.line}`, whiteSpace: "nowrap", color: C.gold, fontWeight: 900 }}>{formatCurrency(salary.finalPayable)}</td>
+                      <td style={{ padding: 10, borderBottom: `1px solid ${C.line}`, whiteSpace: "nowrap", color: payrollRow.carryForwardIn > 0 ? C.gold : C.gray }}>{formatCurrency(payrollRow.carryForwardIn)}</td>
+                      <td style={{ padding: 10, borderBottom: `1px solid ${C.line}`, whiteSpace: "nowrap", color: C.gold, fontWeight: 900 }}>{formatCurrency(payrollRow.payable)}</td>
+                      <td style={{ padding: 10, borderBottom: `1px solid ${C.line}`, whiteSpace: "nowrap" }}>{formatCurrency(payrollRow.paid)}</td>
+                      <td style={{ padding: 10, borderBottom: `1px solid ${C.line}`, whiteSpace: "nowrap", color: payrollRow.balanceDue > 0 ? "#FCA5A5" : C.green }}>
+                        {formatCurrency(payrollRow.balanceDue)}{payrollRow.balanceDue > 0 && <small style={{ display: "block" }}>Pending</small>}
+                      </td>
+                      <td style={{ padding: 10, borderBottom: `1px solid ${C.line}`, color: statusColor, fontWeight: 800 }}>{payrollRow.status}</td>
+                      <td style={{ padding: 8, borderBottom: `1px solid ${C.line}` }}>
+                        <button
+                          type="button"
+                          disabled={payrollRow.balanceDue <= 0}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            openPaymentModal(payrollRow);
+                          }}
+                          style={{ ...buttonStyle, padding: "7px 10px", opacity: payrollRow.balanceDue <= 0 ? 0.5 : 1 }}
+                        >
+                          Pay
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}
-                {!payrollMembers.length && (
-                  <tr><td colSpan={11} style={{ padding: 18, color: C.gray, textAlign: "center" }}>No active staff with monthly salary above ₹0.</td></tr>
+                {!payrollRows.length && (
+                  <tr><td colSpan={15} style={{ padding: 18, color: C.gray, textAlign: "center" }}>No active staff with monthly salary above ₹0.</td></tr>
                 )}
               </tbody>
             </table>
@@ -951,6 +1568,7 @@ export default function Staff({ C, isMobile }) {
             const stats = attendanceStatsByStaff.get(selectedMember.id) || { presentDays: 0, paidLeaveDays: 0 };
             const approvedAdvance = approvedAdvanceTotals.get(selectedMember.id) || 0;
             const monthlySalary = Number(legacyPayroll[selectedMember.id]?.monthlySalary ?? selectedMember.monthlySalary ?? 0);
+            const payrollRow = payrollRows.find((entry) => entry.member.id === selectedMember.id);
             const salary = calculateStaffSalary({
               monthlySalary,
               presentDays: stats.presentDays,
@@ -958,6 +1576,11 @@ export default function Staff({ C, isMobile }) {
               totalApprovedAdvance: approvedAdvance,
               daysInPayPeriod: daysInMonth(month),
             });
+            const payable = payrollRow?.payable ?? salary.finalPayable;
+            const balanceDue = payrollRow?.balanceDue ?? payable;
+            const paymentHistory = salaryPayments
+              .filter((payment) => payment.staffId === selectedMember.id && payment.month === month)
+              .sort((a, b) => String(b.date).localeCompare(String(a.date)));
             const calendarCount = daysInMonth(month);
             const firstWeekday = new Date(`${month}-01T00:00:00`).getDay();
             const selectedDateRecord = allAttendanceRecords.get(`${selectedMember.id}_${attendanceForm.date}`);
@@ -987,7 +1610,8 @@ export default function Staff({ C, isMobile }) {
                       ["Per day", salary.perDaySalary],
                       ["Gross", salary.grossSalary],
                       ["Advances", approvedAdvance],
-                      ["Final payable", salary.finalPayable],
+                      ["Final payable", payable],
+                      ["Balance due", balanceDue],
                     ].map(([label, amount]) => (
                       <div key={label} style={{ background: C.cardAlt, padding: 10, borderRadius: 9 }}>
                         <div style={{ color: C.gray, fontSize: 11 }}>{label}</div>
@@ -997,6 +1621,9 @@ export default function Staff({ C, isMobile }) {
                   </div>
                   {salary.carryForwardAdvance > 0 && (
                     <div style={{ color: "#FCA5A5", fontSize: 12, marginTop: 8 }}>Carry forward advance: {formatCurrency(salary.carryForwardAdvance)}</div>
+                  )}
+                  {payrollRow?.carryForwardIn > 0 && (
+                    <div style={{ color: C.gold, fontSize: 12, marginTop: 8 }}>Previous month carry forward: {formatCurrency(payrollRow.carryForwardIn)}</div>
                   )}
 
                   <h4 style={{ color: C.ink, margin: "20px 0 8px" }}>Attendance calendar</h4>
@@ -1024,7 +1651,7 @@ export default function Staff({ C, isMobile }) {
                             date,
                             status: status || "Present",
                           }))}
-                          title={status ? `${status} · ${record.source === "gps" ? "GPS" : "Manual"}` : "Not marked"}
+                          title={status ? `${status} · ${record.source === "gps" ? "GPS" : record.source === "leave" ? "Leave" : "Manual"}` : "Not marked"}
                           style={{ minWidth: 0, padding: "6px 2px", border: `1px solid ${date === attendanceForm.date ? C.gold : C.line}`, borderRadius: 7, background: C.bg, color: date > todayKey() ? C.gray : color, cursor: date > todayKey() ? "not-allowed" : "pointer", opacity: date > todayKey() ? 0.45 : 1 }}
                         >
                           <span style={{ display: "block", fontSize: 12, fontWeight: 800 }}>{day}</span>
@@ -1058,6 +1685,28 @@ export default function Staff({ C, isMobile }) {
                     </div>
                   )}
 
+                  <h4 style={{ color: C.ink, margin: "20px 0 8px" }}>Salary payment history · {month}</h4>
+                  {paymentHistory.length === 0
+                    ? <div style={{ color: C.gray, fontSize: 12 }}>No salary payments recorded for this month.</div>
+                    : paymentHistory.map((payment) => {
+                      const cancelled = String(payment.status || "paid").toLowerCase() === "cancelled";
+                      const paymentBusy = busyId === `cancel-payment-${payment.id}`;
+                      return (
+                        <div key={payment.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: "8px 0", borderTop: `1px solid ${C.line}`, color: C.ink, fontSize: 12 }}>
+                          <div>
+                            <strong>{payment.date} · {formatCurrency(Number(payment.amount || 0))}</strong>
+                            {payment.note && <div style={{ marginTop: 3, color: C.gray }}>{payment.note}</div>}
+                            {cancelled && <small style={{ color: "#FCA5A5" }}>Cancelled</small>}
+                          </div>
+                          {!cancelled && (
+                            <button type="button" disabled={paymentBusy} onClick={() => handleCancelSalaryPayment(payment)} style={{ ...buttonStyle, padding: "6px 9px", background: "#5B2630", color: "#FCA5A5" }}>
+                              {paymentBusy ? "..." : "Cancel payment"}
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+
                   <h4 style={{ color: C.ink, margin: "20px 0 8px" }}>Approved advances</h4>
                   {(approvedAdvancesByStaff.get(selectedMember.id) || []).length === 0
                     ? <div style={{ color: C.gray, fontSize: 12 }}>Is month mein approved advance nahi hai.</div>
@@ -1068,6 +1717,60 @@ export default function Staff({ C, isMobile }) {
                       </div>
                     ))}
                 </section>
+              </div>
+            );
+          })()}
+
+          {paymentMemberId && (() => {
+            const paymentRow = payrollRows.find((entry) => entry.member.id === paymentMemberId);
+            if (!paymentRow) return null;
+            const amount = Number(paymentForm.amount);
+            const remaining = Number.isFinite(amount) ? Math.max(0, paymentRow.balanceDue - amount) : paymentRow.balanceDue;
+            return (
+              <div
+                role="presentation"
+                onClick={() => setPaymentMemberId("")}
+                style={{ position: "fixed", inset: 0, zIndex: 1100, background: "rgba(0,0,0,0.76)", display: "grid", placeItems: "center", padding: 14 }}
+              >
+                <form
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="salary-payment-title"
+                  onSubmit={handleCreateSalaryPayment}
+                  onClick={(event) => event.stopPropagation()}
+                  style={{ ...cardStyle, width: "min(480px, 100%)", display: "grid", gap: 12, boxSizing: "border-box" }}
+                >
+                  <h3 id="salary-payment-title" style={{ margin: 0, color: C.ink }}>Salary payment · {displayStaffName(paymentRow.member)}</h3>
+                  <label style={labelStyle}>
+                    Payable amount (₹)
+                    <input readOnly value={paymentRow.payable.toFixed(2)} style={inputStyle} />
+                  </label>
+                  <div style={{ color: C.gray, fontSize: 12 }}>Balance due before this payment: {formatCurrency(paymentRow.balanceDue)}</div>
+                  <label style={labelStyle}>
+                    Amount paying now (₹)
+                    <input required type="number" min="0" max={paymentRow.balanceDue} step="0.01" value={paymentForm.amount} onChange={(event) => setPaymentForm((form) => ({ ...form, amount: event.target.value }))} style={inputStyle} />
+                  </label>
+                  <label style={labelStyle}>
+                    Payment date
+                    <input required type="date" value={paymentForm.date} onChange={(event) => setPaymentForm((form) => ({ ...form, date: event.target.value }))} style={inputStyle} />
+                  </label>
+                  <label style={labelStyle}>
+                    Note (optional)
+                    <input maxLength={500} value={paymentForm.note} onChange={(event) => setPaymentForm((form) => ({ ...form, note: event.target.value }))} style={inputStyle} />
+                  </label>
+                  {remaining > 0 && (
+                    <label style={{ display: "flex", alignItems: "center", gap: 8, color: C.ink, fontSize: 13 }}>
+                      <input type="checkbox" checked={paymentForm.carryForward} onChange={(event) => setPaymentForm((form) => ({ ...form, carryForward: event.target.checked }))} />
+                      Carry forward balance ({formatCurrency(remaining)}) to {nextMonthKey(month)}
+                    </label>
+                  )}
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button type="submit" disabled={busyId === "salary-payment"} style={buttonStyle}>
+                      {busyId === "salary-payment" ? "Saving..." : "Save payment"}
+                    </button>
+                    <button type="button" onClick={() => setPaymentMemberId("")} style={{ ...buttonStyle, background: C.cardAlt, color: C.ink }}>Close</button>
+                  </div>
+                </form>
               </div>
             );
           })()}

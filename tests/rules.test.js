@@ -18,6 +18,7 @@ beforeAll(async () => {
     await setDoc(doc(db, "staff/w1"), { role: "waiter" });
     await setDoc(doc(db, "staff/a1"), { role: "admin" });
     await setDoc(doc(db, "staff/o1"), { role: "owner" });
+    await setDoc(doc(db, "staff/m1"), { role: "manager" });
     await setDoc(doc(db, "staff/d1"), { role: "delivery" });
     await setDoc(doc(db, "settings/privatePins"), { pin: "x" });
     await setDoc(doc(db, "settings/menu"), { items: [] });
@@ -110,6 +111,87 @@ describe("other collections", () => {
       status: "Approved", approvedBy: "a1", approvedAt: Date.now(),
     }));
     await assertFails(updateDoc(doc(as("w1"), "advances", request.id), { status: "Approved" }));
+    await assertFails(updateDoc(doc(as("m1"), "advances", request.id), {
+      status: "Rejected", rejectedBy: "m1", rejectedAt: Date.now(),
+    }));
+  });
+  test("admin can add and cancel manual advances; staff cannot create them", async () => {
+    const manual = await addDoc(collection(as("a1"), "advances"), {
+      staffId: "w1", staffName: "Waiter", amount: 500, date: "2026-11-21",
+      month: "2026-11", note: "Travel", reason: "Travel", source: "manual",
+      status: "Approved", createdAt: Date.now(), approvedBy: "a1", approvedAt: Date.now(),
+    });
+    await assertSucceeds(updateDoc(doc(as("a1"), "advances", manual.id), {
+      status: "Cancelled", cancelledBy: "a1", cancelledAt: Date.now(),
+    }));
+    await assertFails(addDoc(collection(as("w1"), "advances"), {
+      staffId: "w1", staffName: "Waiter", amount: 500, date: "2026-11-21",
+      month: "2026-11", note: "Manual", reason: "Manual", source: "manual",
+      status: "Approved", createdAt: Date.now(), approvedBy: "w1", approvedAt: Date.now(),
+    }));
+    await assertFails(addDoc(collection(as("m1"), "advances"), {
+      staffId: "w1", staffName: "Waiter", amount: 500, date: "2026-11-21",
+      month: "2026-11", note: "Manual", reason: "Manual", source: "manual",
+      status: "Approved", createdAt: Date.now(), approvedBy: "m1", approvedAt: Date.now(),
+    }));
+  });
+  test("staff can create and cancel only their own pending leave request", async () => {
+    const pending = await addDoc(collection(as("w1"), "leaveRequests"), {
+      staffId: "w1", staffName: "Waiter", fromDate: "2026-11-20", toDate: "2026-11-21",
+      type: "Paid Leave", reason: "Family", status: "pending", createdAt: Date.now(),
+    });
+    await assertSucceeds(getDoc(doc(as("w1"), "leaveRequests", pending.id)));
+    await assertSucceeds(updateDoc(doc(as("w1"), "leaveRequests", pending.id), {
+      status: "cancelled", cancelledAt: Date.now(),
+    }));
+    const other = await env.withSecurityRulesDisabled(async (ctx) => {
+      const ref = doc(ctx.firestore(), "leaveRequests/for-w1");
+      await setDoc(ref, {
+        staffId: "a1", staffName: "Admin", fromDate: "2026-11-20", toDate: "2026-11-21",
+        type: "Paid Leave", reason: "Family", status: "pending", createdAt: Date.now(),
+      });
+      return ref.id;
+    });
+    await assertFails(getDoc(doc(as("w1"), "leaveRequests", other)));
+    await assertFails(addDoc(collection(as("w1"), "leaveRequests"), {
+      staffId: "a1", staffName: "Admin", fromDate: "2026-11-20", toDate: "2026-11-21",
+      type: "Paid Leave", reason: "Family", status: "pending", createdAt: Date.now(),
+    }));
+    await assertSucceeds(updateDoc(doc(as("a1"), "leaveRequests", other), {
+      status: "approved", adminNote: "Approved", decidedBy: "a1", decidedAt: Date.now(),
+    }));
+    await assertSucceeds(setDoc(doc(as("a1"), "attendance/a1_2026-11-20"), {
+      staffId: "a1", date: "2026-11-20", status: "Paid Leave", markedBy: "Admin",
+      source: "leave", leaveRequestId: other,
+    }));
+  });
+  test("salary payments and carry forwards are admin-only and payments are soft-cancelled", async () => {
+    const payment = await addDoc(collection(as("a1"), "salaryPayments"), {
+      staffId: "w1", month: "2026-11", amount: 4000, date: "2026-11-22",
+      note: "Part payment", createdBy: "a1", createdAt: Date.now(), status: "paid",
+    });
+    await assertSucceeds(updateDoc(doc(as("a1"), "salaryPayments", payment.id), {
+      status: "cancelled", cancelledBy: "a1", cancelledAt: Date.now(),
+    }));
+    await assertFails(addDoc(collection(as("w1"), "salaryPayments"), {
+      staffId: "w1", month: "2026-11", amount: 1000, date: "2026-11-22",
+      note: "", createdBy: "w1", createdAt: Date.now(), status: "paid",
+    }));
+    await assertFails(addDoc(collection(as("m1"), "salaryPayments"), {
+      staffId: "w1", month: "2026-11", amount: 1000, date: "2026-11-22",
+      note: "", createdBy: "m1", createdAt: Date.now(), status: "paid",
+    }));
+    await assertSucceeds(setDoc(doc(as("a1"), "salaryCarryForwards/w1_2026-11"), {
+      staffId: "w1", fromMonth: "2026-11", month: "2026-12", amount: 2000,
+      status: "active", createdBy: "a1", createdAt: Date.now(), updatedAt: Date.now(), updatedBy: "a1",
+    }));
+    await assertSucceeds(updateDoc(doc(as("o1"), "salaryCarryForwards/w1_2026-11"), {
+      amount: 1500, updatedAt: Date.now(), updatedBy: "o1",
+    }));
+    await assertFails(setDoc(doc(as("w1"), "salaryCarryForwards/w1_2026-11"), {
+      staffId: "w1", fromMonth: "2026-11", month: "2026-12", amount: 2000,
+      status: "active", createdBy: "w1", createdAt: Date.now(), updatedAt: Date.now(), updatedBy: "w1",
+    }));
   });
   test("admin can save a staff salary", () => assertSucceeds(setDoc(doc(as("a1"), "staffPayroll/w1"), {
     uid: "w1", monthlySalary: 30000, updatedAt: Date.now(), updatedBy: "a1",

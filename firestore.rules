@@ -12,6 +12,7 @@ service cloud.firestore {
     }
     function isStaff() { return hasStaffDoc() && staffRole() in ['admin', 'owner', 'manager', 'staff', 'waiter', 'cashier', 'chef']; }
     function isAdmin() { return hasStaffDoc() && staffRole() in ['admin', 'owner', 'manager']; }
+    function isAdminOrOwner() { return hasStaffDoc() && staffRole() in ['admin', 'owner']; }
     function validStaffProfile() {
       let d = request.resource.data;
       return d.name is string && d.name.size() > 0 && d.name.size() <= 80
@@ -19,6 +20,30 @@ service cloud.firestore {
         && (!('active' in d) || d.active is bool)
         && (!('monthlySalary' in d)
           || (d.monthlySalary is number && d.monthlySalary >= 0 && d.monthlySalary <= 100000000));
+    }
+    function validSalaryCarryForward() {
+      let d = request.resource.data;
+      return d.keys().hasOnly([
+          'staffId', 'fromMonth', 'month', 'amount', 'status',
+          'createdBy', 'createdAt', 'updatedAt', 'updatedBy',
+          'cancelledAt', 'cancelledBy'
+        ])
+        && d.keys().hasAll([
+          'staffId', 'fromMonth', 'month', 'amount', 'status',
+          'createdBy', 'createdAt', 'updatedAt', 'updatedBy'
+        ])
+        && d.staffId is string
+        && exists(/databases/$(db)/documents/staff/$(d.staffId))
+        && d.fromMonth.matches('^[0-9]{4}-(0[1-9]|1[0-2])$')
+        && d.month.matches('^[0-9]{4}-(0[1-9]|1[0-2])$')
+        && d.amount is number && d.amount > 0
+        && d.status in ['active', 'cancelled']
+        && d.createdBy is string
+        && d.createdAt is int
+        && d.updatedAt is int
+        && d.updatedBy == request.auth.uid
+        && (d.status != 'cancelled'
+          || (d.cancelledBy == request.auth.uid && d.cancelledAt is int));
     }
     function restaurantRadius() {
       return exists(/databases/$(db)/documents/settings/restaurant)
@@ -89,7 +114,7 @@ service cloud.firestore {
 
     match /staffAdvances/{id} {
       allow read: if isAdmin() || (signedIn() && resource.data.uid == request.auth.uid);
-      allow create: if isAdmin()
+      allow create: if isAdminOrOwner()
         && request.resource.data.keys().hasOnly(['uid', 'amount', 'month', 'status', 'createdAt', 'approvedBy'])
         && request.resource.data.uid is string
         && exists(/databases/$(db)/documents/staff/$(request.resource.data.uid))
@@ -100,7 +125,8 @@ service cloud.firestore {
         && request.resource.data.status == 'approved'
         && request.resource.data.createdAt is int
         && request.resource.data.approvedBy == request.auth.uid;
-      allow update, delete: if isAdmin();
+      allow update: if isAdminOrOwner();
+      allow delete: if false;
     }
 
     match /settings/{docId} {
@@ -123,43 +149,162 @@ service cloud.firestore {
     match /advances/{id} {
       allow read: if isAdmin()
         || (signedIn() && resource.data.get('staffId', resource.data.get('uid', '')) == request.auth.uid);
+      allow create: if ((isStaff() || isDelivery())
+          && request.resource.data.keys().hasOnly([
+            'staffId', 'uid', 'staffName', 'name', 'amount', 'reason', 'note',
+            'status', 'createdAt', 'month', 'date', 'source'
+          ])
+          && request.resource.data.keys().hasAny(['staffId', 'uid'])
+          && request.resource.data.get('staffId', request.auth.uid) == request.auth.uid
+          && request.resource.data.get('uid', request.auth.uid) == request.auth.uid
+          && request.resource.data.amount is number
+          && request.resource.data.amount > 0 && request.resource.data.amount <= 10000000
+          && request.resource.data.reason is string
+          && request.resource.data.reason.size() > 0 && request.resource.data.reason.size() <= 500
+          && request.resource.data.status == 'Pending'
+          && request.resource.data.createdAt is int
+          && (!('month' in request.resource.data)
+            || request.resource.data.month.matches('^[0-9]{4}-(0[1-9]|1[0-2])$'))
+          && (!('date' in request.resource.data)
+            || request.resource.data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$'))
+          && (!('source' in request.resource.data) || request.resource.data.source == 'request'))
+        || (isAdminOrOwner()
+          && request.resource.data.keys().hasOnly([
+            'staffId', 'staffName', 'amount', 'date', 'month', 'note', 'reason',
+            'source', 'status', 'createdAt', 'approvedBy', 'approvedAt'
+          ])
+          && request.resource.data.keys().hasAll([
+            'staffId', 'staffName', 'amount', 'date', 'month', 'source',
+            'status', 'createdAt', 'approvedBy', 'approvedAt'
+          ])
+          && request.resource.data.staffId is string
+          && exists(/databases/$(db)/documents/staff/$(request.resource.data.staffId))
+          && request.resource.data.amount is number
+          && request.resource.data.amount > 0 && request.resource.data.amount <= 10000000
+          && request.resource.data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+          && request.resource.data.month.matches('^[0-9]{4}-(0[1-9]|1[0-2])$')
+          && request.resource.data.source == 'manual'
+          && request.resource.data.status == 'Approved'
+          && request.resource.data.createdAt is int
+          && request.resource.data.approvedBy == request.auth.uid
+          && request.resource.data.approvedAt is int);
+      allow update: if isAdminOrOwner()
+        && ((resource.data.status == 'Pending'
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['status', 'approvedBy', 'approvedAt', 'rejectedBy', 'rejectedAt', 'adminNote'])
+          && request.resource.data.status in ['Approved', 'Rejected']
+          && (request.resource.data.status != 'Approved'
+            || (request.resource.data.approvedBy == request.auth.uid && request.resource.data.approvedAt is int))
+          && (request.resource.data.status != 'Rejected'
+            || (request.resource.data.rejectedBy == request.auth.uid && request.resource.data.rejectedAt is int))
+          && (!('adminNote' in request.resource.data) || request.resource.data.adminNote is string))
+        || (resource.data.status in ['Pending', 'pending', 'Approved', 'approved', 'Rejected', 'rejected']
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['status', 'cancelledBy', 'cancelledAt'])
+          && request.resource.data.status == 'Cancelled'
+          && request.resource.data.cancelledBy == request.auth.uid
+          && request.resource.data.cancelledAt is int));
+      allow delete: if false;
+    }
+
+    match /salaryPayments/{id} {
+      allow read: if isAdmin();
+      allow create: if isAdminOrOwner()
+        && request.resource.data.keys().hasOnly([
+          'staffId', 'month', 'amount', 'date', 'note', 'createdBy', 'createdAt', 'status'
+        ])
+        && request.resource.data.keys().hasAll([
+          'staffId', 'month', 'amount', 'date', 'note', 'createdBy', 'createdAt', 'status'
+        ])
+        && request.resource.data.staffId is string
+        && exists(/databases/$(db)/documents/staff/$(request.resource.data.staffId))
+        && request.resource.data.month.matches('^[0-9]{4}-(0[1-9]|1[0-2])$')
+        && request.resource.data.amount is number
+        && request.resource.data.amount > 0 && request.resource.data.amount <= 100000000
+        && request.resource.data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && request.resource.data.note is string
+        && request.resource.data.note.size() <= 500
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.createdAt is int
+        && request.resource.data.status == 'paid';
+      allow update: if isAdminOrOwner()
+        && resource.data.status != 'cancelled'
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['status', 'cancelledBy', 'cancelledAt'])
+        && request.resource.data.status == 'cancelled'
+        && request.resource.data.cancelledBy == request.auth.uid
+        && request.resource.data.cancelledAt is int;
+      allow delete: if false;
+    }
+
+    match /salaryCarryForwards/{id} {
+      allow read: if isAdmin();
+      allow create: if isAdminOrOwner()
+        && validSalaryCarryForward()
+        && request.resource.data.createdBy == request.auth.uid;
+      allow update: if isAdminOrOwner()
+        && validSalaryCarryForward()
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['amount', 'status', 'updatedAt', 'updatedBy', 'cancelledAt', 'cancelledBy']);
+      allow delete: if false;
+    }
+
+    match /leaveRequests/{id} {
+      allow read: if isAdmin()
+        || (signedIn() && resource.data.staffId == request.auth.uid);
       allow create: if (isStaff() || isDelivery())
         && request.resource.data.keys().hasOnly([
-          'staffId', 'uid', 'staffName', 'name', 'amount', 'reason', 'status', 'createdAt', 'month'
+          'staffId', 'staffName', 'fromDate', 'toDate', 'type', 'reason', 'status', 'createdAt'
         ])
-        && request.resource.data.keys().hasAny(['staffId', 'uid'])
-        && (request.resource.data.get('staffId', request.auth.uid) == request.auth.uid)
-        && (request.resource.data.get('uid', request.auth.uid) == request.auth.uid)
-        && request.resource.data.amount is number
-        && request.resource.data.amount > 0 && request.resource.data.amount <= 10000000
+        && request.resource.data.keys().hasAll([
+          'staffId', 'staffName', 'fromDate', 'toDate', 'type', 'reason', 'status', 'createdAt'
+        ])
+        && request.resource.data.staffId == request.auth.uid
+        && request.resource.data.staffName is string
+        && request.resource.data.fromDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && request.resource.data.toDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && request.resource.data.fromDate <= request.resource.data.toDate
+        && request.resource.data.type in ['Paid Leave', 'Unpaid Leave', 'Half Day']
         && request.resource.data.reason is string
-        && request.resource.data.reason.size() > 0 && request.resource.data.reason.size() <= 500
-        && request.resource.data.status == 'Pending'
-        && request.resource.data.createdAt is int
-        && (!('month' in request.resource.data)
-          || request.resource.data.month.matches('^[0-9]{4}-(0[1-9]|1[0-2])$'));
-      allow update: if isAdmin()
-        && resource.data.status == 'Pending'
-        && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['status', 'approvedBy', 'approvedAt'])
-        && request.resource.data.status == 'Approved'
-        && request.resource.data.approvedBy == request.auth.uid
-        && request.resource.data.approvedAt is int;
-      allow delete: if isAdmin();
+        && request.resource.data.reason.size() > 0
+        && request.resource.data.reason.size() <= 500
+        && request.resource.data.status == 'pending'
+        && request.resource.data.createdAt is int;
+      allow update: if (isAdminOrOwner()
+          && resource.data.status in ['pending', 'approved']
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['status', 'adminNote', 'decidedBy', 'decidedAt', 'cancelledBy', 'cancelledAt'])
+          && request.resource.data.status in ['approved', 'rejected', 'cancelled']
+          && (!('adminNote' in request.resource.data) || request.resource.data.adminNote is string)
+          && (request.resource.data.status == 'cancelled'
+            ? (request.resource.data.cancelledBy == request.auth.uid && request.resource.data.cancelledAt is int)
+            : (request.resource.data.decidedBy == request.auth.uid && request.resource.data.decidedAt is int)))
+        || ((isStaff() || isDelivery())
+          && resource.data.staffId == request.auth.uid
+          && resource.data.status == 'pending'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'cancelledAt'])
+          && request.resource.data.status == 'cancelled'
+          && request.resource.data.cancelledAt is int);
+      allow delete: if false;
     }
 
     match /attendance/{id} {
       allow read: if isAdmin()
         || (signedIn() && resource.data.staffId == request.auth.uid);
-      allow create: if (isAdmin()
-        && request.resource.data.keys().hasOnly(['staffId', 'date', 'status', 'markedBy', 'source'])
+      allow create: if (isAdminOrOwner()
+        && request.resource.data.keys().hasOnly(['staffId', 'date', 'status', 'markedBy', 'source', 'leaveRequestId'])
         && request.resource.data.keys().hasAll(['staffId', 'date', 'status', 'markedBy', 'source'])
         && request.resource.data.staffId is string
         && exists(/databases/$(db)/documents/staff/$(request.resource.data.staffId))
         && request.resource.data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
         && request.resource.data.status in ['Present', 'Half Day', 'Absent', 'Paid Leave']
         && request.resource.data.markedBy == 'Admin'
-        && request.resource.data.source == 'manual')
+        && (request.resource.data.source == 'manual'
+          || (request.resource.data.source == 'leave'
+            && request.resource.data.keys().hasAll(['leaveRequestId'])
+            && request.resource.data.leaveRequestId is string
+            && exists(/databases/$(db)/documents/leaveRequests/$(request.resource.data.leaveRequestId)))))
         || ((isStaff() || isDelivery())
           && request.resource.data.keys().hasOnly(['staffId', 'date', 'status', 'distanceMeters', 'source'])
           && request.resource.data.keys().hasAll(['staffId', 'date', 'status', 'distanceMeters'])
@@ -170,16 +315,26 @@ service cloud.firestore {
           && request.resource.data.distanceMeters is number
           && request.resource.data.distanceMeters >= 0
           && request.resource.data.distanceMeters <= restaurantRadius());
-      allow update: if isAdmin()
-        && request.resource.data.keys().hasOnly(['staffId', 'date', 'status', 'markedBy', 'source'])
+      allow update: if isAdminOrOwner()
+        && request.resource.data.keys().hasOnly(['staffId', 'date', 'status', 'markedBy', 'source', 'leaveRequestId'])
         && request.resource.data.keys().hasAll(['staffId', 'date', 'status', 'markedBy', 'source'])
         && request.resource.data.staffId is string
         && exists(/databases/$(db)/documents/staff/$(request.resource.data.staffId))
         && request.resource.data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
         && request.resource.data.status in ['Present', 'Half Day', 'Absent', 'Paid Leave']
         && request.resource.data.markedBy == 'Admin'
-        && request.resource.data.source == 'manual';
-      allow delete: if isAdmin();
+        && (request.resource.data.source == 'manual'
+          || (request.resource.data.source == 'leave'
+            && request.resource.data.keys().hasAll(['leaveRequestId'])
+            && request.resource.data.leaveRequestId is string
+            && exists(/databases/$(db)/documents/leaveRequests/$(request.resource.data.leaveRequestId))));
+      allow delete: if isAdminOrOwner()
+        || ((isStaff() || isDelivery())
+          && resource.data.staffId == request.auth.uid
+          && resource.data.source == 'leave'
+          && exists(/databases/$(db)/documents/leaveRequests/$(resource.data.leaveRequestId))
+          && get(/databases/$(db)/documents/leaveRequests/$(resource.data.leaveRequestId)).data.staffId == request.auth.uid
+          && get(/databases/$(db)/documents/leaveRequests/$(resource.data.leaveRequestId)).data.status == 'pending');
     }
 
     // ============================================================

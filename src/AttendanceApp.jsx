@@ -6,12 +6,14 @@ import {
   signInWithEmailAndPassword,
   signOut,
 } from "firebase/auth";
-import { addDoc, collection, doc, getDoc, getDocs, onSnapshot, query, where } from "firebase/firestore";
+import { addDoc, collection, doc, getDoc, getDocs, onSnapshot, query, updateDoc, where, writeBatch } from "firebase/firestore";
 import { auth } from "./firebase";
 import { db } from "./firebase";
 import {
   ATTENDANCE_RADIUS_METERS,
+  dateRangeInclusive,
   haversineDistanceMeters,
+  isValidDateKey,
   RESTAURANT_LOCATION,
 } from "./lib/staffPayroll";
 import "./AttendanceApp.css";
@@ -49,12 +51,21 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
   const [legacyAttendanceRecords, setLegacyAttendanceRecords] = useState([]);
   const [advanceRecords, setAdvanceRecords] = useState([]);
   const [legacyAdvanceRecords, setLegacyAdvanceRecords] = useState([]);
+  const [leaveRequests, setLeaveRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [advanceAmount, setAdvanceAmount] = useState("");
   const [advanceReason, setAdvanceReason] = useState("");
   const [submittingAdvance, setSubmittingAdvance] = useState(false);
+  const [leaveForm, setLeaveForm] = useState({
+    fromDate: attendanceDate(new Date()),
+    toDate: attendanceDate(new Date()),
+    type: "Paid Leave",
+    reason: "",
+  });
+  const [submittingLeave, setSubmittingLeave] = useState(false);
+  const [cancellingLeaveId, setCancellingLeaveId] = useState("");
   const [loginError, setLoginError] = useState("");
   const [attendanceError, setAttendanceError] = useState("");
   const [profileError, setProfileError] = useState("");
@@ -73,13 +84,24 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
 
   const attendanceHistory = useMemo(() => {
     const recordsByDate = new Map();
-    [...attendanceRecords, ...legacyAttendanceRecords].forEach((record) => {
-      const isPresent = record.status?.toLowerCase() === "present" || record.action === "present";
-      if (record.date && isPresent && !recordsByDate.has(record.date)) {
-        recordsByDate.set(record.date, record);
+    attendanceRecords.forEach((record) => {
+      if (!record.date) return;
+      const current = recordsByDate.get(record.date);
+      const source = record.source || (record.distanceMeters != null ? "gps" : "manual");
+      const normalized = { ...record, source };
+      const sourcePriority = { gps: 0, manual: 1, leave: 2 };
+      if (!current || sourcePriority[source] > sourcePriority[current.source]) {
+        recordsByDate.set(record.date, normalized);
       }
     });
-    return [...recordsByDate.values()].sort((a, b) => b.date.localeCompare(a.date));
+    legacyAttendanceRecords.forEach((record) => {
+      if (record.date && record.action === "present" && !recordsByDate.has(record.date)) {
+        recordsByDate.set(record.date, { ...record, status: "Present", source: "gps" });
+      }
+    });
+    return [...recordsByDate.values()]
+      .filter((record) => record.status || record.action === "present")
+      .sort((a, b) => b.date.localeCompare(a.date));
   }, [attendanceRecords, legacyAttendanceRecords]);
 
   const advanceHistory = useMemo(
@@ -87,7 +109,14 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
       .sort((a, b) => timestampMillis(b.createdAt) - timestampMillis(a.createdAt)),
     [advanceRecords, legacyAdvanceRecords],
   );
-  const totalPresentDays = attendanceHistory.length;
+  const overlappingLeaveRequests = leaveRequests.filter((leave) => (
+    ["pending", "approved"].includes(String(leave.status || "").toLowerCase())
+    && leave.fromDate <= leaveForm.toDate
+    && leave.toDate >= leaveForm.fromDate
+  ));
+  const totalPresentDays = attendanceHistory.filter((record) => (
+    record.status?.toLowerCase() === "present" || record.action === "present"
+  )).length;
   const totalApprovedAdvances = advanceHistory.reduce((total, advance) => (
     String(advance.status || "").toLowerCase() === "approved"
       ? total + (Number.isFinite(Number(advance.amount)) ? Number(advance.amount) : 0)
@@ -119,6 +148,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
           setLegacyAttendanceRecords([]);
           setAdvanceRecords([]);
           setLegacyAdvanceRecords([]);
+          setLeaveRequests([]);
           setOptimisticAttendance(null);
           setProfileError("");
           setLoading(false);
@@ -132,6 +162,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
         setLegacyAttendanceRecords([]);
         setAdvanceRecords([]);
         setLegacyAdvanceRecords([]);
+        setLeaveRequests([]);
         setPayroll(null);
         setProfileError("");
       }
@@ -223,11 +254,10 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
     );
     const unsubscribeAdvances = onSnapshot(
       query(collection(db, "advances"), where("staffId", "==", staffUid)),
-      (snapshot) => setAdvanceRecords(snapshot.docs.map((entry) => ({
-        id: entry.id,
-        source: "advances",
-        ...entry.data(),
-      }))),
+      (snapshot) => setAdvanceRecords(snapshot.docs.map((entry) => {
+        const data = entry.data();
+        return { id: entry.id, ...data, source: data.source || "request" };
+      })),
       (error) => {
         console.error("Staff advance history load failed:", error);
         setProfileError(`Advance history load nahi hui: ${getErrorMessage(error)}`);
@@ -235,11 +265,10 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
     );
     const unsubscribeLegacyAdvances = onSnapshot(
       query(collection(db, "staffAdvances"), where("uid", "==", staffUid)),
-      (snapshot) => setLegacyAdvanceRecords(snapshot.docs.map((entry) => ({
-        id: entry.id,
-        source: "staffAdvances",
-        ...entry.data(),
-      }))),
+      (snapshot) => setLegacyAdvanceRecords(snapshot.docs.map((entry) => {
+        const data = entry.data();
+        return { id: entry.id, ...data, source: data.source || "request" };
+      })),
       (error) => {
         console.error("Legacy advance history load failed:", error);
         setProfileError(`Advance history load nahi hui: ${getErrorMessage(error)}`);
@@ -251,6 +280,15 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
       console.error("Staff salary load failed:", error);
       setProfileError(`Monthly salary load nahi hui: ${getErrorMessage(error)}`);
     });
+    const unsubscribeLeaves = onSnapshot(
+      query(collection(db, "leaveRequests"), where("staffId", "==", staffUid)),
+      (snapshot) => setLeaveRequests(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() }))
+        .sort((a, b) => String(b.fromDate).localeCompare(String(a.fromDate)))),
+      (error) => {
+        console.error("Staff leave requests load failed:", error);
+        setProfileError(`Leave requests load nahi hui: ${getErrorMessage(error)}`);
+      },
+    );
 
     return () => {
       unsubscribeAttendance();
@@ -258,6 +296,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
       unsubscribeAdvances();
       unsubscribeLegacyAdvances();
       unsubscribePayroll();
+      unsubscribeLeaves();
     };
   }, [staffUid]);
 
@@ -393,6 +432,9 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
         staffName: displayName,
         amount,
         reason,
+        note: reason,
+        date: today,
+        source: "request",
         status: "Pending",
         createdAt: Date.now(),
         month: today.slice(0, 7),
@@ -407,6 +449,69 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
       window.alert(message);
     } finally {
       setSubmittingAdvance(false);
+    }
+  };
+
+  const submitLeaveRequest = async (event) => {
+    event.preventDefault();
+    const reason = leaveForm.reason.trim();
+    if (!staffUid || !isValidDateKey(leaveForm.fromDate) || !isValidDateKey(leaveForm.toDate)
+      || leaveForm.fromDate > leaveForm.toDate
+      || !["Paid Leave", "Unpaid Leave", "Half Day"].includes(leaveForm.type)
+      || !reason || reason.length > 500) {
+      setProfileError("Valid leave dates, type, aur reason enter karein.");
+      return;
+    }
+    setSubmittingLeave(true);
+    setProfileError("");
+    try {
+      await addDoc(collection(db, "leaveRequests"), {
+        staffId: staffUid,
+        staffName: displayName,
+        fromDate: leaveForm.fromDate,
+        toDate: leaveForm.toDate,
+        type: leaveForm.type,
+        reason,
+        status: "pending",
+        createdAt: Date.now(),
+      });
+      setLeaveForm((form) => ({ ...form, reason: "" }));
+    } catch (error) {
+      console.error("Leave request submit failed:", error);
+      setProfileError(`Leave request submit nahi hui: ${getErrorMessage(error)}`);
+    } finally {
+      setSubmittingLeave(false);
+    }
+  };
+
+  const cancelLeaveRequest = async (leave) => {
+    if (!window.confirm("Pending leave request cancel karein?")) return;
+    setCancellingLeaveId(leave.id);
+    setProfileError("");
+    try {
+      const deleteRefs = [];
+      const requestedDates = new Set(dateRangeInclusive(leave.fromDate, leave.toDate));
+      const snapshot = await getDocs(query(collection(db, "attendance"), where("staffId", "==", staffUid)));
+      snapshot.docs.forEach((entry) => {
+        const record = entry.data();
+        if (requestedDates.has(record.date)
+          && record.source === "leave"
+          && record.leaveRequestId === leave.id) deleteRefs.push(entry.ref);
+      });
+      for (let offset = 0; offset < deleteRefs.length; offset += 450) {
+        const batch = writeBatch(db);
+        deleteRefs.slice(offset, offset + 450).forEach((ref) => batch.delete(ref));
+        await batch.commit();
+      }
+      await updateDoc(doc(db, "leaveRequests", leave.id), {
+        status: "cancelled",
+        cancelledAt: Date.now(),
+      });
+    } catch (error) {
+      console.error("Leave request cancel failed:", error);
+      setProfileError(`Leave request cancel nahi hui: ${getErrorMessage(error)}`);
+    } finally {
+      setCancellingLeaveId("");
     }
   };
 
@@ -579,7 +684,9 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
               : attendanceHistory.map((record) => (
                 <div key={record.date} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "10px 0", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
                   <span>{new Date(`${record.date}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</span>
-                  <strong style={{ color: "#34d399" }}>Present</strong>
+                  <strong style={{ color: record.status?.toLowerCase() === "present" || record.action === "present" ? "#34d399" : "#fbbf24" }}>
+                    {record.status || "Present"}
+                  </strong>
                 </div>
               ))}
           </section>
@@ -616,6 +723,66 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
               </button>
             </form>
 
+            <form onSubmit={submitLeaveRequest} style={{ ...panelStyle, display: "grid", gap: 11 }}>
+              <h2 style={{ margin: 0, fontSize: 17 }}>Request leave</h2>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 9 }}>
+                <label style={{ display: "grid", gap: 7, color: "#c4ccda", fontSize: 12, fontWeight: 750 }}>
+                  From date
+                  <input type="date" required value={leaveForm.fromDate} onChange={(event) => setLeaveForm((form) => ({ ...form, fromDate: event.target.value }))} style={dashboardInputStyle} />
+                </label>
+                <label style={{ display: "grid", gap: 7, color: "#c4ccda", fontSize: 12, fontWeight: 750 }}>
+                  To date
+                  <input type="date" required min={leaveForm.fromDate} value={leaveForm.toDate} onChange={(event) => setLeaveForm((form) => ({ ...form, toDate: event.target.value }))} style={dashboardInputStyle} />
+                </label>
+              </div>
+              <label style={{ display: "grid", gap: 7, color: "#c4ccda", fontSize: 12, fontWeight: 750 }}>
+                Type
+                <select value={leaveForm.type} onChange={(event) => setLeaveForm((form) => ({ ...form, type: event.target.value }))} style={dashboardInputStyle}>
+                  {["Paid Leave", "Unpaid Leave", "Half Day"].map((type) => <option key={type} value={type}>{type}</option>)}
+                </select>
+              </label>
+              <label style={{ display: "grid", gap: 7, color: "#c4ccda", fontSize: 12, fontWeight: 750 }}>
+                Reason
+                <textarea required maxLength={500} rows={2} value={leaveForm.reason} onChange={(event) => setLeaveForm((form) => ({ ...form, reason: event.target.value }))} style={{ ...dashboardInputStyle, resize: "vertical" }} />
+              </label>
+              {overlappingLeaveRequests.length > 0 && (
+                <div role="status" style={{ color: "#fbbf24", fontSize: 12 }}>
+                  Warning: selected dates overlap an existing pending/approved leave request.
+                </div>
+              )}
+              <button type="submit" disabled={submittingLeave} style={dashboardButtonStyle}>
+                {submittingLeave ? "Submitting..." : "Submit leave request"}
+              </button>
+            </form>
+
+            <section style={panelStyle} aria-label="Leave request history">
+              <h2 style={{ margin: "0 0 12px", fontSize: 17 }}>Leave request history</h2>
+              {leaveRequests.length === 0
+                ? <div style={{ color: "#9ba8ba", fontSize: 13 }}>No leave requests yet.</div>
+                : leaveRequests.map((leave) => {
+                  const status = String(leave.status || "pending").toLowerCase();
+                  const color = status === "approved" ? "#34d399"
+                    : status === "rejected" || status === "cancelled" ? "#fb7185" : "#fbbf24";
+                  return (
+                    <div key={leave.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: "10px 0", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+                      <div style={{ minWidth: 0 }}>
+                        <strong>{leave.type}</strong>
+                        <div style={{ marginTop: 3, color: "#9ba8ba", fontSize: 11 }}>{leave.fromDate} – {leave.toDate} · {leave.reason}</div>
+                        {leave.adminNote && <div style={{ marginTop: 3, color: "#c4ccda", fontSize: 11 }}>Admin: {leave.adminNote}</div>}
+                      </div>
+                      <div style={{ display: "grid", justifyItems: "end", gap: 5 }}>
+                        <strong style={{ color, fontSize: 12 }}>{status}</strong>
+                        {status === "pending" && (
+                          <button type="button" disabled={cancellingLeaveId === leave.id} onClick={() => cancelLeaveRequest(leave)} style={{ ...dashboardButtonStyle, minHeight: 32, padding: "0 9px", fontSize: 11 }}>
+                            {cancellingLeaveId === leave.id ? "Cancelling..." : "Cancel"}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+            </section>
+
             <section style={panelStyle} aria-label="Advance history">
               <h2 style={{ margin: "0 0 12px", fontSize: 17 }}>Advance history</h2>
               {advanceHistory.length === 0
@@ -629,6 +796,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
                       <div>
                         <strong>{formatCurrency(Number(advance.amount || 0))}</strong>
                         {advance.reason && <div style={{ marginTop: 3, color: "#9ba8ba", fontSize: 11 }}>{advance.reason}</div>}
+                        <div style={{ marginTop: 3, color: "#9ba8ba", fontSize: 10 }}>{advance.date || advance.month || ""} · {advance.source || "request"}</div>
                       </div>
                       <strong style={{ color: approved ? "#34d399" : status.toLowerCase() === "rejected" ? "#fb7185" : "#fbbf24", fontSize: 12 }}>{status}</strong>
                     </div>

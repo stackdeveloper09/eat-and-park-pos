@@ -2,9 +2,12 @@ import { describe, expect, test } from "vitest";
 import {
   ATTENDANCE_RADIUS_METERS,
   attendanceDayValue,
+  calculateSalaryBalance,
   calculateStaffSalary,
+  dateRangeInclusive,
   daysInMonth,
   haversineDistanceMeters,
+  isValidDateKey,
   RESTAURANT_LOCATION,
 } from "./staffPayroll";
 
@@ -77,5 +80,23 @@ describe("staff salary", () => {
       finalPayable: 0,
       carryForwardAdvance: 2500,
     });
+  });
+
+  test("validates historic date keys and creates inclusive date ranges", () => {
+    expect(isValidDateKey("2026-02-28")).toBe(true);
+    expect(isValidDateKey("2026-02-29")).toBe(false);
+    expect(dateRangeInclusive("2026-11-20", "2026-11-22")).toEqual([
+      "2026-11-20", "2026-11-21", "2026-11-22",
+    ]);
+    expect(() => dateRangeInclusive("2026-11-23", "2026-11-22")).toThrow(RangeError);
+  });
+
+  test.each([
+    [5000, 0, { paid: 0, balanceDue: 5000 }],
+    [5000, 1500, { paid: 1500, balanceDue: 3500 }],
+    [5000, 5000, { paid: 5000, balanceDue: 0 }],
+    [5000, 5500, { paid: 5500, balanceDue: 0 }],
+  ])("calculates a partial salary balance for payable %i and paid %i", (payable, paid, expected) => {
+    expect(calculateSalaryBalance(payable, paid)).toEqual(expected);
   });
 });

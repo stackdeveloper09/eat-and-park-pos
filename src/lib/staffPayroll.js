@@ -34,6 +34,26 @@ export function daysInMonth(monthKey) {
   return new Date(Date.UTC(year, month, 0)).getUTCDate();
 }
 
+export function isValidDateKey(dateKey) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey || "")) return false;
+  const date = new Date(`${dateKey}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === dateKey;
+}
+
+export function dateRangeInclusive(fromDate, toDate) {
+  if (!isValidDateKey(fromDate) || !isValidDateKey(toDate) || fromDate > toDate) {
+    throw new RangeError("A valid date range is required.");
+  }
+  const current = new Date(`${fromDate}T00:00:00Z`);
+  const end = new Date(`${toDate}T00:00:00Z`);
+  const dates = [];
+  while (current <= end) {
+    dates.push(current.toISOString().slice(0, 10));
+    current.setUTCDate(current.getUTCDate() + 1);
+  }
+  return dates;
+}
+
 export function attendanceDayValue(status) {
   switch (String(status || "").trim().toLowerCase()) {
     case "present": return 1;
@@ -44,6 +64,16 @@ export function attendanceDayValue(status) {
     case "leave": return 1;
     default: return 0;
   }
+}
+
+export function calculateSalaryBalance(payable, paid) {
+  if (!Number.isFinite(payable) || payable < 0 || !Number.isFinite(paid) || paid < 0) {
+    throw new RangeError("Payable and paid salary amounts must be valid non-negative values.");
+  }
+  return {
+    paid,
+    balanceDue: Math.max(0, payable - paid),
+  };
 }
 
 export function calculateStaffSalary({
