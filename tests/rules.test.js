@@ -175,6 +175,13 @@ describe("other collections", () => {
       staffId: "a1", staffName: "Admin", fromDate: "2026-11-20", toDate: "2026-11-21",
       type: "Paid Leave", reason: "Family", status: "pending", createdAt: Date.now(),
     }));
+    const managerDecision = await addDoc(collection(as("w1"), "leaveRequests"), {
+      staffId: "w1", staffName: "Waiter", fromDate: "2026-12-01", toDate: "2026-12-01",
+      type: "Paid Leave", reason: "Appointment", status: "pending", createdAt: Date.now(),
+    });
+    await assertSucceeds(updateDoc(doc(as("m1"), "leaveRequests", managerDecision.id), {
+      status: "rejected", adminNote: "Not approved", decidedBy: "m1", decidedAt: Date.now(),
+    }));
     await assertSucceeds(updateDoc(doc(as("a1"), "leaveRequests", other), {
       status: "approved", adminNote: "Approved", decidedBy: "a1", decidedAt: Date.now(),
     }));
@@ -183,7 +190,7 @@ describe("other collections", () => {
       source: "leave", leaveRequestId: other,
     }));
   });
-  test("admins write salary payments; staff reads are scoped and payments soft-cancel", async () => {
+  test("admin roles write salary records; staff reads are scoped and payments soft-cancel", async () => {
     const payment = await addDoc(collection(as("a1"), "salaryPayments"), {
       staffId: "w1", month: "2026-11", amount: 4000, date: "2026-11-22",
       note: "Part payment", createdBy: "a1", createdAt: Date.now(), status: "paid",
@@ -195,7 +202,7 @@ describe("other collections", () => {
       staffId: "w1", month: "2026-11", amount: 1000, date: "2026-11-22",
       note: "", createdBy: "w1", createdAt: Date.now(), status: "paid",
     }));
-    await assertFails(addDoc(collection(as("m1"), "salaryPayments"), {
+    await assertSucceeds(addDoc(collection(as("m1"), "salaryPayments"), {
       staffId: "w1", month: "2026-11", amount: 1000, date: "2026-11-22",
       note: "", createdBy: "m1", createdAt: Date.now(), status: "paid",
     }));
@@ -205,6 +212,10 @@ describe("other collections", () => {
     }));
     await assertSucceeds(updateDoc(doc(as("o1"), "salaryCarryForwards/w1_2026-11"), {
       amount: 1500, updatedAt: Date.now(), updatedBy: "o1",
+    }));
+    await assertSucceeds(setDoc(doc(as("m1"), "salaryCarryForwards/w1_2026-12"), {
+      staffId: "w1", fromMonth: "2026-11", month: "2026-12", amount: 2000,
+      status: "active", createdBy: "m1", createdAt: Date.now(), updatedAt: Date.now(), updatedBy: "m1",
     }));
     await assertFails(setDoc(doc(as("w1"), "salaryCarryForwards/w1_2026-11"), {
       staffId: "w1", fromMonth: "2026-11", month: "2026-12", amount: 2000,

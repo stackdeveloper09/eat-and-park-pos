@@ -234,7 +234,7 @@ service cloud.firestore {
 
     match /salaryPayments/{id} {
       allow read: if isAdmin() || (signedIn() && resource.data.staffId == request.auth.uid);
-      allow create: if isAdminOrOwner()
+      allow create: if isAdmin()
         && request.resource.data.keys().hasOnly([
           'staffId', 'month', 'amount', 'date', 'note', 'createdBy', 'createdAt', 'status'
         ])
@@ -252,7 +252,7 @@ service cloud.firestore {
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.createdAt is int
         && request.resource.data.status == 'paid';
-      allow update: if isAdminOrOwner()
+      allow update: if isAdmin()
         && resource.data.status != 'cancelled'
         && request.resource.data.diff(resource.data).affectedKeys()
           .hasOnly(['status', 'cancelledBy', 'cancelledAt'])
@@ -264,10 +264,10 @@ service cloud.firestore {
 
     match /salaryCarryForwards/{id} {
       allow read: if isAdmin() || (signedIn() && resource.data.staffId == request.auth.uid);
-      allow create: if isAdminOrOwner()
+      allow create: if isAdmin()
         && validSalaryCarryForward()
         && request.resource.data.createdBy == request.auth.uid;
-      allow update: if isAdminOrOwner()
+      allow update: if isAdmin()
         && validSalaryCarryForward()
         && request.resource.data.createdBy == resource.data.createdBy
         && request.resource.data.diff(resource.data).affectedKeys()
@@ -296,7 +296,7 @@ service cloud.firestore {
         && request.resource.data.reason.size() <= 500
         && request.resource.data.status == 'pending'
         && request.resource.data.createdAt is int;
-      allow update: if (isAdminOrOwner()
+      allow update: if (isAdmin()
           && resource.data.status in ['pending', 'approved']
           && request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(['status', 'adminNote', 'decidedBy', 'decidedAt', 'cancelledBy', 'cancelledAt'])
