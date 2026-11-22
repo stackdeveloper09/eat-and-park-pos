@@ -20,6 +20,8 @@ beforeAll(async () => {
     await setDoc(doc(db, "staff/o1"), { role: "owner" });
     await setDoc(doc(db, "staff/m1"), { role: "manager" });
     await setDoc(doc(db, "staff/d1"), { role: "delivery" });
+    await setDoc(doc(db, "staff/c1"), { role: "cashier" });
+    await setDoc(doc(db, "staff/ch1"), { role: "chef" });
     await setDoc(doc(db, "settings/privatePins"), { pin: "x" });
     await setDoc(doc(db, "settings/menu"), { items: [] });
     await setDoc(doc(db, "orders/paid1"), { paid: true, status: "served", finalTotal: 100, createdBy: "c1" });
@@ -44,6 +46,11 @@ describe("orders", () => {
   test("waiter can mark open order paid", () => assertSucceeds(updateDoc(doc(as("w1"), "orders/open1"), { paid: true })));
   test("waiter cannot delete order", () => assertFails(deleteDoc(doc(as("w1"), "orders/open1"))));
   test("owner role passes isStaff (reads orders)", () => assertSucceeds(getDoc(doc(as("o1"), "orders/open1"))));
+  test("chef cashier waiter and staff roles can read orders", () => Promise.all([
+    assertSucceeds(getDoc(doc(as("ch1"), "orders/open1"))),
+    assertSucceeds(getDoc(doc(as("c1"), "orders/open1"))),
+    assertSucceeds(getDoc(doc(as("w1"), "orders/open1"))),
+  ]));
 });
 
 describe("other collections", () => {

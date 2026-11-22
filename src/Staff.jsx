@@ -33,8 +33,8 @@ import {
   indiaDateKey,
   indiaMonthKey,
 } from "./lib/staffShifts";
+import { ROLES } from "./lib/roles";
 
-const STAFF_ROLES = ["admin", "owner", "manager", "staff", "waiter", "cashier", "chef", "delivery"];
 const ATTENDANCE_STATUSES = ["Present", "Half Day", "Absent", "Paid Leave"];
 const TABS = [
   { id: "staff", label: "Staff Management" },
@@ -1055,7 +1055,7 @@ export default function Staff({ C, isMobile }) {
         if (value === "" || !Number.isFinite(updates.monthlySalary) || updates.monthlySalary < 0) {
           throw new Error("Valid non-negative monthly salary enter karein.");
         }
-      } else if (field === "role" && !STAFF_ROLES.includes(value)) {
+      } else if (field === "role" && !ROLES.some((role) => role.value === value)) {
         throw new Error("Valid staff role select karein.");
       } else if (field === "shiftId" && value && !shifts[value]) {
         throw new Error("Valid shift select karein.");
@@ -1238,17 +1238,13 @@ export default function Staff({ C, isMobile }) {
               Firebase Authentication account pehle banayein; yahan uska UID use karein.
             </div>
             <label style={labelStyle}>
-              Firebase Auth UID
-              <input required value={newStaff.uid} onChange={(event) => setNewStaff((form) => ({ ...form, uid: event.target.value }))} style={inputStyle} />
-            </label>
-            <label style={labelStyle}>
               Name
               <input required maxLength={80} value={newStaff.name} onChange={(event) => setNewStaff((form) => ({ ...form, name: event.target.value }))} style={inputStyle} />
             </label>
             <label style={labelStyle}>
               Role
               <select value={newStaff.role} onChange={(event) => setNewStaff((form) => ({ ...form, role: event.target.value }))} style={inputStyle}>
-                {STAFF_ROLES.map((role) => <option key={role} value={role}>{role}</option>)}
+                {ROLES.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}
               </select>
             </label>
             <label style={labelStyle}>
@@ -1261,6 +1257,10 @@ export default function Staff({ C, isMobile }) {
                 <option value="">No shift</option>
                 {Object.entries(shifts).map(([shiftId, shift]) => <option key={shiftId} value={shiftId}>{shift.name}</option>)}
               </select>
+            </label>
+            <label style={labelStyle}>
+              Firebase Auth UID
+              <input required value={newStaff.uid} onChange={(event) => setNewStaff((form) => ({ ...form, uid: event.target.value }))} style={inputStyle} />
             </label>
             <label style={{ display: "flex", alignItems: "center", gap: 9, color: C.ink, fontSize: 13, fontWeight: 700 }}>
               <input type="checkbox" checked={newStaff.active} onChange={(event) => setNewStaff((form) => ({ ...form, active: event.target.checked }))} />
@@ -1280,7 +1280,7 @@ export default function Staff({ C, isMobile }) {
                   <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900, color: C.ink, fontSize: 13 }}>
                     <thead>
                       <tr style={{ color: C.gray, textAlign: "left" }}>
-                        {["Name", "Role", "Monthly salary", "Shift", "Status", "Auth UID"].map((heading) => (
+                        {["Name", "Shift", "Role", "Monthly salary", "Status", "Auth UID"].map((heading) => (
                           <th key={heading} style={{ padding: "9px 8px", borderBottom: `1px solid ${C.line}` }}>{heading}</th>
                         ))}
                       </tr>
@@ -1321,7 +1321,7 @@ export default function Staff({ C, isMobile }) {
                               onBlur={() => handleSaveStaffField(member, "role")}
                               style={{ ...inputStyle, minWidth: 110, padding: "7px 8px" }}
                             >
-                              {STAFF_ROLES.map((role) => <option key={role} value={role}>{role}</option>)}
+                              {ROLES.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}
                             </select>
                             {renderStaffSaveStatus(member, "role")}
                           </td>

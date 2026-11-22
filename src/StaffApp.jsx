@@ -3,6 +3,7 @@ import { tryRecover } from "./recover";
 import React, { useState, useEffect, useMemo, useRef, useContext, createContext, useCallback } from "react";
 import { db, auth } from "./firebase";
 import StaffPayroll from "./Staff";
+import { ADMIN_ROLES, normalizeRole } from "./lib/roles";
 import { assertEditable, resolveVendorId } from "./lib/guards";
 import { PAID_STATUSES, OPEN_WINDOW_MS, isOpenParcel, isOpenDineIn, isActiveOrder, paidOrders, paidRevenue, buildPaidPatch, isDeliveryOrder, nextKitchenStatus } from "./lib/orderRules";
 import { paymentBreakdown, partialPayment, splitPayment } from "./lib/billing";
@@ -813,7 +814,32 @@ function StaffAppInner() {
   const viewIcon = viewMode === "auto" ? "🔄" : viewMode === "mobile" ? "📱" : "💻";
 
   const C = VELOX_DARK;
-const isOwner = ["owner", "admin", "manager"].includes(String(staffData?.role || "").toLowerCase());
+  const isOwner = ADMIN_ROLES.includes(normalizeRole(staffData?.role));
+  const roleKey = normalizeRole(staffData?.role);
+  const preferredRoleTab = roleKey === "chef"
+    ? "kot"
+    : roleKey === "cashier"
+      ? "history"
+      : "tables";
+  const roleAllowedTabs = roleKey === "chef"
+    ? new Set(["kot", "orders"])
+    : roleKey === "cashier"
+      ? new Set(["tables", "parcel", "orders", "history"])
+      : roleKey === "waiter"
+        ? new Set(["tables", "parcel", "orders", "history"])
+        : roleKey === "delivery"
+          ? new Set(["parcel", "orders"])
+          : roleKey === "staff"
+            ? new Set(["tables", "parcel", "orders", "history"])
+            : null;
+
+  useEffect(() => {
+    if (!staffData) return;
+    setActiveTab((current) => {
+      if (roleAllowedTabs && !roleAllowedTabs.has(current)) return preferredRoleTab;
+      return current;
+    });
+  }, [staffData, roleKey]);
 
   useEffect(() => { document.body.style.background = C.bg; }, [C.bg]);
 
@@ -1053,7 +1079,7 @@ const isOwner = ["owner", "admin", "manager"].includes(String(staffData?.role ||
               { id: "history", label: "Bills", icon: "🧾" },
               { id: "customers", label: "Customers", icon: "🎂" },
               { id: "inventory", label: "Stock", icon: "📦" }
-            ].map(tab => (
+            ].filter(tab => !roleAllowedTabs || roleAllowedTabs.has(tab.id)).map(tab => (
               <button key={tab.id} onClick={() => { haptic(); setActiveTab(tab.id); }} 
                 style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", border: "none", borderRadius: 10, cursor: "pointer", fontFamily: "inherit", textAlign: "left", background: activeTab === tab.id ? C.gold : "transparent", color: activeTab === tab.id ? "#fff" : C.gray, fontWeight: 700, fontSize: 14, transition: "all 0.2s" }}>
                 <span style={{ fontSize: 18 }}>{tab.icon}</span>{tab.label}
@@ -1106,7 +1132,8 @@ const isOwner = ["owner", "admin", "manager"].includes(String(staffData?.role ||
           { id: "inventory", label: "🧾 Saman" + (lowCount ? " (" + lowCount + ")" : "") }, { id: "audit", label: "📝 Audit" },
           { id: "expenses", label: "💸 Kharcha" }, { id: "bookings", label: "📅 Bookings" },
           { id: "reports", label: "📈 Reports" }, { id: "attendance", label: "👥 Staff & Payroll" }, { id: "import", label: "📥 Import" }, { id: "customers", label: "🎂 Customers" },
-        ].filter(tab => tab.id !== "attendance" || isOwner).map(tab => (
+        ].filter(tab => (tab.id !== "attendance" || isOwner)
+          && (!roleAllowedTabs || roleAllowedTabs.has(tab.id))).map(tab => (
           <button key={tab.id} onClick={() => { haptic(); setActiveTab(tab.id); setSelectedTable(null); setOrdersRange(null); }} style={{ padding: isMobile ? "12px 12px" : "15px 20px", border: "none", background: "transparent", color: activeTab === tab.id ? C.gold : C.gray, fontWeight: 700, fontSize: isMobile ? 12 : 13, cursor: "pointer", borderBottom: activeTab === tab.id ? `3px solid ${C.gold}` : "3px solid transparent", whiteSpace: "nowrap", flexShrink: 0 }}>{tab.label}</button>
         ))}
       </div>
@@ -1214,7 +1241,8 @@ const isOwner = ["owner", "admin", "manager"].includes(String(staffData?.role ||
               <div style={{ fontWeight: 800, fontSize: 15, color: C.ink, marginTop: 4 }}>{staffData?.name || "Staff"}</div>
               <div style={{ fontSize: 12, color: C.gray, marginTop: 2 }}>{staffData?.role || "waiter"}</div>
             </div>
-            {[{ id: "parcel", label: "Parcel", icon: "🛍️" }, { id: "tables", label: "Tables", icon: "🍽️" }, { id: "orders", label: "Orders", icon: "📋" }, { id: "kot", label: "Kitchen", icon: "🍳" }, { id: "dashboard", label: "Dashboard", icon: "📊" }, { id: "history", label: "History", icon: "🕘" }, { id: "stock", label: "Stock", icon: "📦" }, { id: "bookings", label: "Bookings", icon: "📅" }, { id: "inventory", label: "Saman", icon: "🧾" }, { id: "audit", label: "Audit Log", icon: "📝" }, { id: "expenses", label: "Kharcha", icon: "💸" }, { id: "reports", label: "Reports / P&L", icon: "📈" }, { id: "attendance", label: "Staff & Payroll", icon: "👥" }, { id: "import", label: "Bulk Import", icon: "📥" }, { id: "customers", label: "Customers", icon: "🎂" }].filter(tab => tab.id !== "attendance" || isOwner).map(tab => (
+            {[{ id: "parcel", label: "Parcel", icon: "🛍️" }, { id: "tables", label: "Tables", icon: "🍽️" }, { id: "orders", label: "Orders", icon: "📋" }, { id: "kot", label: "Kitchen", icon: "🍳" }, { id: "dashboard", label: "Dashboard", icon: "📊" }, { id: "history", label: "History", icon: "🕘" }, { id: "stock", label: "Stock", icon: "📦" }, { id: "bookings", label: "Bookings", icon: "📅" }, { id: "inventory", label: "Saman", icon: "🧾" }, { id: "audit", label: "Audit Log", icon: "📝" }, { id: "expenses", label: "Kharcha", icon: "💸" }, { id: "reports", label: "Reports / P&L", icon: "📈" }, { id: "attendance", label: "Staff & Payroll", icon: "👥" }, { id: "import", label: "Bulk Import", icon: "📥" }, { id: "customers", label: "Customers", icon: "🎂" }].filter(tab => (tab.id !== "attendance" || isOwner)
+              && (!roleAllowedTabs || roleAllowedTabs.has(tab.id))).map(tab => (
               <button key={tab.id} onClick={() => { haptic(); setActiveTab(tab.id); setSidebarOpen(false); setSelectedTable(null); setOrdersRange(null); }} style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 16px", border: "none", background: activeTab === tab.id ? C.goldLight : "transparent", color: activeTab === tab.id ? C.gold : C.ink, fontWeight: 700, fontSize: 14, borderRadius: 10, cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
                 <span style={{ fontSize: 18 }}>{tab.icon}</span><span>{tab.label}</span>
               </button>

@@ -43,6 +43,7 @@ import {
 } from "firebase/firestore";
 import { QRCodeSVG } from 'qrcode.react';
 import * as HX from "./hardening";
+import { ADMIN_ROLES, normalizeRole, STAFF_ROLES } from "./lib/roles";
 function ImageUploadButton({ currentImage, onUploaded, label }) {
   const widgetRef = useRef(null);
   const onUploadedRef = useRef(onUploaded);
@@ -432,7 +433,7 @@ const PREP_TIME_ESTIMATES = {
   "Tandoori": 20,
   "Biryani & Thali": 25
 };const STATUS_FLOW = ["new", "preparing", "ready", "out_for_delivery", "served"];
-const isAdminRole = (role) => ["admin", "owner", "manager"].includes(role);
+const isAdminRole = (role) => ADMIN_ROLES.includes(normalizeRole(role));
 const STATUS_LABEL = { new: "New", preparing: "Preparing", ready: "Ready", served: "Served" };
 const STATUS_COLOR = { new: COLORS.rust, preparing: COLORS.copper, ready: COLORS.sage, served: "#8A8375" };
 
@@ -7642,7 +7643,8 @@ function RestaurantApp() {
         setStaffRole(_r);
         try {
           const saved = sessionStorage.getItem("eatpark_role");
-          if ((_r === "staff" && saved === "staff") || (isAdminRole(_r) && saved === "admin")) setRole(saved);
+          const normalizedRole = normalizeRole(_r);
+          if ((STAFF_ROLES.includes(normalizedRole) && saved === "staff") || (isAdminRole(normalizedRole) && saved === "admin")) setRole(saved);
         } catch (e) {}
 
       } catch (e) { setStaffRole(null); }
@@ -7759,7 +7761,8 @@ function RestaurantApp() {
       signOut(auth).catch(() => {});
       return;
     }
-    if (isAdminRole(staffRole) || (target === "staff" && staffRole === "staff")) { setRole(target); try { sessionStorage.setItem("eatpark_role", target); } catch (e) {} return; }
+    const normalizedStaffRole = normalizeRole(staffRole);
+    if (isAdminRole(normalizedStaffRole) || (target === "staff" && STAFF_ROLES.includes(normalizedStaffRole))) { setRole(target); try { sessionStorage.setItem("eatpark_role", target); } catch (e) {} return; }
 
     setTargetRole(target); setShowPinModal(true); setPinInput("");
   };
@@ -7801,8 +7804,8 @@ function RestaurantApp() {
         return;
       }
 
-      const r = s.data().role || "staff";
-      const ok = isAdminRole(r) || (targetRole === "staff" && r === "staff");
+      const r = normalizeRole(s.data().role);
+      const ok = isAdminRole(r) || (targetRole === "staff" && STAFF_ROLES.includes(r));
            if (!ok) {
         await signOut(auth);
         alert(`❌ Is account ka role '${r}' hai, '${targetRole}' nahi.`);

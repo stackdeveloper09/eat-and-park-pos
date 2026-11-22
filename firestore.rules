@@ -10,7 +10,7 @@ service cloud.firestore {
     function staffRole() {
       return get(/databases/$(db)/documents/staff/$(request.auth.uid)).data.role;
     }
-    function isStaff() { return hasStaffDoc() && staffRole() in ['admin', 'owner', 'manager', 'staff', 'waiter', 'cashier', 'chef']; }
+    function isStaff() { return hasStaffDoc() && staffRole() in ['admin', 'owner', 'manager', 'chef', 'cashier', 'waiter', 'delivery', 'staff']; }
     function isAdmin() { return hasStaffDoc() && staffRole() in ['admin', 'owner', 'manager']; }
     function isAdminOrOwner() { return hasStaffDoc() && staffRole() in ['admin', 'owner']; }
     function validStaffProfile() {

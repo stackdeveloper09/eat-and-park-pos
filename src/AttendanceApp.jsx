@@ -25,8 +25,9 @@ import {
   isShiftRestTime,
 } from "./lib/staffShifts";
 import "./AttendanceApp.css";
+import { STAFF_ROLES } from "./lib/roles";
 
-const STAFF_ROLES = new Set(["admin", "owner", "manager", "staff", "waiter", "cashier", "chef", "delivery"]);
+const STAFF_ROLE_SET = new Set(STAFF_ROLES);
 
 function attendanceDate(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -182,7 +183,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
         const staffSnapshot = await getDoc(doc(db, "staff", currentUser.uid));
         const profile = staffSnapshot.exists() ? staffSnapshot.data() : null;
         const role = String(profile?.role || "").toLowerCase();
-        if (!profile || profile.active === false || !STAFF_ROLES.has(role)) {
+        if (!profile || profile.active === false || !STAFF_ROLE_SET.has(role)) {
           await signOut(auth);
           if (active) {
             setLoginError("Ye account active staff account nahi hai.");
