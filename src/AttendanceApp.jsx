@@ -119,6 +119,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
   });
   const [submittingLeave, setSubmittingLeave] = useState(false);
   const [cancellingLeaveId, setCancellingLeaveId] = useState("");
+  const [cancellingAdvanceId, setCancellingAdvanceId] = useState("");
   const [loginError, setLoginError] = useState("");
   const [attendanceError, setAttendanceError] = useState("");
   const [profileError, setProfileError] = useState("");
