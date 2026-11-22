@@ -75,6 +75,17 @@ describe("other collections", () => {
       lat: 28.6139, lng: 77.209, radius: 100,
     }));
   });
+  test("admin owner can save shifts; waiter cannot", async () => {
+    await assertSucceeds(setDoc(doc(as("a1"), "settings/shifts"), {
+      shifts: {
+        morning: { name: "Morning", startTime: "10:00", endTime: "22:00", breakStart: "15:00", breakEnd: "17:00", halfDayLateMinutes: 30, lateGraceMinutes: 10, earlyLeaveHours: 2 },
+        late: { name: "Late", startTime: "12:00", endTime: "23:00", halfDayLateMinutes: 30, lateGraceMinutes: 10, earlyLeaveHours: 2 },
+      },
+    }));
+    await assertFails(setDoc(doc(as("w1"), "settings/shifts"), {
+      shifts: { morning: { name: "Morning", startTime: "10:00", endTime: "22:00" } },
+    }));
+  });
   test("admin can create and replace deterministic manual attendance", async () => {
     const attendanceRef = doc(as("a1"), "attendance/w1_2026-11-21");
     await assertSucceeds(setDoc(attendanceRef, {
@@ -201,8 +212,14 @@ describe("other collections", () => {
     uid: "w1", monthlySalary: 30000, updatedAt: Date.now(), updatedBy: "w1",
   })));
   test("staff can mark attendance only for self and inside the radius", async () => {
-    await assertSucceeds(addDoc(collection(as("w1"), "attendance"), {
-      staffId: "w1", date: "2026-11-21", status: "Present", source: "gps", distanceMeters: 80,
+    await assertSucceeds(setDoc(doc(as("w1"), "attendance/w1_2026-11-21"), {
+      staffId: "w1", date: "2026-11-21", status: "Present", source: "gps",
+      distanceMeters: 80, checkInAt: Date.now(), shiftId: "morning",
+      shiftName: "Morning", late: false, lateMinutes: 0, incomplete: true, earlyLeave: false,
+    }));
+    await assertSucceeds(updateDoc(doc(as("w1"), "attendance/w1_2026-11-21"), {
+      checkOutAt: Date.now(), incomplete: false, earlyLeave: false,
+      workedMinutes: 600,
     }));
     await assertSucceeds(getDocs(query(collection(as("w1"), "attendance"), where("staffId", "==", "w1"))));
     await assertFails(addDoc(collection(as("w1"), "attendance"), {

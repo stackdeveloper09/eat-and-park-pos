@@ -23,32 +23,37 @@ import {
   isValidDateKey,
   RESTAURANT_LOCATION,
 } from "./lib/staffPayroll";
+import {
+  attendanceTimestamp,
+  autoStatus,
+  calculateWorkedMinutes,
+  DEFAULT_SHIFTS,
+  formatIndiaTime,
+  indiaTimeInput,
+  indiaDateKey,
+  indiaMonthKey,
+} from "./lib/staffShifts";
 
 const STAFF_ROLES = ["admin", "owner", "manager", "staff", "waiter", "cashier", "chef", "delivery"];
 const ATTENDANCE_STATUSES = ["Present", "Half Day", "Absent", "Paid Leave"];
 const TABS = [
   { id: "staff", label: "Staff Management" },
+  { id: "shifts", label: "Shift Settings" },
   { id: "gps", label: "GPS Settings" },
   { id: "advances", label: "Advance Requests" },
   { id: "leaves", label: "Leave Requests" },
   { id: "payroll", label: "Payroll & Attendance" },
 ];
 
-const currentMonthKey = () => {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-};
-
-const todayKey = () => {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-};
+const currentMonthKey = () => indiaMonthKey();
+const todayKey = () => indiaDateKey();
 
 const nextMonthKey = (monthKey) => {
   const [year, month] = monthKey.split("-").map(Number);
   const next = new Date(Date.UTC(year, month, 1));
   return `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, "0")}`;
 };
+
 
 const formatCurrency = (value) => new Intl.NumberFormat("en-IN", {
   style: "currency",
@@ -100,6 +105,10 @@ export default function Staff({ C, isMobile }) {
   const [activeTab, setActiveTab] = useState("staff");
   const [month, setMonth] = useState(currentMonthKey);
   const [members, setMembers] = useState([]);
+  const [shifts, setShifts] = useState(DEFAULT_SHIFTS);
+  const [shiftDrafts, setShiftDrafts] = useState(DEFAULT_SHIFTS);
+  const [shiftSaveStates, setShiftSaveStates] = useState({});
+  const [shiftSettingsLoading, setShiftSettingsLoading] = useState(true);
   const [staffDrafts, setStaffDrafts] = useState({});
   const [staffSaveStates, setStaffSaveStates] = useState({});
   const [selectedMemberId, setSelectedMemberId] = useState("");
@@ -139,6 +148,7 @@ export default function Staff({ C, isMobile }) {
     role: "staff",
     monthlySalary: "",
     active: true,
+    shiftId: "morning",
   });
   const [gpsForm, setGpsForm] = useState({
     lat: String(RESTAURANT_LOCATION.latitude),
@@ -154,7 +164,12 @@ export default function Staff({ C, isMobile }) {
     staffId: "",
     date: todayKey(),
     status: "Present",
+    checkInTime: "",
+    checkOutTime: "",
   });
+
+  const currentAdminRole = members.find((member) => member.id === auth.currentUser?.uid)?.role;
+  const canEditShifts = currentAdminRole === "admin" || currentAdminRole === "owner";
 
   useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, "staff"), (snapshot) => {
@@ -179,6 +194,37 @@ export default function Staff({ C, isMobile }) {
     });
     return unsubscribe;
   }, []);
+
+  useEffect(() => {
+    const shiftsRef = doc(db, "settings", "shifts");
+    const unsubscribe = onSnapshot(shiftsRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const savedShifts = snapshot.data()?.shifts;
+        if (!savedShifts || typeof savedShifts !== "object") {
+          setLoadError("Shift settings ka format invalid hai.");
+          setShiftSettingsLoading(false);
+          return;
+        }
+        setShifts(savedShifts);
+        setShiftDrafts(savedShifts);
+      } else {
+        setShifts(DEFAULT_SHIFTS);
+        setShiftDrafts(DEFAULT_SHIFTS);
+        if (canEditShifts) {
+          setDoc(shiftsRef, { shifts: DEFAULT_SHIFTS }).catch((error) => {
+            console.error("Default shift settings seed failed:", error);
+            setLoadError(`Default shifts save nahi hue: ${getErrorMessage(error)}`);
+          });
+        }
+      }
+      setShiftSettingsLoading(false);
+    }, (error) => {
+      console.error("Shift settings load failed:", error);
+      setLoadError(`Shift settings load nahi hui: ${getErrorMessage(error)}`);
+      setShiftSettingsLoading(false);
+    });
+    return unsubscribe;
+  }, [canEditShifts]);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, "staffPayroll"), (snapshot) => {
@@ -502,9 +548,10 @@ export default function Staff({ C, isMobile }) {
           role: newStaff.role,
           monthlySalary,
           active: newStaff.active,
+          shiftId: newStaff.shiftId || "",
         });
       });
-      setNewStaff({ uid: "", name: "", role: "staff", monthlySalary: "", active: true });
+      setNewStaff({ uid: "", name: "", role: "staff", monthlySalary: "", active: true, shiftId: "morning" });
     } catch (error) {
       setActionError(`Staff member add nahi hua: ${getErrorMessage(error)}`);
       console.error("Staff member add failed:", error);
@@ -881,7 +928,13 @@ export default function Staff({ C, isMobile }) {
     }
   };
 
-  const saveAttendance = async (staffId, date, status) => {
+  const saveAttendance = async (
+    staffId,
+    date,
+    status,
+    inTime = attendanceForm.checkInTime,
+    outTime = attendanceForm.checkOutTime,
+  ) => {
     setActionError("");
     const parsedDate = new Date(`${date}T00:00:00Z`);
     const validDate = /^\d{4}-\d{2}-\d{2}$/.test(date)
@@ -907,14 +960,52 @@ export default function Staff({ C, isMobile }) {
         if (!window.confirm(`Already marked as ${existingStatus}, replace?`)) return;
       }
       const attendanceRef = doc(db, "attendance", `${staffId}_${date}`);
-      const batch = writeBatch(db);
-      batch.set(attendanceRef, {
+      const currentRecord = allAttendanceRecords.get(`${staffId}_${date}`);
+      const member = members.find((entry) => entry.id === staffId);
+      const shiftId = member?.shiftId || currentRecord?.shiftId || "";
+      const shift = shifts[shiftId];
+      const checkInAt = inTime
+        ? attendanceTimestamp(date, inTime)
+        : currentRecord?.checkInAt || null;
+      const checkOutAt = outTime
+        ? attendanceTimestamp(date, outTime, checkInAt)
+        : currentRecord?.checkOutAt || null;
+      if (checkOutAt && !checkInAt) {
+        setActionError("Out time ke liye In time bhi enter karein.");
+        return;
+      }
+      const automatic = checkInAt && shift
+        ? autoStatus(checkInAt, shift, checkOutAt)
+        : null;
+      const attendanceData = {
         staffId,
         date,
         status,
         markedBy: "Admin",
         source: "manual",
-      });
+        ...(checkInAt ? { checkInAt } : {}),
+        ...(checkOutAt ? { checkOutAt } : {}),
+        ...(shift ? {
+          shiftId,
+          shiftName: shift.name,
+          shiftStartTime: shift.startTime,
+          shiftEndTime: shift.endTime,
+          breakStart: shift.breakStart || "",
+          breakEnd: shift.breakEnd || "",
+          halfDayLateMinutes: Number(shift.halfDayLateMinutes ?? 30),
+          lateGraceMinutes: Number(shift.lateGraceMinutes ?? 10),
+          earlyLeaveHours: Number(shift.earlyLeaveHours ?? 2),
+        } : {}),
+        ...(automatic ? {
+          late: automatic.late,
+          lateMinutes: automatic.lateMinutes,
+          incomplete: automatic.incomplete,
+          earlyLeave: automatic.earlyLeave,
+          ...(checkOutAt ? { workedMinutes: calculateWorkedMinutes(checkInAt, checkOutAt, shift) } : {}),
+        } : {}),
+      };
+      const batch = writeBatch(db);
+      batch.set(attendanceRef, attendanceData);
       manualSnapshot.docs.forEach((entry) => {
         if (entry.id !== attendanceRef.id && getStaffId(entry.data()) === staffId) {
           batch.delete(entry.ref);
@@ -922,7 +1013,14 @@ export default function Staff({ C, isMobile }) {
       });
       await batch.commit();
       setMonth(date.slice(0, 7));
-      setAttendanceForm((form) => ({ ...form, staffId, date, status }));
+      setAttendanceForm((form) => ({
+        ...form,
+        staffId,
+        date,
+        status,
+        checkInTime: checkInAt ? indiaTimeInput(checkInAt) : "",
+        checkOutTime: checkOutAt ? indiaTimeInput(checkOutAt) : "",
+      }));
       setActionError("");
     } catch (error) {
       reportError("Attendance mark nahi hui", error);
@@ -933,7 +1031,13 @@ export default function Staff({ C, isMobile }) {
 
   const handleMarkAttendance = (event) => {
     event.preventDefault();
-    return saveAttendance(attendanceForm.staffId, attendanceForm.date, attendanceForm.status);
+    return saveAttendance(
+      attendanceForm.staffId,
+      attendanceForm.date,
+      attendanceForm.status,
+      attendanceForm.checkInTime,
+      attendanceForm.checkOutTime,
+    );
   };
 
   const handleSaveStaffField = async (member, field) => {
@@ -953,6 +1057,8 @@ export default function Staff({ C, isMobile }) {
         }
       } else if (field === "role" && !STAFF_ROLES.includes(value)) {
         throw new Error("Valid staff role select karein.");
+      } else if (field === "shiftId" && value && !shifts[value]) {
+        throw new Error("Valid shift select karein.");
       }
 
       if (field === "monthlySalary") {
@@ -990,6 +1096,50 @@ export default function Staff({ C, isMobile }) {
     } catch (error) {
       setStaffSaveStates((current) => ({ ...current, [saveKey]: { status: "error", message: getErrorMessage(error) } }));
       console.error(`Staff active status save failed for ${member.id}:`, error);
+    }
+  };
+
+  const handleSaveShiftField = async (shiftId, field) => {
+    const shift = shiftDrafts[shiftId];
+    if (!shift) return;
+    const saveKey = `${shiftId}-${field}`;
+    const nextShift = { ...shift };
+    if (["startTime", "endTime", "breakStart", "breakEnd"].includes(field)) {
+      if (field.startsWith("break") && !nextShift.breakStart && !nextShift.breakEnd) {
+        delete nextShift.breakStart;
+        delete nextShift.breakEnd;
+      } else if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(String(nextShift[field] || ""))) {
+        setShiftSaveStates((current) => ({ ...current, [saveKey]: { status: "error", message: "Valid 24-hour time enter karein." } }));
+        return;
+      }
+    } else if (field === "name") {
+      if (!String(nextShift.name || "").trim() || String(nextShift.name).length > 80) {
+        setShiftSaveStates((current) => ({ ...current, [saveKey]: { status: "error", message: "Shift name required hai (max 80 characters)." } }));
+        return;
+      }
+      nextShift.name = String(nextShift.name).trim();
+    } else {
+      const value = Number(nextShift[field]);
+      const integerField = field === "halfDayLateMinutes" || field === "lateGraceMinutes";
+      const max = field === "earlyLeaveHours" ? 12 : 720;
+      if (!Number.isFinite(value) || value < 0 || value > max || (integerField && !Number.isInteger(value))) {
+        setShiftSaveStates((current) => ({ ...current, [saveKey]: { status: "error", message: "Shift threshold valid range mein enter karein." } }));
+        return;
+      }
+      nextShift[field] = value;
+    }
+    if (Boolean(nextShift.breakStart) !== Boolean(nextShift.breakEnd)) {
+      setShiftSaveStates((current) => ({ ...current, [saveKey]: { status: "error", message: "Break start aur end dono enter karein ya dono khali chhodein." } }));
+      return;
+    }
+    const updatedShifts = { ...shiftDrafts, [shiftId]: nextShift };
+    setShiftSaveStates((current) => ({ ...current, [saveKey]: { status: "saving", message: "" } }));
+    try {
+      await setDoc(doc(db, "settings", "shifts"), { shifts: updatedShifts });
+      setShiftSaveStates((current) => ({ ...current, [saveKey]: { status: "saved", message: "" } }));
+    } catch (error) {
+      console.error(`Shift ${field} save failed:`, error);
+      setShiftSaveStates((current) => ({ ...current, [saveKey]: { status: "error", message: getErrorMessage(error) } }));
     }
   };
 
@@ -1105,6 +1255,13 @@ export default function Staff({ C, isMobile }) {
               Monthly salary (₹)
               <input required type="number" min="0" step="0.01" value={newStaff.monthlySalary} onChange={(event) => setNewStaff((form) => ({ ...form, monthlySalary: event.target.value }))} style={inputStyle} />
             </label>
+            <label style={labelStyle}>
+              Shift
+              <select value={newStaff.shiftId} onChange={(event) => setNewStaff((form) => ({ ...form, shiftId: event.target.value }))} style={inputStyle}>
+                <option value="">No shift</option>
+                {Object.entries(shifts).map(([shiftId, shift]) => <option key={shiftId} value={shiftId}>{shift.name}</option>)}
+              </select>
+            </label>
             <label style={{ display: "flex", alignItems: "center", gap: 9, color: C.ink, fontSize: 13, fontWeight: 700 }}>
               <input type="checkbox" checked={newStaff.active} onChange={(event) => setNewStaff((form) => ({ ...form, active: event.target.checked }))} />
               Active staff
@@ -1120,10 +1277,10 @@ export default function Staff({ C, isMobile }) {
               ? <div style={{ color: C.gray, fontSize: 13 }}>No staff profiles found.</div>
               : (
                 <div style={{ overflowX: "auto" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760, color: C.ink, fontSize: 13 }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900, color: C.ink, fontSize: 13 }}>
                     <thead>
                       <tr style={{ color: C.gray, textAlign: "left" }}>
-                        {["Name", "Role", "Monthly salary", "Status", "Auth UID"].map((heading) => (
+                        {["Name", "Role", "Monthly salary", "Shift", "Status", "Auth UID"].map((heading) => (
                           <th key={heading} style={{ padding: "9px 8px", borderBottom: `1px solid ${C.line}` }}>{heading}</th>
                         ))}
                       </tr>
@@ -1141,6 +1298,20 @@ export default function Staff({ C, isMobile }) {
                               style={{ ...inputStyle, minWidth: 120, padding: "7px 8px" }}
                             />
                             {renderStaffSaveStatus(member, "name")}
+                          </td>
+                          <td style={{ padding: "8px", borderBottom: `1px solid ${C.line}` }}>
+                            <select
+                              aria-label={`Shift for ${member.id}`}
+                              value={staffDrafts[member.id]?.shiftId ?? member.shiftId ?? ""}
+                              onChange={(event) => setStaffDrafts((current) => ({ ...current, [member.id]: { ...current[member.id], shiftId: event.target.value } }))}
+                              onBlur={() => handleSaveStaffField(member, "shiftId")}
+                              style={{ ...inputStyle, minWidth: 110, padding: "7px 8px" }}
+                            >
+                              <option value="">No shift</option>
+                              {Object.entries(shifts).map(([shiftId, shift]) => <option key={shiftId} value={shiftId}>{shift.name}</option>)}
+                            </select>
+                            {!member.shiftId && <small style={{ display: "block", color: "#FCA5A5" }}>No shift assigned</small>}
+                            {renderStaffSaveStatus(member, "shiftId")}
                           </td>
                           <td style={{ padding: "8px", borderBottom: `1px solid ${C.line}` }}>
                             <select
@@ -1183,6 +1354,61 @@ export default function Staff({ C, isMobile }) {
               )}
           </section>
         </div>
+      )}
+
+      {activeTab === "shifts" && (
+        <section style={{ display: "grid", gap: 12 }}>
+          {shiftSettingsLoading && <div style={{ color: C.gray }}>Shift settings load ho rahi hain...</div>}
+          {!canEditShifts && <div style={{ color: C.gold, fontSize: 12 }}>Shift settings sirf admin/owner edit kar sakte hain.</div>}
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))", gap: 12 }}>
+            {Object.entries(shiftDrafts).map(([shiftId, shift]) => (
+              <section key={shiftId} style={cardStyle}>
+                <h3 style={{ color: C.ink, margin: "0 0 12px" }}>Shift {shiftId === "morning" ? "A" : "B"}</h3>
+                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10 }}>
+                  {[
+                    ["name", "Shift name", "text"],
+                    ["startTime", "Start time", "time"],
+                    ["endTime", "End time", "time"],
+                    ["breakStart", "Rest starts (optional)", "time"],
+                    ["breakEnd", "Rest ends (optional)", "time"],
+                    ["halfDayLateMinutes", "Half Day after (minutes)", "number"],
+                    ["lateGraceMinutes", "Late badge after (minutes)", "number"],
+                    ["earlyLeaveHours", "Early leave threshold (hours)", "number"],
+                  ].map(([field, label, type]) => {
+                    const saveState = shiftSaveStates[`${shiftId}-${field}`];
+                    return (
+                      <label key={field} style={labelStyle}>
+                        {label}
+                        <input
+                          type={type}
+                          min={type === "number" ? 0 : undefined}
+                          max={field === "earlyLeaveHours" ? 12 : 720}
+                          step={field === "earlyLeaveHours" ? "0.5" : type === "number" ? "1" : undefined}
+                          value={shift[field] ?? ""}
+                          disabled={!canEditShifts}
+                          onChange={(event) => setShiftDrafts((current) => ({
+                            ...current,
+                            [shiftId]: { ...current[shiftId], [field]: event.target.value },
+                          }))}
+                          onBlur={() => handleSaveShiftField(shiftId, field)}
+                          style={inputStyle}
+                        />
+                        {saveState?.status === "saving" && <small style={{ color: C.gray }}>Saving...</small>}
+                        {saveState?.status === "saved" && <small style={{ color: C.green }}>Saved ✓</small>}
+                        {saveState?.status === "error" && <small role="alert" style={{ color: "#FCA5A5" }}>{saveState.message}</small>}
+                      </label>
+                    );
+                  })}
+                </div>
+                {shift.breakStart && shift.breakEnd && (
+                  <small style={{ display: "block", color: C.gray, marginTop: 10 }}>
+                    Unpaid rest: {shift.breakStart}–{shift.breakEnd}
+                  </small>
+                )}
+              </section>
+            ))}
+          </div>
+        </section>
       )}
 
       {activeTab === "gps" && (
@@ -1469,7 +1695,7 @@ export default function Staff({ C, isMobile }) {
             ))}
           </div>
 
-          <form onSubmit={handleMarkAttendance} style={{ ...cardStyle, display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(180px, 1fr) minmax(150px, 190px) minmax(140px, 180px) auto", gap: 10, alignItems: "end", marginBottom: 14 }}>
+          <form onSubmit={handleMarkAttendance} style={{ ...cardStyle, display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(160px, 1fr) minmax(140px, 160px) minmax(130px, 150px) minmax(110px, 130px) minmax(110px, 130px) auto", gap: 10, alignItems: "end", marginBottom: 14 }}>
             <label style={labelStyle}>
               Staff member
               <select required value={attendanceForm.staffId} onChange={(event) => setAttendanceForm((form) => ({ ...form, staffId: event.target.value }))} style={inputStyle}>
@@ -1486,6 +1712,14 @@ export default function Staff({ C, isMobile }) {
               <select value={attendanceForm.status} onChange={(event) => setAttendanceForm((form) => ({ ...form, status: event.target.value }))} style={inputStyle}>
                 {ATTENDANCE_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
               </select>
+            </label>
+            <label style={labelStyle}>
+              In time (optional)
+              <input type="time" value={attendanceForm.checkInTime} onChange={(event) => setAttendanceForm((form) => ({ ...form, checkInTime: event.target.value }))} style={inputStyle} />
+            </label>
+            <label style={labelStyle}>
+              Out time (optional)
+              <input type="time" value={attendanceForm.checkOutTime} onChange={(event) => setAttendanceForm((form) => ({ ...form, checkOutTime: event.target.value }))} style={inputStyle} />
             </label>
             <button type="submit" disabled={busyId === "attendance" || !activeMembers.length} style={buttonStyle}>
               {busyId === "attendance" ? "Saving..." : "Save Attendance"}
@@ -1657,6 +1891,12 @@ export default function Staff({ C, isMobile }) {
                           <span style={{ display: "block", fontSize: 12, fontWeight: 800 }}>{day}</span>
                           <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", fontSize: 8 }}>{status || "—"}</span>
                           {record && <span style={{ display: "block", fontSize: 7 }}>{record.source === "gps" ? "GPS" : "Manual"}</span>}
+                          {record?.checkInAt && <span style={{ display: "block", fontSize: 7 }}>In {formatIndiaTime(record.checkInAt)}</span>}
+                          {record?.checkOutAt && <span style={{ display: "block", fontSize: 7 }}>Out {formatIndiaTime(record.checkOutAt)}</span>}
+                          {record?.shiftName && <span style={{ display: "block", fontSize: 7 }}>{record.shiftName}</span>}
+                          {record?.lateMinutes > 0 && <span style={{ display: "block", fontSize: 7, color: C.gold }}>Late {record.lateMinutes}m</span>}
+                          {record?.incomplete && <span style={{ display: "block", fontSize: 7, color: "#FCA5A5" }}>Incomplete</span>}
+                          {record?.earlyLeave && <span style={{ display: "block", fontSize: 7, color: C.gold }}>Early leave</span>}
                         </button>
                       );
                     })}

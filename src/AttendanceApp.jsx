@@ -6,7 +6,7 @@ import {
   signInWithEmailAndPassword,
   signOut,
 } from "firebase/auth";
-import { addDoc, collection, doc, getDoc, getDocs, onSnapshot, query, updateDoc, where, writeBatch } from "firebase/firestore";
+import { addDoc, collection, doc, getDoc, getDocs, onSnapshot, query, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
 import { auth } from "./firebase";
 import { db } from "./firebase";
 import {
@@ -16,6 +16,14 @@ import {
   isValidDateKey,
   RESTAURANT_LOCATION,
 } from "./lib/staffPayroll";
+import {
+  autoStatus,
+  calculateWorkedMinutes,
+  DEFAULT_SHIFTS,
+  formatIndiaTime,
+  indiaDateKey,
+  isShiftRestTime,
+} from "./lib/staffShifts";
 import "./AttendanceApp.css";
 
 const STAFF_ROLES = new Set(["admin", "owner", "manager", "staff", "waiter", "cashier", "chef", "delivery"]);
@@ -52,6 +60,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
   const [advanceRecords, setAdvanceRecords] = useState([]);
   const [legacyAdvanceRecords, setLegacyAdvanceRecords] = useState([]);
   const [leaveRequests, setLeaveRequests] = useState([]);
+  const [shifts, setShifts] = useState(DEFAULT_SHIFTS);
   const [loading, setLoading] = useState(true);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -76,7 +85,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
   const [gpsSettingsLoading, setGpsSettingsLoading] = useState(true);
   const [gpsSettingsError, setGpsSettingsError] = useState("");
   const [now, setNow] = useState(() => new Date());
-  const today = attendanceDate(now);
+  const today = indiaDateKey(now);
   const staffUid = user?.uid
     || (currentUserProp?.uid && auth.currentUser?.uid === currentUserProp.uid ? currentUserProp.uid : null);
   const suppliedName = currentUserProp?.uid && currentUserProp.uid === staffUid ? currentUserProp.name : "";
@@ -114,9 +123,12 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
     && leave.fromDate <= leaveForm.toDate
     && leave.toDate >= leaveForm.fromDate
   ));
-  const totalPresentDays = attendanceHistory.filter((record) => (
-    record.status?.toLowerCase() === "present" || record.action === "present"
-  )).length;
+  const totalPresentDays = attendanceHistory.reduce((total, record) => {
+    const status = String(record.status || (record.action === "present" ? "Present" : "")).toLowerCase();
+    if (status === "half day") return total + 0.5;
+    if (status === "present" || status === "paid leave") return total + 1;
+    return total;
+  }, 0);
   const totalApprovedAdvances = advanceHistory.reduce((total, advance) => (
     String(advance.status || "").toLowerCase() === "approved"
       ? total + (Number.isFinite(Number(advance.amount)) ? Number(advance.amount) : 0)
@@ -233,6 +245,14 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
     setGpsSettingsLoading(false);
   }), []);
 
+  useEffect(() => onSnapshot(doc(db, "settings", "shifts"), (snapshot) => {
+    const saved = snapshot.exists() ? snapshot.data()?.shifts : null;
+    setShifts(saved && typeof saved === "object" ? saved : DEFAULT_SHIFTS);
+  }, (error) => {
+    console.error("Shift settings load failed:", error);
+    setProfileError(`Shift settings load nahi hui: ${getErrorMessage(error)}`);
+  }), []);
+
   useEffect(() => {
     if (!staffUid) return undefined;
 
@@ -320,7 +340,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
   };
 
   const markAttendance = async () => {
-    if (!staffUid || checkingLocation || todayAttendance) return;
+    if (!staffUid || checkingLocation) return;
     setCheckingLocation(true);
     setAttendanceError("");
     setNotice("");
@@ -370,7 +390,11 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
         return;
       }
 
-      const currentDate = attendanceDate(new Date());
+      const currentDate = indiaDateKey(new Date());
+      if (todayAttendance?.checkOutAt == null && todayAttendance?.checkInAt) {
+        setNotice("Aaj check-in ho chuka hai. Ab Check out karein.");
+        return;
+      }
       const [attendanceSnapshot, legacySnapshot] = await Promise.all([
         getDocs(query(collection(db, "attendance"), where("staffId", "==", staffUid))),
         getDocs(query(collection(db, "staffAttendance"), where("uid", "==", staffUid))),
@@ -378,24 +402,42 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
       const alreadyMarked = [...attendanceSnapshot.docs, ...legacySnapshot.docs].some((entry) => {
         const record = entry.data();
         return record.date === currentDate
-          && (record.status?.toLowerCase() === "present" || record.action === "present");
+          && (record.status || record.action === "present");
       });
       if (alreadyMarked) {
-        setOptimisticAttendance({ status: "Present", date: currentDate });
-        setNotice("Aaj ki attendance pehle hi mark ho chuki hai.");
+        const canonical = attendanceSnapshot.docs.find((entry) => entry.id === `${staffUid}_${currentDate}`);
+        const record = canonical?.data();
+        if (record?.source === "manual") {
+          setNotice("Admin ne aaj ki attendance manual override ki hai.");
+        } else {
+          setOptimisticAttendance(record || { status: "Present", date: currentDate });
+          setNotice("Aaj ki attendance pehle hi mark ho chuki hai.");
+        }
         return;
       }
 
+      const checkInAt = Date.now();
+      const shiftId = staff?.shiftId || "";
+      const shift = shifts[shiftId];
+      const result = shift ? autoStatus(checkInAt, shift) : null;
       const record = {
         staffId: staffUid,
         date: currentDate,
-        status: "Present",
+        status: result?.status || "Present",
         source: "gps",
         distanceMeters: Math.round(distance * 100) / 100,
+        checkInAt,
+        incomplete: result?.incomplete ?? true,
+        late: result?.late ?? false,
+        lateMinutes: result?.lateMinutes ?? 0,
+        earlyLeave: false,
+        ...(shiftId ? { shiftId, shiftName: shift.name } : {}),
       };
-      await addDoc(collection(db, "attendance"), record);
+      await setDoc(doc(db, "attendance", `${staffUid}_${currentDate}`), record);
       setOptimisticAttendance(record);
-      setNotice("Aaj ki attendance successfully mark ho gayi.");
+      setNotice(result?.status === "Half Day"
+        ? "Half Day mark hui: shift start se 30 minutes ya zyada late."
+        : "Check-in successfully mark ho gaya.");
     } catch (error) {
       console.error("GPS attendance failed:", error);
       if (error?.code === 1) {
@@ -410,6 +452,70 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
         window.alert(`Attendance mark nahi hui: ${getErrorMessage(error)}`);
         setAttendanceError(`Attendance mark nahi hui: ${getErrorMessage(error)}`);
       }
+    } finally {
+      setCheckingLocation(false);
+    }
+  };
+
+  const markCheckout = async () => {
+    if (!staffUid || checkingLocation || !todayAttendance?.checkInAt || todayAttendance?.checkOutAt) return;
+    if (todayAttendance.source === "manual") {
+      setNotice("Manual override wale record par staff check-out GPS se change nahi hoga.");
+      return;
+    }
+    setCheckingLocation(true);
+    setAttendanceError("");
+    setNotice("");
+    try {
+      const settingsSnapshot = await getDoc(doc(db, "settings", "restaurant"));
+      const settings = settingsSnapshot.exists() ? settingsSnapshot.data() : {
+        lat: RESTAURANT_LOCATION.latitude,
+        lng: RESTAURANT_LOCATION.longitude,
+        radius: ATTENDANCE_RADIUS_METERS,
+      };
+      if (!Number.isFinite(settings.lat) || !Number.isFinite(settings.lng)
+        || !Number.isFinite(settings.radius)) {
+        throw new Error("Restaurant GPS settings are invalid.");
+      }
+      const position = await new Promise((resolve, reject) => {
+        if (!navigator.geolocation) {
+          reject(new Error("Location services are unavailable in this browser."));
+          return;
+        }
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 15000,
+          maximumAge: 0,
+        });
+      });
+      const distance = haversineDistanceMeters(
+        position.coords.latitude,
+        position.coords.longitude,
+        settings.lat,
+        settings.lng,
+      );
+      if (distance > settings.radius) {
+        window.alert("You are too far");
+        return;
+      }
+
+      const checkOutAt = Date.now();
+      const shift = shifts[todayAttendance.shiftId] || shifts.staff?.[todayAttendance.shiftId];
+      const result = shift ? autoStatus(todayAttendance.checkInAt, shift, checkOutAt) : null;
+      const updated = {
+        ...todayAttendance,
+        checkOutAt,
+        incomplete: false,
+        earlyLeave: result?.earlyLeave ?? false,
+        status: todayAttendance.source === "manual" ? todayAttendance.status : (result?.status || todayAttendance.status),
+        workedMinutes: shift ? calculateWorkedMinutes(todayAttendance.checkInAt, checkOutAt, shift) : null,
+      };
+      await setDoc(doc(db, "attendance", `${staffUid}_${today}`), updated, { merge: true });
+      setOptimisticAttendance(updated);
+      setNotice(result?.earlyLeave ? "Check-out ho gaya; Early leave flag lagi hai." : "Check-out successfully mark ho gaya.");
+    } catch (error) {
+      console.error("GPS check-out failed:", error);
+      setAttendanceError(`Check-out nahi hua: ${getErrorMessage(error)}`);
     } finally {
       setCheckingLocation(false);
     }
@@ -625,8 +731,25 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
           </div>
           <div className={`attendance-status-pill ${todayAttendance ? "is-marked" : ""}`}>
             <span>{todayAttendance ? "✓" : "•"}</span>
-            {todayAttendance ? "Attendance marked" : "Not checked in yet"}
+            {todayAttendance
+              ? `${todayAttendance.status || "Present"}${todayAttendance.incomplete ? " · Incomplete" : ""}${todayAttendance.earlyLeave ? " · Early leave" : ""}`
+              : "Not checked in yet"}
           </div>
+          {todayAttendance?.late && (
+            <div style={{ marginTop: 8, color: "#fbbf24", fontSize: 12 }}>
+              Late by {todayAttendance.lateMinutes} minutes
+            </div>
+          )}
+          {todayAttendance?.checkInAt && (
+            <div style={{ marginTop: 8, color: "#9ba8ba", fontSize: 12 }}>
+              In: {formatIndiaTime(todayAttendance.checkInAt)}
+              {todayAttendance.checkOutAt ? ` · Out: ${formatIndiaTime(todayAttendance.checkOutAt)}` : ""}
+              {todayAttendance.shiftName ? ` · ${todayAttendance.shiftName}` : ""}
+            </div>
+          )}
+          {isShiftRestTime(now, shifts[todayAttendance?.shiftId] || {}) && (
+            <div style={{ marginTop: 8, color: "#fb923c", fontSize: 12, fontWeight: 800 }}>Rest time · 15:00–17:00</div>
+          )}
           <div className="attendance-divider" />
           <div className="attendance-location-row">
             <div className="attendance-location-icon">⌖</div>
@@ -640,15 +763,17 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
           <button
             type="button"
             className="attendance-primary-button attendance-checkin-button"
-            onClick={markAttendance}
-            disabled={checkingLocation || Boolean(todayAttendance) || gpsSettingsLoading || Boolean(gpsSettingsError)}
+            onClick={todayAttendance?.checkInAt && !todayAttendance?.checkOutAt ? markCheckout : markAttendance}
+            disabled={checkingLocation || (Boolean(todayAttendance?.checkOutAt)) || gpsSettingsLoading || Boolean(gpsSettingsError)}
           >
             {gpsSettingsLoading
               ? <>Loading restaurant GPS settings...</>
               : checkingLocation
               ? <><span className="attendance-spinner" />Checking your location...</>
-              : todayAttendance
-                ? <>Checked in for today <span>✓</span></>
+              : todayAttendance?.checkOutAt
+                ? <>Checked out for today <span>✓</span></>
+                : todayAttendance?.checkInAt
+                ? <>Check out via GPS <span>→</span></>
                 : <>Mark today&apos;s attendance via GPS <span>→</span></>}
           </button>
           <div className="attendance-gps-note">📍 Location permission on rakhein; attendance ke liye GPS verify hoga. Allowed radius: {attendanceRadius} meters.</div>
@@ -683,10 +808,22 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
               ? <div style={{ color: "#9ba8ba", fontSize: 13 }}>No attendance records yet.</div>
               : attendanceHistory.map((record) => (
                 <div key={record.date} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "10px 0", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-                  <span>{new Date(`${record.date}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</span>
-                  <strong style={{ color: record.status?.toLowerCase() === "present" || record.action === "present" ? "#34d399" : "#fbbf24" }}>
-                    {record.status || "Present"}
-                  </strong>
+                  <div>
+                    <span>{new Date(`${record.date}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</span>
+                    <div style={{ color: "#9ba8ba", fontSize: 10, marginTop: 4 }}>
+                      {record.checkInAt ? `In ${formatIndiaTime(record.checkInAt)}` : "In —"}
+                      {record.checkOutAt ? ` · Out ${formatIndiaTime(record.checkOutAt)}` : ""}
+                      {record.shiftName ? ` · ${record.shiftName}` : ""}
+                      {record.lateMinutes ? ` · Late ${record.lateMinutes}m` : ""}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <strong style={{ display: "block", color: record.status?.toLowerCase() === "present" || record.action === "present" ? "#34d399" : "#fbbf24" }}>
+                      {record.status || "Present"}
+                    </strong>
+                    {record.incomplete && <small style={{ display: "block", color: "#FCA5A5" }}>Incomplete</small>}
+                    {record.earlyLeave && <small style={{ display: "block", color: "#FBBF24" }}>Early leave</small>}
+                  </div>
                 </div>
               ))}
           </section>
