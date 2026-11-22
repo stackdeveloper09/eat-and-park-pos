@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import { db, auth } from "./firebase";
 import { isDeliveryOrder } from "./lib/orderRules";
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged, setPersistence, browserLocalPersistence } from "firebase/auth";
-import { collection, query, where, onSnapshot, doc, updateDoc, getDoc } from "firebase/firestore";
+import { collection, query, onSnapshot, doc, updateDoc, getDoc, limit } from "firebase/firestore";
 
 const timeAgo = (ts) => {
   if (!ts) return "";
@@ -92,28 +92,38 @@ export default function DeliveryApp() {
   const [busyId, setBusyId] = useState("");
 
   const prevOrdersRef = useRef([]);
+  const prevStatusMapRef = useRef({});
   const isFirstLoad = useRef(true);
 
-  const myId = user ? (user.email || user.uid) : "";
+  // Trigger re-render every minute to update "timeAgo"
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const interval = setInterval(() => setTick((t) => t + 1), 60000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const myId = user ? user.uid : "";
 
   // Unlock audio on first user interaction
   useEffect(() => {
+    const cleanup = () => {
+      document.removeEventListener("click", unlock);
+      document.removeEventListener("touchstart", unlock);
+    };
     const unlock = () => {
       if (alertAudio) {
         alertAudio.play().then(() => {
           alertAudio.pause();
           alertAudio.currentTime = 0;
+          cleanup();
         }).catch(() => {});
+      } else {
+        cleanup();
       }
-      document.removeEventListener("click", unlock);
-      document.removeEventListener("touchstart", unlock);
     };
     document.addEventListener("click", unlock);
     document.addEventListener("touchstart", unlock);
-    return () => {
-      document.removeEventListener("click", unlock);
-      document.removeEventListener("touchstart", unlock);
-    };
+    return () => cleanup();
   }, []);
 
   // Auth check
@@ -122,6 +132,9 @@ export default function DeliveryApp() {
       if (!u) {
         setUser(null);
         setLoading(false);
+        setPage("orders");
+        setMenuOpen(false);
+        setSelectedOrder(null);
         return;
       }
       try {
@@ -145,32 +158,54 @@ export default function DeliveryApp() {
     return () => unsub();
   }, []);
 
-  // Fetch parcel orders
+  // Fetch orders
   useEffect(() => {
     if (!user) {
       setActiveOrders([]);
       setServedOrders([]);
       setSelectedOrder(null);
       prevOrdersRef.current = [];
+      prevStatusMapRef.current = {};
       isFirstLoad.current = true;
       return undefined;
     }
     prevOrdersRef.current = [];
+    prevStatusMapRef.current = {};
     isFirstLoad.current = true;
 
-    const q = query(collection(db, "orders"), where("orderType", "==", "parcel"));
+    // Limit 300 to keep the app fast. Filter in JS so we don't miss variations like "Parcel", "parcel", etc.
+    const q = query(collection(db, "orders"), limit(300));
+    
     const unsub = onSnapshot(q, (snap) => {
       const all = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      const validOrders = all.filter((o) => o.status !== "cancelled" && isDeliveryOrder(o));
+      
+      // Loose filter for orderType to ensure all parcel/delivery orders are caught
+      const validOrders = all.filter((o) => {
+        const type = String(o.orderType || "").toLowerCase();
+        const isParcel = type.includes("parcel") || type.includes("delivery") || type.includes("home");
+        return o.status !== "cancelled" && isParcel;
+      });
 
       const active = validOrders
         .filter((o) => o.status !== "served")
         .sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
 
       if (!isFirstLoad.current) {
-        const hasNew = active.some((o) => !prevOrdersRef.current.includes(o.id));
-        if (hasNew) playAlert();
+        let hasNew = false;
+        let becameReady = false;
+        
+        active.forEach((o) => {
+          if (!prevOrdersRef.current.includes(o.id)) hasNew = true;
+          if (o.status === "ready" && prevStatusMapRef.current[o.id] !== "ready") becameReady = true;
+        });
+
+        if (hasNew || becameReady) playAlert();
       }
+
+      const newStatusMap = {};
+      active.forEach((o) => { newStatusMap[o.id] = o.status; });
+      
+      prevStatusMapRef.current = newStatusMap;
       prevOrdersRef.current = active.map((o) => o.id);
       isFirstLoad.current = false;
       setActiveOrders(active);
@@ -178,6 +213,7 @@ export default function DeliveryApp() {
       const served = validOrders
         .filter((o) => o.status === "served")
         .sort((a, b) => toMillis(b.deliveredAt || b.createdAt) - toMillis(a.deliveredAt || a.createdAt));
+      
       setServedOrders(served);
     }, (err) => {
       console.error("Delivery orders listener:", err.code, err.message);
@@ -190,9 +226,12 @@ export default function DeliveryApp() {
   useEffect(() => {
     if (!selectedOrder) return;
     const fresh = [...activeOrders, ...servedOrders].find((o) => o.id === selectedOrder.id);
-    if (fresh) setSelectedOrder(fresh);
-    // eslint-disable-next-line
-  }, [activeOrders, servedOrders]);
+    if (fresh) {
+      setSelectedOrder(fresh);
+    } else {
+      setSelectedOrder(null); // Close modal if order gets deleted
+    }
+  }, [activeOrders, servedOrders, selectedOrder?.id]);
 
   const historyOrders = useMemo(() => servedOrders.slice(0, 50), [servedOrders]);
 
@@ -376,9 +415,11 @@ export default function DeliveryApp() {
                     </div>
                   </div>
                   <div style={{ textAlign: "right", marginLeft: 10 }}>
-                    <div style={{ fontWeight: 900, fontSize: 18, color: o.paid ? "#10B981" : "#F59E0B" }}>₹{o.finalTotal}</div>
+                    {/* FIXED: ₹0 fallback */}
+                    <div style={{ fontWeight: 900, fontSize: 18, color: o.paid ? "#10B981" : "#F59E0B" }}>₹{Number(o.finalTotal || 0)}</div>
                     <div style={{ fontSize: 9, color: o.paid ? "#10B981" : "#F59E0B", marginTop: 2, fontWeight: 700, background: o.paid ? "rgba(16,185,129,0.15)" : "rgba(245,158,11,0.15)", padding: "2px 6px", borderRadius: 4 }}>
-                      {o.paid ? "PAID" : o.status === "served" ? "DONE" : "COLLECT"}
+                      {/* FIXED: PAID / UNPAID */}
+                      {o.paid ? "PAID" : "UNPAID"}
                     </div>
                   </div>
                 </div>
@@ -428,12 +469,12 @@ export default function DeliveryApp() {
               {selectedOrder.items?.map((it, idx) => (
                 <div key={idx} style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontSize: 14 }}>
                   <span>{it.qty}x {it.name}</span>
-                  <span style={{ fontWeight: 700 }}>₹{it.price * it.qty}</span>
+                  <span style={{ fontWeight: 700 }}>₹{(it.price || 0) * (it.qty || 1)}</span>
                 </div>
               ))}
               <div style={{ borderTop: "1px dashed #273449", margin: "10px 0", paddingTop: 10, display: "flex", justifyContent: "space-between", fontWeight: 900, fontSize: 18 }}>
                 <span>Total</span>
-                <span style={{ color: selectedOrder.paid ? "#10B981" : "#F59E0B" }}>₹{selectedOrder.finalTotal}</span>
+                <span style={{ color: selectedOrder.paid ? "#10B981" : "#F59E0B" }}>₹{Number(selectedOrder.finalTotal || 0)}</span>
               </div>
             </div>
 
@@ -448,7 +489,7 @@ export default function DeliveryApp() {
 
                 {selectedOrder.status === "out_for_delivery" && (
                   <button disabled={Boolean(busyId)} onClick={() => markDelivered(selectedOrder.id)} style={{ width: "100%", padding: 16, background: "#10B981", color: "#fff", border: "none", borderRadius: 12, fontWeight: 900, fontSize: 16, cursor: "pointer", opacity: busyId ? 0.6 : 1 }}>
-                    {busyId === selectedOrder.id ? "Please wait..." : "✅ Delivered & Collected ₹" + selectedOrder.finalTotal}
+                    {busyId === selectedOrder.id ? "Please wait..." : "✅ Delivered & Collected ₹" + Number(selectedOrder.finalTotal || 0)}
                   </button>
                 )}
 
