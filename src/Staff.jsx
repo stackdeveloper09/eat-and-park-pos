@@ -575,7 +575,7 @@ export default function Staff({ C, isMobile }) {
     }
     setBusyId("gps");
     try {
-      await setDoc(doc(db, "settings", "restaurant"), { lat, lng, radius });
+      await setDoc(doc(db, "settings", "restaurant"), { lat, lng, radius }, { merge: true });
       setGpsSaved({ lat, lng });
     } catch (error) {
       setGpsError(`GPS settings save nahi hui: ${getErrorMessage(error)}`);
@@ -638,7 +638,18 @@ export default function Staff({ C, isMobile }) {
           rejectedAt: Date.now(),
           adminNote: (advanceNoteDrafts[advance.id] || "").trim(),
         };
-      await updateDoc(doc(db, advance.collectionName, advance.id), update);
+      const batch = writeBatch(db);
+      batch.update(doc(db, advance.collectionName, advance.id), update);
+      batch.set(doc(collection(db, "notifications")), {
+        userId: getStaffId(advance),
+        title: `Advance ${status.toLowerCase()}`,
+        message: status === "Approved"
+          ? `Your advance request for ${formatCurrency(Number(advance.amount || 0))} was approved.`
+          : `Your advance request was rejected.${update.adminNote ? ` Admin note: ${update.adminNote}` : ""}`,
+        read: false,
+        createdAt: Date.now(),
+      });
+      await batch.commit();
     } catch (error) {
       reportError(`Advance ${status === "Approved" ? "approve" : "reject"} nahi hua`, error);
     } finally {
@@ -806,7 +817,18 @@ export default function Staff({ C, isMobile }) {
         decision.cancelledBy = adminUid;
         decision.cancelledAt = Date.now();
       }
-      await updateDoc(doc(db, "leaveRequests", leave.id), decision);
+      const batch = writeBatch(db);
+      batch.update(doc(db, "leaveRequests", leave.id), decision);
+      if (nextStatus !== "cancelled") {
+        batch.set(doc(collection(db, "notifications")), {
+          userId: leave.staffId,
+          title: `Leave request ${nextStatus}`,
+          message: `Your ${leave.type} request for ${leave.fromDate} to ${leave.toDate} was ${nextStatus}.${decision.adminNote ? ` Admin note: ${decision.adminNote}` : ""}`,
+          read: false,
+          createdAt: Date.now(),
+        });
+      }
+      await batch.commit();
     } catch (error) {
       reportError(`Leave request ${nextStatus} nahi hui`, error);
     } finally {
@@ -855,6 +877,14 @@ export default function Staff({ C, isMobile }) {
           createdBy: adminUid,
           createdAt: Date.now(),
           status: "paid",
+        });
+        const notificationRef = doc(collection(db, "notifications"));
+        batch.set(notificationRef, {
+          userId: row.member.id,
+          title: "Salary payment received",
+          message: `Salary payment of ${formatCurrency(amount)} for ${month} was recorded.`,
+          read: false,
+          createdAt: Date.now(),
         });
       }
       if (remaining > 0 && paymentForm.carryForward) {
@@ -1006,6 +1036,13 @@ export default function Staff({ C, isMobile }) {
       };
       const batch = writeBatch(db);
       batch.set(attendanceRef, attendanceData);
+      batch.set(doc(collection(db, "notifications")), {
+        userId: staffId,
+        title: "Attendance updated",
+        message: `Admin updated your attendance for ${date} to ${status}.`,
+        read: false,
+        createdAt: Date.now(),
+      });
       manualSnapshot.docs.forEach((entry) => {
         if (entry.id !== attendanceRef.id && getStaffId(entry.data()) === staffId) {
           batch.delete(entry.ref);

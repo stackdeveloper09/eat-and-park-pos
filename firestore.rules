@@ -91,12 +91,17 @@ service cloud.firestore {
       allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
       allow create: if isAdmin()
         && request.resource.data.keys().hasAll(['name', 'role', 'monthlySalary', 'active'])
-        && request.resource.data.keys().hasOnly(['name', 'role', 'monthlySalary', 'active', 'shiftId'])
+        && request.resource.data.keys().hasOnly(['name', 'role', 'monthlySalary', 'active', 'shiftId', 'phone'])
         && validStaffProfile();
-      allow update: if isAdmin()
+      allow update: if (isAdmin()
         && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['name', 'role', 'monthlySalary', 'active', 'shiftId'])
-        && validStaffProfile();
+          .hasOnly(['name', 'role', 'monthlySalary', 'active', 'shiftId', 'phone'])
+        && validStaffProfile())
+        || (signedIn()
+          && request.auth.uid == uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['phone'])
+          && request.resource.data.phone is string
+          && request.resource.data.phone.size() <= 20);
       allow delete: if false;
     }
 
@@ -140,14 +145,21 @@ service cloud.firestore {
                       && request.resource.data.shifts is map)
                   || (docId == 'restaurant'
                       && isAdmin()
-                      && request.resource.data.keys().hasOnly(['lat', 'lng', 'radius'])
+                      && request.resource.data.keys().hasOnly([
+                        'lat', 'lng', 'radius', 'contactPhone', 'showStaffSalary'
+                      ])
                       && request.resource.data.keys().hasAll(['lat', 'lng', 'radius'])
                       && request.resource.data.lat is number
                       && request.resource.data.lat >= -90 && request.resource.data.lat <= 90
                       && request.resource.data.lng is number
                       && request.resource.data.lng >= -180 && request.resource.data.lng <= 180
                       && request.resource.data.radius is number
-                      && request.resource.data.radius > 0 && request.resource.data.radius <= 10000)
+                      && request.resource.data.radius > 0 && request.resource.data.radius <= 10000
+                      && (!('contactPhone' in request.resource.data)
+                        || (request.resource.data.contactPhone is string
+                          && request.resource.data.contactPhone.size() <= 20))
+                      && (!('showStaffSalary' in request.resource.data)
+                        || request.resource.data.showStaffSalary is bool))
                   || (isAdmin() && docId != 'restaurant' && docId != 'shifts')
                   || (isStaff() && docId in ['menu', 'availability', 'favourites', 'expenseCats']);
     }
@@ -194,7 +206,7 @@ service cloud.firestore {
           && request.resource.data.createdAt is int
           && request.resource.data.approvedBy == request.auth.uid
           && request.resource.data.approvedAt is int);
-      allow update: if isAdminOrOwner()
+      allow update: if (isAdminOrOwner()
         && ((resource.data.status == 'Pending'
           && request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(['status', 'approvedBy', 'approvedAt', 'rejectedBy', 'rejectedAt', 'adminNote'])
@@ -209,12 +221,19 @@ service cloud.firestore {
             .hasOnly(['status', 'cancelledBy', 'cancelledAt'])
           && request.resource.data.status == 'Cancelled'
           && request.resource.data.cancelledBy == request.auth.uid
-          && request.resource.data.cancelledAt is int));
+          && request.resource.data.cancelledAt is int)))
+        || (signedIn()
+          && resource.data.get('staffId', resource.data.get('uid', '')) == request.auth.uid
+          && resource.data.status == 'Pending'
+          && request.resource.data.status == 'Cancelled'
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['status', 'cancelledAt'])
+          && request.resource.data.cancelledAt is int);
       allow delete: if false;
     }
 
     match /salaryPayments/{id} {
-      allow read: if isAdmin();
+      allow read: if isAdmin() || (signedIn() && resource.data.staffId == request.auth.uid);
       allow create: if isAdminOrOwner()
         && request.resource.data.keys().hasOnly([
           'staffId', 'month', 'amount', 'date', 'note', 'createdBy', 'createdAt', 'status'
@@ -244,7 +263,7 @@ service cloud.firestore {
     }
 
     match /salaryCarryForwards/{id} {
-      allow read: if isAdmin();
+      allow read: if isAdmin() || (signedIn() && resource.data.staffId == request.auth.uid);
       allow create: if isAdminOrOwner()
         && validSalaryCarryForward()
         && request.resource.data.createdBy == request.auth.uid;
@@ -295,6 +314,25 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    match /notifications/{id} {
+      allow read: if signedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isAdmin()
+        && request.resource.data.keys().hasOnly(['userId', 'title', 'message', 'read', 'createdAt'])
+        && request.resource.data.keys().hasAll(['userId', 'title', 'message', 'read', 'createdAt'])
+        && request.resource.data.userId is string
+        && exists(/databases/$(db)/documents/staff/$(request.resource.data.userId))
+        && request.resource.data.title is string
+        && request.resource.data.message is string
+        && request.resource.data.read == false
+        && request.resource.data.createdAt is int;
+      allow update: if signedIn()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read'])
+        && request.resource.data.read == true;
+      allow delete: if false;
+    }
+
     match /attendance/{id} {
       allow read: if isAdmin()
         || (signedIn() && resource.data.staffId == request.auth.uid);
@@ -318,6 +356,7 @@ service cloud.firestore {
             && request.resource.data.leaveRequestId is string
             && exists(/databases/$(db)/documents/leaveRequests/$(request.resource.data.leaveRequestId)))))
         || ((isStaff() || isDelivery())
+          && id == request.resource.data.staffId + '_' + request.resource.data.date
           && request.resource.data.keys().hasOnly([
             'staffId', 'date', 'status', 'distanceMeters', 'source',
             'checkInAt', 'checkOutAt', 'shiftId', 'shiftName', 'shiftStartTime',
@@ -328,12 +367,13 @@ service cloud.firestore {
           && request.resource.data.staffId == request.auth.uid
           && request.resource.data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
           && request.resource.data.status in ['Present', 'Half Day']
-          && (!('source' in request.resource.data) || request.resource.data.source == 'gps')
+          && request.resource.data.source == 'gps'
           && request.resource.data.distanceMeters is number
           && request.resource.data.distanceMeters >= 0
           && request.resource.data.distanceMeters <= restaurantRadius()
           && request.resource.data.checkInAt is number
-          && (!('checkOutAt' in request.resource.data) || request.resource.data.checkOutAt is number));
+          && request.resource.data.incomplete == true
+          && !('checkOutAt' in request.resource.data));
       allow update: if (isAdminOrOwner()
         && request.resource.data.keys().hasOnly([
           'staffId', 'date', 'status', 'markedBy', 'source', 'leaveRequestId',
@@ -354,19 +394,21 @@ service cloud.firestore {
             && request.resource.data.leaveRequestId is string
             && exists(/databases/$(db)/documents/leaveRequests/$(request.resource.data.leaveRequestId)))))
         || ((isStaff() || isDelivery())
+          && id == resource.data.staffId + '_' + resource.data.date
           && resource.data.staffId == request.auth.uid
-          && resource.data.source == 'gps'
+          && (resource.data.get('source', '') == 'gps'
+            || (!('source' in resource.data) && resource.data.distanceMeters is number))
           && request.resource.data.staffId == request.auth.uid
-          && request.resource.data.source == 'gps'
+          && (request.resource.data.get('source', '') == 'gps'
+            || !('source' in request.resource.data))
           && request.resource.data.date == resource.data.date
           && request.resource.data.checkInAt == resource.data.checkInAt
-          && request.resource.data.keys().hasOnly([
-            'staffId', 'date', 'status', 'distanceMeters', 'source',
-            'checkInAt', 'checkOutAt', 'shiftId', 'shiftName', 'shiftStartTime',
-            'shiftEndTime', 'breakStart', 'breakEnd', 'late', 'lateMinutes',
-            'incomplete', 'earlyLeave', 'workedMinutes'
-          ])
-          && request.resource.data.checkOutAt is number);
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['checkOutAt', 'incomplete', 'earlyLeave', 'workedMinutes'])
+          && request.resource.data.status == resource.data.status
+          && request.resource.data.checkOutAt is number
+          && request.resource.data.checkOutAt > resource.data.checkInAt
+          && request.resource.data.incomplete == false);
       allow delete: if isAdminOrOwner()
         || ((isStaff() || isDelivery())
           && resource.data.staffId == request.auth.uid

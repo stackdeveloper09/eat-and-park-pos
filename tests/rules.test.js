@@ -183,7 +183,7 @@ describe("other collections", () => {
       source: "leave", leaveRequestId: other,
     }));
   });
-  test("salary payments and carry forwards are admin-only and payments are soft-cancelled", async () => {
+  test("admins write salary payments; staff reads are scoped and payments soft-cancel", async () => {
     const payment = await addDoc(collection(as("a1"), "salaryPayments"), {
       staffId: "w1", month: "2026-11", amount: 4000, date: "2026-11-22",
       note: "Part payment", createdBy: "a1", createdAt: Date.now(), status: "paid",
@@ -218,10 +218,47 @@ describe("other collections", () => {
   test("waiter cannot write staff salary", () => assertFails(setDoc(doc(as("w1"), "staffPayroll/w1"), {
     uid: "w1", monthlySalary: 30000, updatedAt: Date.now(), updatedBy: "w1",
   })));
+  test("staff can edit only their own phone field", async () => {
+    await assertSucceeds(updateDoc(doc(as("w1"), "staff/w1"), { phone: "+919876543210" }));
+    await assertFails(updateDoc(doc(as("w1"), "staff/w1"), { monthlySalary: 1 }));
+    await assertFails(updateDoc(doc(as("w1"), "staff/a1"), { phone: "+919876543210" }));
+  });
+  test("staff can read only their own salary payments and carry-forwards", async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await setDoc(doc(db, "salaryPayments/payment-w1"), {
+        staffId: "w1", month: "2026-11", amount: 4000, date: "2026-11-22",
+        note: "", createdBy: "a1", createdAt: Date.now(), status: "paid",
+      });
+      await setDoc(doc(db, "salaryPayments/payment-c1"), {
+        staffId: "c1", month: "2026-11", amount: 4000, date: "2026-11-22",
+        note: "", createdBy: "a1", createdAt: Date.now(), status: "paid",
+      });
+      await setDoc(doc(db, "salaryCarryForwards/carry-w1"), {
+        staffId: "w1", fromMonth: "2026-10", month: "2026-11", amount: 500,
+        status: "active", createdBy: "a1", createdAt: Date.now(), updatedAt: Date.now(), updatedBy: "a1",
+      });
+    });
+    await assertSucceeds(getDoc(doc(as("w1"), "salaryPayments/payment-w1")));
+    await assertFails(getDoc(doc(as("w1"), "salaryPayments/payment-c1")));
+    await assertSucceeds(getDoc(doc(as("w1"), "salaryCarryForwards/carry-w1")));
+  });
+  test("staff can read and mark read only their own notifications", async () => {
+    await assertSucceeds(setDoc(doc(as("a1"), "notifications/for-w1"), {
+      userId: "w1", title: "Test", message: "Message", read: false, createdAt: Date.now(),
+    }));
+    await assertSucceeds(getDoc(doc(as("w1"), "notifications/for-w1")));
+    await assertSucceeds(updateDoc(doc(as("w1"), "notifications/for-w1"), { read: true }));
+    await assertFails(updateDoc(doc(as("w1"), "notifications/for-w1"), { message: "Changed" }));
+    await assertFails(getDoc(doc(as("c1"), "notifications/for-w1")));
+    await assertFails(setDoc(doc(as("w1"), "notifications/staff-created"), {
+      userId: "w1", title: "Test", message: "Message", read: false, createdAt: Date.now(),
+    }));
+  });
   test("staff can mark attendance only for self and inside the radius", async () => {
     await assertSucceeds(setDoc(doc(as("w1"), "attendance/w1_2026-11-21"), {
       staffId: "w1", date: "2026-11-21", status: "Present", source: "gps",
-      distanceMeters: 80, checkInAt: Date.now(), shiftId: "morning",
+      distanceMeters: 80, checkInAt: Date.now() - 60000, shiftId: "morning",
       shiftName: "Morning", late: false, lateMinutes: 0, incomplete: true, earlyLeave: false,
     }));
     await assertSucceeds(updateDoc(doc(as("w1"), "attendance/w1_2026-11-21"), {

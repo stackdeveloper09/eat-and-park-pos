@@ -1,17 +1,24 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   browserLocalPersistence,
+  EmailAuthProvider,
   onAuthStateChanged,
+  reauthenticateWithCredential,
   setPersistence,
   signInWithEmailAndPassword,
   signOut,
+  updatePassword,
 } from "firebase/auth";
 import { addDoc, collection, doc, getDoc, getDocs, onSnapshot, query, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
 import { auth } from "./firebase";
 import { db } from "./firebase";
 import {
   ATTENDANCE_RADIUS_METERS,
+  attendanceDayValue,
+  calculateSalaryBalance,
+  calculateStaffSalary,
   dateRangeInclusive,
+  daysInMonth,
   haversineDistanceMeters,
   isValidDateKey,
   RESTAURANT_LOCATION,
@@ -26,12 +33,9 @@ import {
 } from "./lib/staffShifts";
 import "./AttendanceApp.css";
 import { STAFF_ROLES } from "./lib/roles";
+import { ATTENDANCE_STRINGS } from "./lib/attendanceStrings";
 
 const STAFF_ROLE_SET = new Set(STAFF_ROLES);
-
-function attendanceDate(date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
 
 function getErrorMessage(error) {
   return error instanceof Error ? error.message : "Something went wrong. Please try again.";
@@ -56,12 +60,40 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
   const [user, setUser] = useState(null);
   const [staff, setStaff] = useState(null);
   const [payroll, setPayroll] = useState(null);
+  const [salaryPayments, setSalaryPayments] = useState([]);
+  const [salaryCarryForwards, setSalaryCarryForwards] = useState([]);
   const [attendanceRecords, setAttendanceRecords] = useState([]);
   const [legacyAttendanceRecords, setLegacyAttendanceRecords] = useState([]);
   const [advanceRecords, setAdvanceRecords] = useState([]);
   const [legacyAdvanceRecords, setLegacyAdvanceRecords] = useState([]);
   const [leaveRequests, setLeaveRequests] = useState([]);
+  const [notifications, setNotifications] = useState([]);
+  const [restaurantSettings, setRestaurantSettings] = useState({});
   const [shifts, setShifts] = useState(DEFAULT_SHIFTS);
+  const [activeSection, setActiveSection] = useState("home");
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [selectedMonth, setSelectedMonth] = useState(indiaDateKey().slice(0, 7));
+  const [language, setLanguage] = useState(() => {
+    try { return localStorage.getItem("attendance_language") === "hi" ? "hi" : "en"; } catch { return "en"; }
+  });
+  const languageRef = useRef(language);
+  const [phoneDraft, setPhoneDraft] = useState("");
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [settingsBusy, setSettingsBusy] = useState(false);
+  const [settingsMessage, setSettingsMessage] = useState("");
+  const [selectedAttendanceDetail, setSelectedAttendanceDetail] = useState(null);
+  const [dataLoaded, setDataLoaded] = useState({
+    attendance: false,
+    legacyAttendance: false,
+    advances: false,
+    legacyAdvances: false,
+    payroll: false,
+    payments: false,
+    carryForwards: false,
+    leaves: false,
+    notifications: false,
+  });
   const [loading, setLoading] = useState(true);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -69,8 +101,8 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
   const [advanceReason, setAdvanceReason] = useState("");
   const [submittingAdvance, setSubmittingAdvance] = useState(false);
   const [leaveForm, setLeaveForm] = useState({
-    fromDate: attendanceDate(new Date()),
-    toDate: attendanceDate(new Date()),
+    fromDate: indiaDateKey(),
+    toDate: indiaDateKey(),
     type: "Paid Leave",
     reason: "",
   });
@@ -91,6 +123,24 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
     || (currentUserProp?.uid && auth.currentUser?.uid === currentUserProp.uid ? currentUserProp.uid : null);
   const suppliedName = currentUserProp?.uid && currentUserProp.uid === staffUid ? currentUserProp.name : "";
   const displayName = staff?.name || suppliedName || user?.email?.split("@")[0] || "Staff";
+  const t = (key) => ATTENDANCE_STRINGS[language][key] || key;
+  const locale = language === "hi" ? "hi-IN" : "en-IN";
+  const localizeAttendanceStatus = (status) => ({
+    Present: t("present"),
+    "Half Day": t("halfDay"),
+    Absent: t("absent"),
+    "Paid Leave": t("paidLeave"),
+    "Unpaid Leave": t("unpaidLeave"),
+  })[status] || status;
+  const localizeRequestStatus = (status) => ({
+    pending: t("pendingStatus"),
+    approved: t("approvedStatus"),
+    rejected: t("rejectedStatus"),
+    cancelled: t("cancelledStatus"),
+  })[String(status || "").toLowerCase()] || status;
+  const markDataLoaded = (key) => setDataLoaded((current) => ({ ...current, [key]: true }));
+  const staffShift = shifts[staff?.shiftId] || null;
+  const unreadNotifications = notifications.filter((notification) => notification.read !== true).length;
 
   const attendanceHistory = useMemo(() => {
     const recordsByDate = new Map();
@@ -124,20 +174,81 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
     && leave.fromDate <= leaveForm.toDate
     && leave.toDate >= leaveForm.fromDate
   ));
-  const totalPresentDays = attendanceHistory.reduce((total, record) => {
-    const status = String(record.status || (record.action === "present" ? "Present" : "")).toLowerCase();
-    if (status === "half day") return total + 0.5;
-    if (status === "present" || status === "paid leave") return total + 1;
-    return total;
-  }, 0);
-  const totalApprovedAdvances = advanceHistory.reduce((total, advance) => (
-    String(advance.status || "").toLowerCase() === "approved"
-      ? total + (Number.isFinite(Number(advance.amount)) ? Number(advance.amount) : 0)
-      : total
-  ), 0);
   const todayAttendance = optimisticAttendance?.date === today
     ? optimisticAttendance
-    : attendanceHistory.find((record) => record.date === today) || null;
+    : attendanceHistory.find((record) => record.date === today)
+      || attendanceHistory.find((record) => {
+        if (!record.checkInAt || record.checkOutAt || !record.date) return false;
+        const dayOffset = new Date(`${today}T00:00:00+05:30`).getTime()
+          - new Date(`${record.date}T00:00:00+05:30`).getTime();
+        return dayOffset > 0 && dayOffset <= 24 * 60 * 60 * 1000;
+      })
+      || null;
+  const selectedMonthRecords = attendanceHistory.filter((record) => record.date?.startsWith(`${selectedMonth}-`));
+  const selectedMonthLeaves = leaveRequests.filter((leave) => (
+    String(leave.status || "").toLowerCase() === "approved"
+    && leave.fromDate <= `${selectedMonth}-${String(daysInMonth(selectedMonth)).padStart(2, "0")}`
+    && leave.toDate >= `${selectedMonth}-01`
+  ));
+  const attendanceByDate = new Map(selectedMonthRecords.map((record) => [record.date, record]));
+  selectedMonthLeaves.forEach((leave) => {
+    dateRangeInclusive(leave.fromDate, leave.toDate)
+      .filter((date) => date.startsWith(`${selectedMonth}-`) && !attendanceByDate.has(date))
+      .forEach((date) => attendanceByDate.set(date, {
+        date,
+        status: leave.type === "Paid Leave" ? "Paid Leave" : leave.type === "Half Day" ? "Half Day" : "Unpaid Leave",
+        source: "leave",
+        leaveRequestId: leave.id,
+      }));
+  });
+  const attendanceSummary = [...attendanceByDate.values()].reduce((summary, record) => {
+    const status = String(record.status || (record.action === "present" ? "Present" : ""));
+    if (status === "Present") summary.present += 1;
+    else if (status === "Half Day") summary.halfDay += 1;
+    else if (status === "Absent") summary.absent += 1;
+    else if (status === "Paid Leave" || status === "Unpaid Leave") summary.leave += 1;
+    if (Number(record.lateMinutes || 0) > 0) summary.late += 1;
+    return summary;
+  }, { present: 0, halfDay: 0, absent: 0, leave: 0, late: 0 });
+  const selectedPresentDays = selectedMonthRecords.reduce((total, record) => (
+    total + (record.status === "Paid Leave" ? 0
+      : attendanceDayValue(record.status || (record.action === "present" ? "Present" : "")))
+  ), 0);
+  const selectedPaidLeaveDays = selectedMonthRecords.filter((record) => record.status === "Paid Leave").length;
+  const salaryMonthlyAmount = Number(staff?.monthlySalary ?? payroll?.monthlySalary ?? 0);
+  const salaryCalculation = calculateStaffSalary({
+    monthlySalary: salaryMonthlyAmount,
+    presentDays: selectedPresentDays,
+    paidLeaveDays: selectedPaidLeaveDays,
+    totalApprovedAdvance: advanceHistory
+      .filter((advance) => String(advance.status || "").toLowerCase() === "approved"
+        && (advance.month === selectedMonth || String(advance.date || "").startsWith(`${selectedMonth}-`)))
+      .reduce((total, advance) => total + Math.max(0, Number(advance.amount || 0)), 0),
+    daysInPayPeriod: daysInMonth(selectedMonth),
+  });
+  const salaryCarryIn = salaryCarryForwards
+    .filter((entry) => entry.month === selectedMonth && String(entry.status || "active").toLowerCase() === "active")
+    .reduce((total, entry) => total + Math.max(0, Number(entry.amount || 0)), 0);
+  const selectedMonthPayments = salaryPayments
+    .filter((payment) => payment.month === selectedMonth && String(payment.status || "paid").toLowerCase() !== "cancelled")
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  const salaryHistoryMonths = [...new Set([
+    ...salaryPayments.map((payment) => payment.month),
+    ...attendanceHistory.map((record) => record.date?.slice(0, 7)),
+    ...advanceHistory.map((advance) => advance.month || String(advance.date || "").slice(0, 7)),
+    ...salaryCarryForwards.map((entry) => entry.month),
+    ...leaveRequests.flatMap((leave) => [leave.fromDate?.slice(0, 7), leave.toDate?.slice(0, 7)]),
+  ].filter((month) => month && month <= today.slice(0, 7)))]
+    .sort((a, b) => b.localeCompare(a));
+  const salaryPaid = selectedMonthPayments.reduce((total, payment) => total + Math.max(0, Number(payment.amount || 0)), 0);
+  const salaryPayable = salaryCalculation.finalPayable + salaryCarryIn;
+  const { balanceDue: salaryBalance } = calculateSalaryBalance(salaryPayable, salaryPaid);
+  const salaryStatus = salaryBalance <= 0 ? "Paid" : salaryPaid > 0 ? "Partial" : "Unpaid";
+  const overallAdvances = advanceHistory
+    .filter((advance) => String(advance.status || "").toLowerCase() === "approved")
+    .reduce((total, advance) => total + Math.max(0, Number(advance.amount || 0)), 0);
+  const calendarDays = daysInMonth(selectedMonth);
+  const calendarFirstDay = new Date(`${selectedMonth}-01T00:00:00Z`).getUTCDay();
 
   useEffect(() => {
     document.title = "Eat & Park Attendance";
@@ -150,13 +261,19 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
   }, []);
 
   useEffect(() => {
-    let active = true;
+    languageRef.current = language;
+  }, [language]);
+
+  useEffect(() => {
+    const active = { value: true };
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (!currentUser) {
-        if (active) {
+        if (active.value) {
           setUser(null);
           setStaff(null);
           setPayroll(null);
+          setSalaryPayments([]);
+          setSalaryCarryForwards([]);
           setAttendanceRecords([]);
           setLegacyAttendanceRecords([]);
           setAdvanceRecords([]);
@@ -169,15 +286,27 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
         return;
       }
 
-      if (active) setLoading(true);
-      if (active) {
+      if (active.value) setLoading(true);
+      if (active.value) {
         setAttendanceRecords([]);
         setLegacyAttendanceRecords([]);
         setAdvanceRecords([]);
         setLegacyAdvanceRecords([]);
         setLeaveRequests([]);
+        setNotifications([]);
         setPayroll(null);
         setProfileError("");
+        setDataLoaded({
+          attendance: false,
+          legacyAttendance: false,
+          advances: false,
+          legacyAdvances: false,
+          payroll: false,
+          payments: false,
+          carryForwards: false,
+          leaves: false,
+          notifications: false,
+        });
       }
       try {
         const staffSnapshot = await getDoc(doc(db, "staff", currentUser.uid));
@@ -185,29 +314,30 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
         const role = String(profile?.role || "").toLowerCase();
         if (!profile || profile.active === false || !STAFF_ROLE_SET.has(role)) {
           await signOut(auth);
-          if (active) {
-            setLoginError("Ye account active staff account nahi hai.");
+          if (active.value) {
+            setLoginError(ATTENDANCE_STRINGS[languageRef.current].profileVerifyError);
             setLoading(false);
           }
           return;
         }
-        if (active) {
+        if (active.value) {
           setUser(currentUser);
           setStaff(profile);
+          setPhoneDraft(String(profile.phone || ""));
           setOptimisticAttendance(null);
           setLoginError("");
           setLoading(false);
         }
       } catch (error) {
         console.error("Attendance staff verification failed:", error);
-        if (active) {
+        if (active.value) {
           setLoginError(`Staff account verify nahi hua: ${getErrorMessage(error)}`);
           setLoading(false);
         }
       }
     });
     return () => {
-      active = false;
+      active.value = false;
       unsubscribe();
     };
   }, []);
@@ -259,55 +389,114 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
 
     const unsubscribeAttendance = onSnapshot(
       query(collection(db, "attendance"), where("staffId", "==", staffUid)),
-      (snapshot) => setAttendanceRecords(snapshot.docs.map((entry) => entry.data())),
+      (snapshot) => {
+        setAttendanceRecords(snapshot.docs.map((entry) => entry.data()));
+        markDataLoaded("attendance");
+      },
       (error) => {
+        markDataLoaded("attendance");
         console.error("Staff attendance history load failed:", error);
         setProfileError(`Attendance history load nahi hui: ${getErrorMessage(error)}`);
       },
     );
     const unsubscribeLegacyAttendance = onSnapshot(
       query(collection(db, "staffAttendance"), where("uid", "==", staffUid)),
-      (snapshot) => setLegacyAttendanceRecords(snapshot.docs.map((entry) => entry.data())),
+      (snapshot) => {
+        setLegacyAttendanceRecords(snapshot.docs.map((entry) => entry.data()));
+        markDataLoaded("legacyAttendance");
+      },
       (error) => {
+        markDataLoaded("legacyAttendance");
         console.error("Legacy attendance history load failed:", error);
         setProfileError(`Attendance history load nahi hui: ${getErrorMessage(error)}`);
       },
     );
     const unsubscribeAdvances = onSnapshot(
       query(collection(db, "advances"), where("staffId", "==", staffUid)),
-      (snapshot) => setAdvanceRecords(snapshot.docs.map((entry) => {
-        const data = entry.data();
-        return { id: entry.id, ...data, source: data.source || "request" };
-      })),
+      (snapshot) => {
+        setAdvanceRecords(snapshot.docs.map((entry) => {
+          const data = entry.data();
+          return { id: entry.id, ...data, source: data.source || "request" };
+        }));
+        markDataLoaded("advances");
+      },
       (error) => {
+        markDataLoaded("advances");
         console.error("Staff advance history load failed:", error);
         setProfileError(`Advance history load nahi hui: ${getErrorMessage(error)}`);
       },
     );
     const unsubscribeLegacyAdvances = onSnapshot(
       query(collection(db, "staffAdvances"), where("uid", "==", staffUid)),
-      (snapshot) => setLegacyAdvanceRecords(snapshot.docs.map((entry) => {
-        const data = entry.data();
-        return { id: entry.id, ...data, source: data.source || "request" };
-      })),
+      (snapshot) => {
+        setLegacyAdvanceRecords(snapshot.docs.map((entry) => {
+          const data = entry.data();
+          return { id: entry.id, ...data, source: data.source || "request" };
+        }));
+        markDataLoaded("legacyAdvances");
+      },
       (error) => {
+        markDataLoaded("legacyAdvances");
         console.error("Legacy advance history load failed:", error);
         setProfileError(`Advance history load nahi hui: ${getErrorMessage(error)}`);
       },
     );
     const unsubscribePayroll = onSnapshot(doc(db, "staffPayroll", staffUid), (snapshot) => {
       setPayroll(snapshot.exists() ? snapshot.data() : null);
+      markDataLoaded("payroll");
     }, (error) => {
+      markDataLoaded("payroll");
       console.error("Staff salary load failed:", error);
       setProfileError(`Monthly salary load nahi hui: ${getErrorMessage(error)}`);
     });
+    const unsubscribeSalaryPayments = onSnapshot(
+      query(collection(db, "salaryPayments"), where("staffId", "==", staffUid)),
+      (snapshot) => {
+        setSalaryPayments(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() })));
+        markDataLoaded("payments");
+      },
+      (error) => {
+        markDataLoaded("payments");
+        console.error("Staff salary payment history load failed:", error);
+        setProfileError(`Salary payments load nahi hue: ${getErrorMessage(error)}`);
+      },
+    );
+    const unsubscribeCarryForwards = onSnapshot(
+      query(collection(db, "salaryCarryForwards"), where("staffId", "==", staffUid)),
+      (snapshot) => {
+        setSalaryCarryForwards(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() })));
+        markDataLoaded("carryForwards");
+      },
+      (error) => {
+        markDataLoaded("carryForwards");
+        console.error("Staff carry-forward load failed:", error);
+        setProfileError(`Carry-forward load nahi hua: ${getErrorMessage(error)}`);
+      },
+    );
     const unsubscribeLeaves = onSnapshot(
       query(collection(db, "leaveRequests"), where("staffId", "==", staffUid)),
-      (snapshot) => setLeaveRequests(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() }))
-        .sort((a, b) => String(b.fromDate).localeCompare(String(a.fromDate)))),
+      (snapshot) => {
+        setLeaveRequests(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() }))
+          .sort((a, b) => String(b.fromDate).localeCompare(String(a.fromDate))));
+        markDataLoaded("leaves");
+      },
       (error) => {
+        markDataLoaded("leaves");
         console.error("Staff leave requests load failed:", error);
         setProfileError(`Leave requests load nahi hui: ${getErrorMessage(error)}`);
+      },
+    );
+    const unsubscribeNotifications = onSnapshot(
+      query(collection(db, "notifications"), where("userId", "==", staffUid)),
+      (snapshot) => {
+        setNotifications(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() }))
+          .sort((a, b) => timestampMillis(b.createdAt) - timestampMillis(a.createdAt)));
+        markDataLoaded("notifications");
+      },
+      (error) => {
+        markDataLoaded("notifications");
+        console.error("Staff notifications load failed:", error);
+        setProfileError(`Notifications load nahi hui: ${getErrorMessage(error)}`);
       },
     );
 
@@ -317,9 +506,19 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
       unsubscribeAdvances();
       unsubscribeLegacyAdvances();
       unsubscribePayroll();
+      unsubscribeSalaryPayments();
+      unsubscribeCarryForwards();
       unsubscribeLeaves();
+      unsubscribeNotifications();
     };
   }, [staffUid]);
+
+  useEffect(() => onSnapshot(doc(db, "settings", "restaurant"), (snapshot) => {
+    setRestaurantSettings(snapshot.exists() ? snapshot.data() : {});
+  }, (error) => {
+    console.error("Restaurant contact settings load failed:", error);
+    setProfileError(`Restaurant settings load nahi hui: ${getErrorMessage(error)}`);
+  }), []);
 
   const login = async (event) => {
     event.preventDefault();
@@ -333,7 +532,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
       const message = error?.code === "auth/invalid-credential"
         || error?.code === "auth/user-not-found"
         || error?.code === "auth/wrong-password"
-        ? "Email ya password galat hai."
+        ? t("emailPasswordError")
         : getErrorMessage(error);
       setLoginError(message);
       setLoading(false);
@@ -367,7 +566,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
             code: error.code,
             message: error.message,
           });
-          if (error.code === 1) window.alert("Please allow location permission");
+          if (error.code === 1) window.alert(t("permissionError"));
           reject(error);
         };
         console.log("Calling navigator.geolocation.getCurrentPosition", {
@@ -387,13 +586,14 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
         settings.lng,
       );
       if (distance > settings.radius) {
-        window.alert("You are too far");
+        setAttendanceError(t("outOfRange"));
+        window.alert(t("outOfRange"));
         return;
       }
 
       const currentDate = indiaDateKey(new Date());
       if (todayAttendance?.checkOutAt == null && todayAttendance?.checkInAt) {
-        setNotice("Aaj check-in ho chuka hai. Ab Check out karein.");
+        setNotice(t("checkedInAlready"));
         return;
       }
       const [attendanceSnapshot, legacySnapshot] = await Promise.all([
@@ -409,10 +609,10 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
         const canonical = attendanceSnapshot.docs.find((entry) => entry.id === `${staffUid}_${currentDate}`);
         const record = canonical?.data();
         if (record?.source === "manual") {
-          setNotice("Admin ne aaj ki attendance manual override ki hai.");
+          setNotice(t("manualOverride"));
         } else {
           setOptimisticAttendance(record || { status: "Present", date: currentDate });
-          setNotice("Aaj ki attendance pehle hi mark ho chuki hai.");
+          setNotice(t("alreadyMarked"));
         }
         return;
       }
@@ -436,22 +636,19 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
       };
       await setDoc(doc(db, "attendance", `${staffUid}_${currentDate}`), record);
       setOptimisticAttendance(record);
-      setNotice(result?.status === "Half Day"
-        ? "Half Day mark hui: shift start se 30 minutes ya zyada late."
-        : "Check-in successfully mark ho gaya.");
+      setNotice(result?.status === "Half Day" ? t("halfDayMarked") : t("gpsCheckinSaved"));
     } catch (error) {
       console.error("GPS attendance failed:", error);
       if (error?.code === 1) {
-        setAttendanceError("Please allow location permission");
+        setAttendanceError(t("permissionError"));
       } else if (error?.code === 2) {
-        window.alert("Unable to get your location. Please check GPS.");
-        setAttendanceError("Aapki current location nahi mil saki. GPS check karke phir try karein.");
+        window.alert(t("locationUnavailable"));
+        setAttendanceError(t("locationUnavailable"));
       } else if (error?.code === 3) {
-        window.alert("Location request timed out. Please try again.");
-        setAttendanceError("GPS location lene mein time out hua. Phir try karein.");
+        window.alert(t("locationTimeout"));
+        setAttendanceError(t("locationTimeout"));
       } else {
-        window.alert(`Attendance mark nahi hui: ${getErrorMessage(error)}`);
-        setAttendanceError(`Attendance mark nahi hui: ${getErrorMessage(error)}`);
+        setAttendanceError(`${t("attendanceFailed")} ${getErrorMessage(error)}`);
       }
     } finally {
       setCheckingLocation(false);
@@ -461,7 +658,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
   const markCheckout = async () => {
     if (!staffUid || checkingLocation || !todayAttendance?.checkInAt || todayAttendance?.checkOutAt) return;
     if (todayAttendance.source === "manual") {
-      setNotice("Manual override wale record par staff check-out GPS se change nahi hoga.");
+      setNotice(t("manualOverride"));
       return;
     }
     setCheckingLocation(true);
@@ -496,7 +693,8 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
         settings.lng,
       );
       if (distance > settings.radius) {
-        window.alert("You are too far");
+        setAttendanceError(t("outOfRange"));
+        window.alert(t("outOfRange"));
         return;
       }
 
@@ -511,12 +709,17 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
         status: todayAttendance.source === "manual" ? todayAttendance.status : (result?.status || todayAttendance.status),
         workedMinutes: shift ? calculateWorkedMinutes(todayAttendance.checkInAt, checkOutAt, shift) : null,
       };
-      await setDoc(doc(db, "attendance", `${staffUid}_${today}`), updated, { merge: true });
+      await updateDoc(doc(db, "attendance", `${staffUid}_${todayAttendance.date || today}`), {
+        checkOutAt,
+        incomplete: false,
+        earlyLeave: result?.earlyLeave ?? false,
+        workedMinutes: shift ? calculateWorkedMinutes(todayAttendance.checkInAt, checkOutAt, shift) : null,
+      });
       setOptimisticAttendance(updated);
-      setNotice(result?.earlyLeave ? "Check-out ho gaya; Early leave flag lagi hai." : "Check-out successfully mark ho gaya.");
+      setNotice(result?.earlyLeave ? `${t("checkoutSaved")} ${t("earlyLeave")}.` : t("checkoutSaved"));
     } catch (error) {
       console.error("GPS check-out failed:", error);
-      setAttendanceError(`Check-out nahi hua: ${getErrorMessage(error)}`);
+      setAttendanceError(`${t("checkoutFailed")} ${getErrorMessage(error)}`);
     } finally {
       setCheckingLocation(false);
     }
@@ -527,7 +730,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
     const amount = Number(advanceAmount);
     const reason = advanceReason.trim();
     if (!staffUid || !Number.isFinite(amount) || amount <= 0 || !reason) {
-      window.alert("Valid advance amount aur reason enter karein.");
+      window.alert(t("validAdvance"));
       return;
     }
 
@@ -548,10 +751,10 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
       });
       setAdvanceAmount("");
       setAdvanceReason("");
-      window.alert("Advance request submitted.");
+      window.alert(t("advanceSubmitted"));
     } catch (error) {
       console.error("Advance request submit failed:", error);
-      const message = `Advance request submit nahi hui: ${getErrorMessage(error)}`;
+      const message = `${t("advanceSubmitError")} ${getErrorMessage(error)}`;
       setProfileError(message);
       window.alert(message);
     } finally {
@@ -566,7 +769,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
       || leaveForm.fromDate > leaveForm.toDate
       || !["Paid Leave", "Unpaid Leave", "Half Day"].includes(leaveForm.type)
       || !reason || reason.length > 500) {
-      setProfileError("Valid leave dates, type, aur reason enter karein.");
+      setProfileError(t("validLeave"));
       return;
     }
     setSubmittingLeave(true);
@@ -592,7 +795,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
   };
 
   const cancelLeaveRequest = async (leave) => {
-    if (!window.confirm("Pending leave request cancel karein?")) return;
+    if (!window.confirm(t("cancelLeaveConfirm"))) return;
     setCancellingLeaveId(leave.id);
     setProfileError("");
     try {
@@ -616,13 +819,68 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
       });
     } catch (error) {
       console.error("Leave request cancel failed:", error);
-      setProfileError(`Leave request cancel nahi hui: ${getErrorMessage(error)}`);
+      setProfileError(`${t("leaveCancelledError")} ${getErrorMessage(error)}`);
     } finally {
       setCancellingLeaveId("");
     }
   };
 
+  const savePhone = async (event) => {
+    event.preventDefault();
+    const phone = phoneDraft.trim();
+    if (phone && !/^[+0-9()\-\s]{7,20}$/.test(phone)) {
+      setSettingsMessage(t("validPhone"));
+      return;
+    }
+    setSettingsBusy(true);
+    setSettingsMessage("");
+    try {
+      await updateDoc(doc(db, "staff", staffUid), { phone });
+      setStaff((current) => ({ ...current, phone }));
+      setSettingsMessage(t("phoneSaved"));
+    } catch (error) {
+      console.error("Staff phone update failed:", error);
+      setSettingsMessage(`Phone save nahi hua: ${getErrorMessage(error)}`);
+    } finally {
+      setSettingsBusy(false);
+    }
+  };
+
+  const changeAccountPassword = async (event) => {
+    event.preventDefault();
+    if (!auth.currentUser?.email || newPassword.length < 6) {
+      setSettingsMessage(t("validNewPassword"));
+      return;
+    }
+    setSettingsBusy(true);
+    setSettingsMessage("");
+    try {
+      const credential = EmailAuthProvider.credential(auth.currentUser.email, currentPassword);
+      await reauthenticateWithCredential(auth.currentUser, credential);
+      await updatePassword(auth.currentUser, newPassword);
+      setCurrentPassword("");
+      setNewPassword("");
+      setSettingsMessage(t("passwordChanged"));
+    } catch (error) {
+      console.error("Staff password update failed:", error);
+      setSettingsMessage(`Password change nahi hua: ${getErrorMessage(error)}`);
+    } finally {
+      setSettingsBusy(false);
+    }
+  };
+
+  const markNotificationRead = async (notification) => {
+    if (notification.read === true) return;
+    try {
+      await updateDoc(doc(db, "notifications", notification.id), { read: true });
+    } catch (error) {
+      console.error("Notification read update failed:", error);
+      setProfileError(`Notification update nahi hui: ${getErrorMessage(error)}`);
+    }
+  };
+
   const logout = async () => {
+    if (!window.confirm(t("logoutConfirm"))) return;
     setAttendanceError("");
     try {
       await signOut(auth);
@@ -663,10 +921,10 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
     cursor: "pointer",
   };
 
-  if (loading) {
+  if (loading || (staff && Object.values(dataLoaded).some((loaded) => !loaded))) {
     return (
       <main className="attendance-app">
-        <div className="attendance-loading"><span className="attendance-spinner" />Loading attendance...</div>
+        <div className="attendance-loading"><span className="attendance-spinner" />{t("loading")}</div>
       </main>
     );
   }
@@ -680,23 +938,23 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
             <div><strong>Eat & Park</strong><small>STAFF ATTENDANCE</small></div>
           </div>
           <div className="attendance-login-copy">
-            <div className="attendance-eyebrow">STAFF CHECK-IN</div>
-            <h1>Hajiri, ab<br />aasani se.</h1>
-            <p>Apne staff account se sign in karke restaurant par pahunchne ke baad attendance mark karein.</p>
+            <div className="attendance-eyebrow">{t("staffCheckin")}</div>
+            <h1>{t("loginTitle")}</h1>
+            <p>{t("signInPrompt")}</p>
           </div>
           <form onSubmit={login} className="attendance-login-form">
             <label>
-              Staff email
+              {t("staffEmail")}
               <input type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@example.com" required />
             </label>
             <label>
-              Password
-              <input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Apna password" required />
+              {t("staffPassword")}
+              <input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={t("passwordPlaceholder")} required />
             </label>
             {loginError && <div className="attendance-error" role="alert">{loginError}</div>}
-            <button type="submit" className="attendance-primary-button">Sign in <span>→</span></button>
+            <button type="submit" className="attendance-primary-button">{t("signIn")} <span>→</span></button>
           </form>
-          <div className="attendance-login-footer">Secure staff-only attendance · GPS verification required</div>
+          <div className="attendance-login-footer">{t("loginSecure")}</div>
         </section>
       </main>
     );
@@ -706,39 +964,91 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
     <main className="attendance-app">
       <section className="attendance-dashboard">
         <header className="attendance-topbar">
+          <button
+            type="button"
+            className="attendance-menu-button"
+            aria-label={t("menuOpen")}
+            aria-expanded={drawerOpen}
+            onClick={() => setDrawerOpen(true)}
+          >☰</button>
           <div className="attendance-brand">
             <div className="attendance-brand-mark"><span>E<span>&</span>P</span></div>
             <div><strong>Eat & Park</strong><small>STAFF ATTENDANCE</small></div>
           </div>
-          <button type="button" className="attendance-logout" onClick={logout}>Sign out</button>
+          <span className="attendance-topbar-role">{staff.role || "Staff"}</span>
         </header>
 
-        <section className="attendance-welcome">
-          <div className="attendance-eyebrow">YOUR SHIFT, YOUR CHECK-IN</div>
-          <h1>Namaste, {displayName} 👋</h1>
-          <p>Jab restaurant par pahunch jaayein, yahin se apni aaj ki hajiri lagayein.</p>
-        </section>
+        {drawerOpen && (
+          <div className="attendance-drawer-overlay" onClick={() => setDrawerOpen(false)}>
+            <nav className="attendance-drawer" aria-label={t("appCaption")} onClick={(event) => event.stopPropagation()}>
+              <header className="attendance-drawer-profile">
+                <button type="button" aria-label={t("menuClose")} onClick={() => setDrawerOpen(false)}>×</button>
+                <strong>{displayName}</strong>
+                <span>{staff.role || "Staff"}{staffShift ? ` · ${staffShift.name}` : ""}</span>
+              </header>
+              {[
+                ["home", "⌂", "home"],
+                ["profile", "◉", "profile"],
+                ["history", "▦", "history"],
+                ["salary", "₹", "salary"],
+                ["advance", "+", "advance"],
+                ["leave", "◇", "leave"],
+                ["shift", "◷", "shift"],
+                ["notifications", "♧", "notifications"],
+                ["settings", "⚙", "settings"],
+                ["help", "?", "help"],
+                ["logout", "↪", "logout"],
+              ].map(([section, icon, key]) => (
+                <button
+                  type="button"
+                  key={section}
+                  className={`attendance-drawer-item ${activeSection === section ? "is-active" : ""}`}
+                  onClick={() => {
+                    if (section === "logout") {
+                      setDrawerOpen(false);
+                      logout();
+                      return;
+                    }
+                    setActiveSection(section);
+                    setDrawerOpen(false);
+                  }}
+                >
+                  <span>{icon}</span>{t(key)}
+                  {section === "notifications" && unreadNotifications > 0 && <b>{unreadNotifications}</b>}
+                </button>
+              ))}
+            </nav>
+          </div>
+        )}
 
-        <section className="attendance-status-card">
+        {profileError && <div className="attendance-error" role="alert">{profileError}</div>}
+
+        {activeSection === "home" &&         <section className="attendance-welcome">
+          <div className="attendance-eyebrow">{t("home")}</div>
+          <h1>{t("greetingTitle")}, {displayName} 👋</h1>
+          <p>{t("arrivalPrompt")}</p>
+        </section>}
+
+        {activeSection === "home" && <section className="attendance-status-card">
           <div className="attendance-status-top">
             <div>
-              <div className="attendance-eyebrow">TODAY</div>
-              <h2>{now.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })}</h2>
+              <div className="attendance-eyebrow">{t("today")}</div>
+              <h2>{now.toLocaleDateString(locale, { timeZone: "Asia/Kolkata", weekday: "long", day: "numeric", month: "long" })}</h2>
             </div>
-            <div className="attendance-live-dot"><span /> LIVE</div>
+            <div className="attendance-live-dot"><span /> {t("live")}</div>
           </div>
           <div className="attendance-clock">
-            {now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true })}
+            {now.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true })}
           </div>
           <div className={`attendance-status-pill ${todayAttendance ? "is-marked" : ""}`}>
             <span>{todayAttendance ? "✓" : "•"}</span>
             {todayAttendance
-              ? `${todayAttendance.status || "Present"}${todayAttendance.incomplete ? " · Incomplete" : ""}${todayAttendance.earlyLeave ? " · Early leave" : ""}`
-              : "Not checked in yet"}
+              ? `${todayAttendance.status || t("present")}${todayAttendance.incomplete ? ` · ${t("incompleteAttendance")}` : ""}${todayAttendance.earlyLeave ? ` · ${t("earlyLeave")}` : ""}`
+              : t("notCheckedIn")}
           </div>
           {todayAttendance?.late && (
             <div style={{ marginTop: 8, color: "#fbbf24", fontSize: 12 }}>
-              Late by {todayAttendance.lateMinutes} minutes
+              {t("lateBy")} {todayAttendance.lateMinutes} {language === "hi" ? "मिनट" : "minutes"}
             </div>
           )}
           {todayAttendance?.checkInAt && (
@@ -748,17 +1058,17 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
               {todayAttendance.shiftName ? ` · ${todayAttendance.shiftName}` : ""}
             </div>
           )}
-          {isShiftRestTime(now, shifts[todayAttendance?.shiftId] || {}) && (
-            <div style={{ marginTop: 8, color: "#fb923c", fontSize: 12, fontWeight: 800 }}>Rest time · 15:00–17:00</div>
+          {isShiftRestTime(now, shifts[todayAttendance?.shiftId] || staffShift || {}) && (
+            <div style={{ marginTop: 8, color: "#fb923c", fontSize: 12, fontWeight: 800 }}>{t("restWindow")}</div>
           )}
           <div className="attendance-divider" />
           <div className="attendance-location-row">
             <div className="attendance-location-icon">⌖</div>
             <div>
-              <strong>Restaurant location</strong>
-              <span>Check-in allowed within {attendanceRadius} meters</span>
+              <strong>{t("restaurantLocation")}</strong>
+              <span>{t("checkinAllowed")} {attendanceRadius} {language === "hi" ? "मीटर" : "meters"}</span>
             </div>
-            <span className="attendance-location-check">GPS</span>
+            <span className="attendance-location-check">{t("gps")}</span>
           </div>
 
           <button
@@ -768,31 +1078,33 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
             disabled={checkingLocation || (Boolean(todayAttendance?.checkOutAt)) || gpsSettingsLoading || Boolean(gpsSettingsError)}
           >
             {gpsSettingsLoading
-              ? <>Loading restaurant GPS settings...</>
+              ? <>{t("gpsSettingsLoading")}</>
               : checkingLocation
-              ? <><span className="attendance-spinner" />Checking your location...</>
+              ? <><span className="attendance-spinner" />{t("checkingLocation")}</>
               : todayAttendance?.checkOutAt
-                ? <>Checked out for today <span>✓</span></>
+                ? <>{t("checkedOut")} <span>✓</span></>
                 : todayAttendance?.checkInAt
-                ? <>Check out via GPS <span>→</span></>
-                : <>Mark today&apos;s attendance via GPS <span>→</span></>}
+                ? <>{t("checkoutGps")} <span>→</span></>
+                : <>{t("checkinGps")} <span>→</span></>}
           </button>
-          <div className="attendance-gps-note">📍 Location permission on rakhein; attendance ke liye GPS verify hoga. Allowed radius: {attendanceRadius} meters.</div>
+          <div className="attendance-gps-note">📍 {t("gpsRadiusNote")} {attendanceRadius} {language === "hi" ? "मीटर" : "meters"}.</div>
           {gpsSettingsError && <div className="attendance-error" role="alert">{gpsSettingsError}</div>}
           {notice && <div className="attendance-success" role="status">{notice}</div>}
           {attendanceError && <div className="attendance-error" role="alert">{attendanceError}</div>}
-        </section>
+        </section>}
 
-        <section style={{ ...panelStyle, marginTop: 16 }} aria-label="Staff profile">
-          <div className="attendance-eyebrow">MY PROFILE</div>
+        {activeSection === "profile" && <section style={{ ...panelStyle, marginTop: 16 }} aria-label="Staff profile">
+          <div className="attendance-eyebrow">{t("profile")}</div>
           <h2 style={{ margin: "8px 0 14px", fontSize: 20 }}>{displayName}</h2>
-          {profileError && <div className="attendance-error" role="alert">{profileError}</div>}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
             {[
-              ["Role", staff.role || "staff"],
-              ["Monthly salary", formatCurrency(Number(staff.monthlySalary ?? payroll?.monthlySalary ?? 0))],
-              ["Present days", String(totalPresentDays)],
-              ["Approved advances", formatCurrency(totalApprovedAdvances)],
+              [t("role"), staff.role || "staff"],
+              [t("shiftName"), staffShift?.name || "—"],
+              [t("joiningDate"), staff.joiningDate || staff.joinedAt || "—"],
+              [t("email"), user?.email || "—"],
+              ...(restaurantSettings.showStaffSalary !== false
+                ? [[t("monthlySalary"), formatCurrency(Number(staff.monthlySalary ?? payroll?.monthlySalary ?? 0))]]
+                : []),
             ].map(([label, value]) => (
               <div key={label} style={{ padding: 12, borderRadius: 12, background: "rgba(255,255,255,0.04)" }}>
                 <div style={{ color: "#9ba8ba", fontSize: 11, marginBottom: 5 }}>{label}</div>
@@ -800,17 +1112,83 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
               </div>
             ))}
           </div>
-        </section>
+          <form onSubmit={savePhone} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 8, marginTop: 12 }}>
+            <label style={{ display: "grid", gap: 6, color: "#c4ccda", fontSize: 12 }}>
+              {t("phone")}
+              <input value={phoneDraft} onChange={(event) => setPhoneDraft(event.target.value)} style={dashboardInputStyle} />
+            </label>
+            <button type="submit" disabled={settingsBusy} style={{ ...dashboardButtonStyle, alignSelf: "end" }}>{t("save")}</button>
+          </form>
+          {settingsMessage && <div role="status" style={{ color: "#9ba8ba", fontSize: 12, marginTop: 8 }}>{settingsMessage}</div>}
+        </section>}
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 300px), 1fr))", gap: 14, marginTop: 14 }}>
-          <section style={panelStyle} aria-label="Attendance history">
-            <h2 style={{ margin: "0 0 12px", fontSize: 17 }}>Attendance history</h2>
-            {attendanceHistory.length === 0
-              ? <div style={{ color: "#9ba8ba", fontSize: 13 }}>No attendance records yet.</div>
-              : attendanceHistory.map((record) => (
+        {activeSection === "history" && <section style={{ ...panelStyle, marginTop: 14 }} aria-label="Attendance history">
+            <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <h2 style={{ margin: 0, fontSize: 17 }}>{t("history")}</h2>
+              <input
+                type="month"
+                max={today.slice(0, 7)}
+                value={selectedMonth}
+                onChange={(event) => {
+                  setSelectedMonth(event.target.value);
+                  setSelectedAttendanceDetail(null);
+                }}
+                style={{ ...dashboardInputStyle, width: 170 }}
+              />
+            </header>
+            <div className="attendance-month-summary">
+              {[
+                [t("presentDays"), attendanceSummary.present],
+                [t("halfDays"), attendanceSummary.halfDay],
+                [t("absentDays"), attendanceSummary.absent],
+                [t("leaveDays"), attendanceSummary.leave],
+                [t("lateDays"), attendanceSummary.late],
+              ].map(([label, value]) => <div key={label}><small>{label}</small><strong>{value}</strong></div>)}
+            </div>
+            {attendanceByDate.size === 0
+              ? <div style={{ color: "#9ba8ba", fontSize: 13 }}>{t("noRecords")}</div>
+              : (
+                <div className="attendance-calendar">
+                  {t("weekdays").map((day) => <strong key={day}>{day}</strong>)}
+                  {Array.from({ length: calendarFirstDay }, (_, index) => <span key={`blank-${index}`} />)}
+                  {Array.from({ length: calendarDays }, (_, index) => {
+                    const date = `${selectedMonth}-${String(index + 1).padStart(2, "0")}`;
+                    const record = attendanceByDate.get(date);
+                    const label = record?.status || "";
+                    return (
+                      <button
+                        type="button"
+                        key={date}
+                        className={record ? `attendance-calendar-day status-${String(label).toLowerCase().replace(/\s+/g, "-")}` : "attendance-calendar-day"}
+                        title={record ? `${label} · ${record.source || "manual"}` : date}
+                        aria-label={`${date}${label ? `, ${label}` : ""}`}
+                        onClick={() => setSelectedAttendanceDetail(record || null)}
+                      >
+                        <span>{index + 1}</span>
+                        <small>{record ? localizeAttendanceStatus(label) : "—"}</small>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            {selectedAttendanceDetail && (
+              <div className="attendance-detail-card" role="status">
+                <strong>{selectedAttendanceDetail.date} · {localizeAttendanceStatus(selectedAttendanceDetail.status || "Present")}</strong>
+                <span>{t("in")}: {selectedAttendanceDetail.checkInAt ? formatIndiaTime(selectedAttendanceDetail.checkInAt) : "—"}</span>
+                <span>{t("out")}: {selectedAttendanceDetail.checkOutAt ? formatIndiaTime(selectedAttendanceDetail.checkOutAt) : "—"}</span>
+                <span>{t("worked")}: {selectedAttendanceDetail.workedMinutes != null
+                  ? `${Math.floor(selectedAttendanceDetail.workedMinutes / 60)}h ${selectedAttendanceDetail.workedMinutes % 60}m`
+                  : "—"}</span>
+                <span>{t("late")}: {selectedAttendanceDetail.lateMinutes || 0}m · {t("source")}: {selectedAttendanceDetail.source || "manual"}</span>
+                {selectedAttendanceDetail.incomplete && <span>{t("incomplete")}</span>}
+                {selectedAttendanceDetail.earlyLeave && <span>{t("earlyLeave")}</span>}
+              </div>
+            )}
+            <div style={{ marginTop: 14 }}>
+              {selectedMonthRecords.map((record) => (
                 <div key={record.date} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "10px 0", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
                   <div>
-                    <span>{new Date(`${record.date}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</span>
+                    <span>{new Date(`${record.date}T00:00:00Z`).toLocaleDateString(locale, { timeZone: "UTC", day: "numeric", month: "short", year: "numeric" })}</span>
                     <div style={{ color: "#9ba8ba", fontSize: 10, marginTop: 4 }}>
                       {record.checkInAt ? `In ${formatIndiaTime(record.checkInAt)}` : "In —"}
                       {record.checkOutAt ? ` · Out ${formatIndiaTime(record.checkOutAt)}` : ""}
@@ -820,20 +1198,21 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
                   </div>
                   <div style={{ textAlign: "right" }}>
                     <strong style={{ display: "block", color: record.status?.toLowerCase() === "present" || record.action === "present" ? "#34d399" : "#fbbf24" }}>
-                      {record.status || "Present"}
+                      {localizeAttendanceStatus(record.status || "Present")}
                     </strong>
                     {record.incomplete && <small style={{ display: "block", color: "#FCA5A5" }}>Incomplete</small>}
                     {record.earlyLeave && <small style={{ display: "block", color: "#FBBF24" }}>Early leave</small>}
                   </div>
                 </div>
               ))}
-          </section>
+            </div>
+          </section>}
 
-          <section style={{ display: "grid", gap: 14, alignContent: "start" }}>
-            <form onSubmit={submitAdvanceRequest} style={{ ...panelStyle, display: "grid", gap: 11 }}>
-              <h2 style={{ margin: 0, fontSize: 17 }}>Request an advance</h2>
+        {["advance", "leave"].includes(activeSection) && <section style={{ display: "grid", gap: 14, alignContent: "start", marginTop: 14 }}>
+            {activeSection === "advance" && <form onSubmit={submitAdvanceRequest} style={{ ...panelStyle, display: "grid", gap: 11 }}>
+              <h2 style={{ margin: 0, fontSize: 17 }}>{t("requestAdvanceTitle")}</h2>
               <label style={{ display: "grid", gap: 7, color: "#c4ccda", fontSize: 12, fontWeight: 750 }}>
-                Amount (₹)
+                {t("amountRupees")}
                 <input
                   type="number"
                   min="1"
@@ -857,19 +1236,19 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
                 />
               </label>
               <button type="submit" disabled={submittingAdvance} style={dashboardButtonStyle}>
-                {submittingAdvance ? "Submitting..." : "Submit request"}
+                {submittingAdvance ? t("submitting") : t("submitRequest")}
               </button>
-            </form>
+            </form>}
 
-            <form onSubmit={submitLeaveRequest} style={{ ...panelStyle, display: "grid", gap: 11 }}>
-              <h2 style={{ margin: 0, fontSize: 17 }}>Request leave</h2>
+            {activeSection === "leave" && <form onSubmit={submitLeaveRequest} style={{ ...panelStyle, display: "grid", gap: 11 }}>
+              <h2 style={{ margin: 0, fontSize: 17 }}>{t("requestLeaveTitle")}</h2>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 9 }}>
                 <label style={{ display: "grid", gap: 7, color: "#c4ccda", fontSize: 12, fontWeight: 750 }}>
-                  From date
+                  {t("fromDate")}
                   <input type="date" required value={leaveForm.fromDate} onChange={(event) => setLeaveForm((form) => ({ ...form, fromDate: event.target.value }))} style={dashboardInputStyle} />
                 </label>
                 <label style={{ display: "grid", gap: 7, color: "#c4ccda", fontSize: 12, fontWeight: 750 }}>
-                  To date
+                  {t("toDate")}
                   <input type="date" required min={leaveForm.fromDate} value={leaveForm.toDate} onChange={(event) => setLeaveForm((form) => ({ ...form, toDate: event.target.value }))} style={dashboardInputStyle} />
                 </label>
               </div>
@@ -885,18 +1264,18 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
               </label>
               {overlappingLeaveRequests.length > 0 && (
                 <div role="status" style={{ color: "#fbbf24", fontSize: 12 }}>
-                  Warning: selected dates overlap an existing pending/approved leave request.
+                  {t("overlapWarning")}
                 </div>
               )}
               <button type="submit" disabled={submittingLeave} style={dashboardButtonStyle}>
-                {submittingLeave ? "Submitting..." : "Submit leave request"}
+                {submittingLeave ? t("submitting") : t("submitLeave")}
               </button>
-            </form>
+            </form>}
 
-            <section style={panelStyle} aria-label="Leave request history">
-              <h2 style={{ margin: "0 0 12px", fontSize: 17 }}>Leave request history</h2>
+            {activeSection === "leave" && <section style={panelStyle} aria-label="Leave request history">
+              <h2 style={{ margin: "0 0 12px", fontSize: 17 }}>{t("leaveHistory")}</h2>
               {leaveRequests.length === 0
-                ? <div style={{ color: "#9ba8ba", fontSize: 13 }}>No leave requests yet.</div>
+                ? <div style={{ color: "#9ba8ba", fontSize: 13 }}>{t("noLeaveRequests")}</div>
                 : leaveRequests.map((leave) => {
                   const status = String(leave.status || "pending").toLowerCase();
                   const color = status === "approved" ? "#34d399"
@@ -909,7 +1288,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
                         {leave.adminNote && <div style={{ marginTop: 3, color: "#c4ccda", fontSize: 11 }}>Admin: {leave.adminNote}</div>}
                       </div>
                       <div style={{ display: "grid", justifyItems: "end", gap: 5 }}>
-                        <strong style={{ color, fontSize: 12 }}>{status}</strong>
+                        <strong style={{ color, fontSize: 12 }}>{localizeRequestStatus(status)}</strong>
                         {status === "pending" && (
                           <button type="button" disabled={cancellingLeaveId === leave.id} onClick={() => cancelLeaveRequest(leave)} style={{ ...dashboardButtonStyle, minHeight: 32, padding: "0 9px", fontSize: 11 }}>
                             {cancellingLeaveId === leave.id ? "Cancelling..." : "Cancel"}
@@ -919,12 +1298,19 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
                     </div>
                   );
                 })}
-            </section>
+            </section>}
 
-            <section style={panelStyle} aria-label="Advance history">
-              <h2 style={{ margin: "0 0 12px", fontSize: 17 }}>Advance history</h2>
+            {activeSection === "advance" && <section style={panelStyle} aria-label="Advance history">
+              <h2 style={{ margin: "0 0 12px", fontSize: 17 }}>{t("advanceHistory")}</h2>
+              <div style={{ color: "#c4ccda", fontSize: 12, marginBottom: 8 }}>
+                {t("approvedThisMonth")} {formatCurrency(advanceHistory
+                  .filter((advance) => String(advance.status || "").toLowerCase() === "approved"
+                    && (advance.month === today.slice(0, 7) || String(advance.date || "").startsWith(`${today.slice(0, 7)}-`)))
+                  .reduce((sum, advance) => sum + Number(advance.amount || 0), 0))}
+                {" · "}{t("overall")} {formatCurrency(overallAdvances)}
+              </div>
               {advanceHistory.length === 0
-                ? <div style={{ color: "#9ba8ba", fontSize: 13 }}>No advance requests yet.</div>
+                ? <div style={{ color: "#9ba8ba", fontSize: 13 }}>{t("noAdvanceRequests")}</div>
                 : advanceHistory.map((advance, index) => {
                   const key = `${advance.source || "advance"}-${advance.id || index}`;
                   const status = String(advance.status || "Pending");
@@ -933,20 +1319,152 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
                     <div key={key} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "10px 0", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
                       <div>
                         <strong>{formatCurrency(Number(advance.amount || 0))}</strong>
-                        {advance.reason && <div style={{ marginTop: 3, color: "#9ba8ba", fontSize: 11 }}>{advance.reason}</div>}
+                        {(advance.adminNote || advance.reason) && <div style={{ marginTop: 3, color: "#9ba8ba", fontSize: 11 }}>{advance.adminNote || advance.reason}</div>}
                         <div style={{ marginTop: 3, color: "#9ba8ba", fontSize: 10 }}>{advance.date || advance.month || ""} · {advance.source || "request"}</div>
                       </div>
-                      <strong style={{ color: approved ? "#34d399" : status.toLowerCase() === "rejected" ? "#fb7185" : "#fbbf24", fontSize: 12 }}>{status}</strong>
+                      <div style={{ display: "grid", justifyItems: "end", gap: 5 }}>
+                        <strong style={{ color: approved ? "#34d399" : status.toLowerCase() === "rejected" ? "#fb7185" : "#fbbf24", fontSize: 12 }}>{localizeRequestStatus(status)}</strong>
+                        {status.toLowerCase() === "pending" && advance.id && (
+                          <button type="button" disabled={cancellingAdvanceId === advance.id} onClick={async () => {
+                            if (!window.confirm(t("cancelAdvanceConfirm"))) return;
+                            setCancellingAdvanceId(advance.id);
+                            try {
+                              await updateDoc(doc(db, "advances", advance.id), { status: "Cancelled", cancelledAt: Date.now() });
+                            } catch (error) {
+                              console.error("Advance request cancel failed:", error);
+                              setProfileError(`${t("advanceCancelledError")} ${getErrorMessage(error)}`);
+                            } finally {
+                              setCancellingAdvanceId("");
+                            }
+                          }} style={{ ...dashboardButtonStyle, minHeight: 32, padding: "0 9px", fontSize: 11 }}>
+                            {cancellingAdvanceId === advance.id ? t("submitting") : t("cancel")}
+                          </button>
+                        )}
+                      </div>
                     </div>
                   );
                 })}
-            </section>
-          </section>
-        </div>
+            </section>}
+          </section>}
+
+        {activeSection === "salary" && <section style={{ ...panelStyle, marginTop: 14 }}>
+          <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <h2 style={{ margin: 0, fontSize: 17 }}>{t("salary")}</h2>
+            <input type="month" max={today.slice(0, 7)} value={selectedMonth} onChange={(event) => setSelectedMonth(event.target.value)} style={{ ...dashboardInputStyle, width: 170 }} />
+          </header>
+          {restaurantSettings.showStaffSalary !== false
+            ? <div className="attendance-month-summary salary-summary">
+              {[
+                [t("perDay"), salaryCalculation.perDaySalary],
+                [t("presentDays"), selectedPresentDays],
+                [t("gross"), salaryCalculation.grossSalary],
+                [t("advances"), salaryCalculation.totalApprovedAdvance],
+                [t("paid"), salaryPaid],
+                [t("balance"), salaryBalance],
+              ].map(([label, amount]) => (
+                <div key={label}><small>{label}</small><strong>{label === t("presentDays") ? amount : formatCurrency(amount)}</strong></div>
+              ))}
+            </div>
+            : <div style={{ color: "#9ba8ba", marginTop: 14 }}>{t("salaryHidden")}</div>}
+          {restaurantSettings.showStaffSalary !== false && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12 }}>
+              <span className={`attendance-salary-badge status-${salaryStatus.toLowerCase()}`}>{t(`salaryStatus${salaryStatus}`)}</span>
+              <span style={{ color: "#9ba8ba", fontSize: 12 }}>{selectedMonth}</span>
+            </div>
+          )}
+          <h3 style={{ fontSize: 14, margin: "20px 0 8px" }}>{t("paymentHistory")} · {selectedMonth}</h3>
+          {selectedMonthPayments.length === 0
+            ? <div style={{ color: "#9ba8ba", fontSize: 13 }}>{t("noRecords")}</div>
+            : selectedMonthPayments.map((payment) => (
+              <div key={payment.id} className="attendance-list-row">
+                <span>{payment.date || "—"}{payment.note ? ` · ${payment.note}` : ""}</span>
+                <strong>{formatCurrency(Number(payment.amount || 0))}</strong>
+              </div>
+            ))}
+          <h3 style={{ fontSize: 14, margin: "20px 0 8px" }}>{t("previousSalaryMonths")}</h3>
+          {salaryHistoryMonths
+            .filter((month) => month !== selectedMonth)
+            .map((month) => (
+              <button type="button" key={month} className="attendance-list-row attendance-month-link" onClick={() => setSelectedMonth(month)}>
+                <span>{month}</span>
+                <strong>{formatCurrency(salaryPayments
+                  .filter((payment) => payment.month === month && String(payment.status || "paid").toLowerCase() !== "cancelled")
+                  .reduce((sum, payment) => sum + Number(payment.amount || 0), 0))}</strong>
+              </button>
+            ))}
+        </section>}
+
+        {activeSection === "shift" && <section style={{ ...panelStyle, marginTop: 14 }}>
+          <h2 style={{ margin: "0 0 14px", fontSize: 17 }}>{t("shift")}</h2>
+          {staffShift
+            ? <>
+              <h3 style={{ color: "#f2a271", margin: "0 0 12px" }}>{staffShift.name}</h3>
+              <div className="attendance-shift-grid">
+                <div><small>{t("start")}</small><strong>{staffShift.startTime}</strong></div>
+                <div><small>{t("end")}</small><strong>{staffShift.endTime}</strong></div>
+                <div><small>{t("rest")}</small><strong>{staffShift.breakStart && staffShift.breakEnd ? `${staffShift.breakStart}–${staffShift.breakEnd}` : t("noBreak")}</strong></div>
+              </div>
+              <p style={{ color: "#c4ccda", fontSize: 13, lineHeight: 1.6 }}>
+                {Number(staffShift.halfDayLateMinutes ?? 30)} min or more late = {t("halfDay")}.
+                {" "}{t("lateBadgeAfter")} {Number(staffShift.lateGraceMinutes ?? 10)} min.
+              </p>
+            </>
+            : <div style={{ color: "#fbbf24" }}>{t("noShift")}</div>}
+        </section>}
+
+        {activeSection === "notifications" && <section style={{ ...panelStyle, marginTop: 14 }}>
+          <h2 style={{ margin: "0 0 12px", fontSize: 17 }}>{t("notifications")}{unreadNotifications ? ` · ${unreadNotifications} ${t("unread")}` : ""}</h2>
+          {notifications.length === 0
+            ? <div style={{ color: "#9ba8ba", fontSize: 13 }}>{t("noRecords")}</div>
+            : notifications.map((notification) => (
+              <button
+                type="button"
+                key={notification.id}
+                onClick={() => markNotificationRead(notification)}
+                className={`attendance-notification ${notification.read ? "" : "is-unread"}`}
+              >
+                <span><strong>{notification.title}</strong><small>{notification.message}</small></span>
+                <time>{new Date(timestampMillis(notification.createdAt)).toLocaleDateString(locale)}</time>
+              </button>
+            ))}
+        </section>}
+
+        {activeSection === "settings" && <section style={{ ...panelStyle, marginTop: 14 }}>
+          <h2 style={{ margin: "0 0 14px", fontSize: 17 }}>{t("settings")}</h2>
+          <label style={{ display: "grid", gap: 6, color: "#c4ccda", fontSize: 12 }}>
+            {t("language")}
+            <select value={language} onChange={(event) => {
+              const nextLanguage = event.target.value;
+              setLanguage(nextLanguage);
+              try { localStorage.setItem("attendance_language", nextLanguage); } catch (error) { console.error("Language preference could not be saved:", error); }
+            }} style={dashboardInputStyle}>
+              <option value="en">English</option>
+              <option value="hi">हिन्दी</option>
+            </select>
+          </label>
+          <form onSubmit={changeAccountPassword} style={{ display: "grid", gap: 10, marginTop: 18 }}>
+            <h3 style={{ margin: 0, fontSize: 14 }}>{t("changePassword")}</h3>
+            <input type="password" autoComplete="current-password" required value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} placeholder={t("currentPassword")} style={dashboardInputStyle} />
+            <input type="password" autoComplete="new-password" minLength={6} required value={newPassword} onChange={(event) => setNewPassword(event.target.value)} placeholder={t("newPassword")} style={dashboardInputStyle} />
+            <button type="submit" disabled={settingsBusy} style={dashboardButtonStyle}>{t("save")}</button>
+          </form>
+          <p style={{ color: "#9ba8ba", fontSize: 12 }}>{t("installHint")}</p>
+          {settingsMessage && <div role="status" style={{ color: "#f2a271", fontSize: 12 }}>{settingsMessage}</div>}
+        </section>}
+
+        {activeSection === "help" && <section style={{ ...panelStyle, marginTop: 14 }}>
+          <h2 style={{ margin: "0 0 12px", fontSize: 17 }}>{t("help")}</h2>
+          {restaurantSettings.contactPhone && (
+            <a className="attendance-contact-link" href={`https://wa.me/${String(restaurantSettings.contactPhone).replace(/\D/g, "")}`} target="_blank" rel="noreferrer">
+              {t("whatsappAdmin")} · {restaurantSettings.contactPhone}
+            </a>
+          )}
+          {!restaurantSettings.contactPhone && <div style={{ color: "#9ba8ba", fontSize: 13 }}>{t("noRecords")}</div>}
+        </section>}
 
         <footer className="attendance-footer">
           <span>{staff.role || "Staff"}</span>
-          <span>Eat & Park · Staff portal</span>
+          <span>Eat & Park · {t("appCaption")}</span>
         </footer>
       </section>
     </main>
