@@ -1,7 +1,9 @@
 import { describe, expect, test } from "vitest";
 import {
   ATTENDANCE_RADIUS_METERS,
+  attendanceDayValue,
   calculateStaffSalary,
+  daysInMonth,
   haversineDistanceMeters,
   RESTAURANT_LOCATION,
 } from "./staffPayroll";
@@ -47,6 +49,33 @@ describe("staff salary", () => {
       grossSalary: 34000,
       totalApprovedAdvance: 5000,
       finalPayable: 29000,
+      carryForwardAdvance: 0,
+    });
+  });
+
+  test("uses actual month length, supports half days and paid leave, and carries excess advance", () => {
+    expect(daysInMonth("2026-02")).toBe(28);
+    expect(daysInMonth("2024-02")).toBe(29);
+    expect(daysInMonth("2026-11")).toBe(30);
+    expect(attendanceDayValue("Present")).toBe(1);
+    expect(attendanceDayValue("Half Day")).toBe(0.5);
+    expect(attendanceDayValue("Absent")).toBe(0);
+    expect(attendanceDayValue("Paid Leave")).toBe(1);
+
+    expect(calculateStaffSalary({
+      monthlySalary: 31000,
+      presentDays: 2.5,
+      paidLeaveDays: 1,
+      totalApprovedAdvance: 6000,
+      daysInPayPeriod: 31,
+    })).toEqual({
+      perDaySalary: 1000,
+      earnedLeaves: 0,
+      totalPaidDays: 3.5,
+      grossSalary: 3500,
+      totalApprovedAdvance: 6000,
+      finalPayable: 0,
+      carryForwardAdvance: 2500,
     });
   });
 });

@@ -351,6 +351,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
         staffId: staffUid,
         date: currentDate,
         status: "Present",
+        source: "gps",
         distanceMeters: Math.round(distance * 100) / 100,
       };
       await addDoc(collection(db, "attendance"), record);

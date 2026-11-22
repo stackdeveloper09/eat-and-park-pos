@@ -74,11 +74,25 @@ describe("other collections", () => {
       lat: 28.6139, lng: 77.209, radius: 100,
     }));
   });
-  test("admin can manually mark staff attendance", () => assertSucceeds(addDoc(collection(as("a1"), "attendance"), {
-    staffId: "w1", date: "2026-11-21", status: "Present", markedBy: "Admin",
-  })));
+  test("admin can create and replace deterministic manual attendance", async () => {
+    const attendanceRef = doc(as("a1"), "attendance/w1_2026-11-21");
+    await assertSucceeds(setDoc(attendanceRef, {
+      staffId: "w1", date: "2026-11-21", status: "Half Day", markedBy: "Admin", source: "manual",
+    }));
+    await assertSucceeds(updateDoc(attendanceRef, {
+      status: "Paid Leave",
+    }));
+  });
+  test("admin manual attendance rejects unsupported status and wrong source", async () => {
+    await assertFails(setDoc(doc(as("a1"), "attendance/w1_2026-11-22"), {
+      staffId: "w1", date: "2026-11-22", status: "Late", markedBy: "Admin", source: "manual",
+    }));
+    await assertFails(setDoc(doc(as("a1"), "attendance/w1_2026-11-23"), {
+      staffId: "w1", date: "2026-11-23", status: "Present", markedBy: "Admin", source: "gps",
+    }));
+  });
   test("waiter cannot manually mark attendance", () => assertFails(addDoc(collection(as("w1"), "attendance"), {
-    staffId: "w1", date: "2026-11-21", status: "Present", markedBy: "Admin",
+    staffId: "w1", date: "2026-11-21", status: "Present", markedBy: "Admin", source: "manual",
   })));
   test("staff can request an advance and admin can approve it", async () => {
     const request = await addDoc(collection(as("w1"), "advances"), {
@@ -106,7 +120,7 @@ describe("other collections", () => {
   })));
   test("staff can mark attendance only for self and inside the radius", async () => {
     await assertSucceeds(addDoc(collection(as("w1"), "attendance"), {
-      staffId: "w1", date: "2026-11-21", status: "Present", distanceMeters: 80,
+      staffId: "w1", date: "2026-11-21", status: "Present", source: "gps", distanceMeters: 80,
     }));
     await assertSucceeds(getDocs(query(collection(as("w1"), "attendance"), where("staffId", "==", "w1"))));
     await assertFails(addDoc(collection(as("w1"), "attendance"), {

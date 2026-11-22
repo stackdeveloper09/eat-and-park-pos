@@ -26,9 +26,37 @@ export function haversineDistanceMeters(latitude1, longitude1, latitude2, longit
   return 2 * EARTH_RADIUS_METERS * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-export function calculateStaffSalary({ monthlySalary, presentDays, totalApprovedAdvance }) {
+export function daysInMonth(monthKey) {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(monthKey || "")) {
+    throw new RangeError("Month must be in YYYY-MM format.");
+  }
+  const [year, month] = monthKey.split("-").map(Number);
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+export function attendanceDayValue(status) {
+  switch (String(status || "").trim().toLowerCase()) {
+    case "present": return 1;
+    case "half day":
+    case "half-day":
+    case "half_day": return 0.5;
+    case "paid leave":
+    case "leave": return 1;
+    default: return 0;
+  }
+}
+
+export function calculateStaffSalary({
+  monthlySalary,
+  presentDays,
+  totalApprovedAdvance,
+  daysInPayPeriod = 30,
+  paidLeaveDays = 0,
+}) {
   if (!Number.isFinite(monthlySalary) || monthlySalary < 0
-    || !Number.isInteger(presentDays) || presentDays < 0
+    || !Number.isFinite(presentDays) || presentDays < 0
+    || !Number.isFinite(paidLeaveDays) || paidLeaveDays < 0
+    || !Number.isFinite(daysInPayPeriod) || daysInPayPeriod < 1
     || !Number.isFinite(totalApprovedAdvance) || totalApprovedAdvance < 0) {
     throw new RangeError("Salary, present days, and approved advance must be valid non-negative values.");
   }
@@ -38,9 +66,10 @@ export function calculateStaffSalary({ monthlySalary, presentDays, totalApproved
       : presentDays >= 14 ? 2
         : presentDays >= 7 ? 1
           : 0;
-  const perDaySalary = monthlySalary / 30;
-  const totalPaidDays = presentDays + earnedLeaves;
+  const perDaySalary = monthlySalary / daysInPayPeriod;
+  const totalPaidDays = presentDays + paidLeaveDays + earnedLeaves;
   const grossSalary = totalPaidDays * perDaySalary;
+  const finalPayable = Math.max(0, grossSalary - totalApprovedAdvance);
 
   return {
     perDaySalary,
@@ -48,6 +77,7 @@ export function calculateStaffSalary({ monthlySalary, presentDays, totalApproved
     totalPaidDays,
     grossSalary,
     totalApprovedAdvance,
-    finalPayable: grossSalary - totalApprovedAdvance,
+    finalPayable,
+    carryForwardAdvance: Math.max(0, totalApprovedAdvance - grossSalary),
   };
 }

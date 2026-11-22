@@ -152,23 +152,34 @@ service cloud.firestore {
       allow read: if isAdmin()
         || (signedIn() && resource.data.staffId == request.auth.uid);
       allow create: if (isAdmin()
-        && request.resource.data.keys().hasOnly(['staffId', 'date', 'status', 'markedBy'])
-        && request.resource.data.keys().hasAll(['staffId', 'date', 'status', 'markedBy'])
+        && request.resource.data.keys().hasOnly(['staffId', 'date', 'status', 'markedBy', 'source'])
+        && request.resource.data.keys().hasAll(['staffId', 'date', 'status', 'markedBy', 'source'])
         && request.resource.data.staffId is string
         && exists(/databases/$(db)/documents/staff/$(request.resource.data.staffId))
         && request.resource.data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
-        && request.resource.data.status == 'Present'
-        && request.resource.data.markedBy == 'Admin')
+        && request.resource.data.status in ['Present', 'Half Day', 'Absent', 'Paid Leave']
+        && request.resource.data.markedBy == 'Admin'
+        && request.resource.data.source == 'manual')
         || ((isStaff() || isDelivery())
-          && request.resource.data.keys().hasOnly(['staffId', 'date', 'status', 'distanceMeters'])
+          && request.resource.data.keys().hasOnly(['staffId', 'date', 'status', 'distanceMeters', 'source'])
           && request.resource.data.keys().hasAll(['staffId', 'date', 'status', 'distanceMeters'])
           && request.resource.data.staffId == request.auth.uid
           && request.resource.data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
           && request.resource.data.status == 'Present'
+          && (!('source' in request.resource.data) || request.resource.data.source == 'gps')
           && request.resource.data.distanceMeters is number
           && request.resource.data.distanceMeters >= 0
           && request.resource.data.distanceMeters <= restaurantRadius());
-      allow update, delete: if isAdmin();
+      allow update: if isAdmin()
+        && request.resource.data.keys().hasOnly(['staffId', 'date', 'status', 'markedBy', 'source'])
+        && request.resource.data.keys().hasAll(['staffId', 'date', 'status', 'markedBy', 'source'])
+        && request.resource.data.staffId is string
+        && exists(/databases/$(db)/documents/staff/$(request.resource.data.staffId))
+        && request.resource.data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && request.resource.data.status in ['Present', 'Half Day', 'Absent', 'Paid Leave']
+        && request.resource.data.markedBy == 'Admin'
+        && request.resource.data.source == 'manual';
+      allow delete: if isAdmin();
     }
 
     // ============================================================

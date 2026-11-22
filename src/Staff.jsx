@@ -1,24 +1,27 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { auth, db } from "./firebase";
 import {
-  addDoc,
   collection,
   doc,
-  getDoc,
   getDocs,
   onSnapshot,
   query,
+  runTransaction,
   setDoc,
   updateDoc,
   where,
+  writeBatch,
 } from "firebase/firestore";
 import {
   ATTENDANCE_RADIUS_METERS,
+  attendanceDayValue,
   calculateStaffSalary,
+  daysInMonth,
   RESTAURANT_LOCATION,
 } from "./lib/staffPayroll";
 
 const STAFF_ROLES = ["admin", "owner", "manager", "staff", "waiter", "cashier", "chef", "delivery"];
+const ATTENDANCE_STATUSES = ["Present", "Half Day", "Absent", "Paid Leave"];
 const TABS = [
   { id: "staff", label: "Staff Management" },
   { id: "gps", label: "GPS Settings" },
@@ -56,6 +59,25 @@ function getStaffId(record) {
   return record.staffId || record.uid || "";
 }
 
+function displayStaffName(member) {
+  return String(member?.name || "").trim() || String(member?.id || "").slice(0, 6);
+}
+
+function normalizedAttendanceStatus(record) {
+  if (record.action === "present") return "Present";
+  const status = String(record.status || "").trim().toLowerCase();
+  if (status === "half day" || status === "half-day" || status === "half_day") return "Half Day";
+  if (status === "paid leave" || status === "leave") return "Paid Leave";
+  if (status === "absent") return "Absent";
+  return status === "present" ? "Present" : "";
+}
+
+function attendanceSource(record) {
+  return record.source === "gps" || record.distanceMeters != null || record.action === "present"
+    ? "gps"
+    : "manual";
+}
+
 function getRecordMonth(record) {
   if (/^\d{4}-(0[1-9]|1[0-2])$/.test(record.month || "")) return record.month;
   const createdAt = record.createdAt;
@@ -72,6 +94,9 @@ export default function Staff({ C, isMobile }) {
   const [activeTab, setActiveTab] = useState("staff");
   const [month, setMonth] = useState(currentMonthKey);
   const [members, setMembers] = useState([]);
+  const [staffDrafts, setStaffDrafts] = useState({});
+  const [staffSaveStates, setStaffSaveStates] = useState({});
+  const [selectedMemberId, setSelectedMemberId] = useState("");
   const [legacyPayroll, setLegacyPayroll] = useState({});
   const [advanceRequests, setAdvanceRequests] = useState([]);
   const [legacyAdvances, setLegacyAdvances] = useState([]);
@@ -82,7 +107,6 @@ export default function Staff({ C, isMobile }) {
   const [loadError, setLoadError] = useState("");
   const [actionError, setActionError] = useState("");
   const [busyId, setBusyId] = useState("");
-  const [salaryInputs, setSalaryInputs] = useState({});
   const [newStaff, setNewStaff] = useState({
     uid: "",
     name: "",
@@ -96,9 +120,14 @@ export default function Staff({ C, isMobile }) {
     radius: String(ATTENDANCE_RADIUS_METERS),
   });
   const [gpsLoading, setGpsLoading] = useState(true);
+  const [gpsSaved, setGpsSaved] = useState(null);
+  const [gpsAccuracy, setGpsAccuracy] = useState(null);
+  const [gpsLocating, setGpsLocating] = useState(false);
+  const [gpsError, setGpsError] = useState("");
   const [attendanceForm, setAttendanceForm] = useState({
     staffId: "",
     date: todayKey(),
+    status: "Present",
   });
 
   useEffect(() => {
@@ -172,6 +201,7 @@ export default function Staff({ C, isMobile }) {
           lng: String(settings.lng),
           radius: String(settings.radius),
         });
+        setGpsSaved({ lat: settings.lat, lng: settings.lng });
       }
       setGpsLoading(false);
     }, (error) => {
@@ -196,7 +226,7 @@ export default function Staff({ C, isMobile }) {
       where("date", "<", endDate),
     );
     const unsubscribeManual = onSnapshot(attendanceQuery, (snapshot) => {
-      setManualAttendance(snapshot.docs.map((entry) => entry.data()));
+      setManualAttendance(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() })));
       setManualAttendanceLoading(false);
     }, (error) => {
       console.error("Monthly manual attendance load failed:", error);
@@ -204,7 +234,7 @@ export default function Staff({ C, isMobile }) {
       setManualAttendanceLoading(false);
     });
     const unsubscribeGps = onSnapshot(gpsQuery, (snapshot) => {
-      setGpsAttendance(snapshot.docs.map((entry) => entry.data()));
+      setGpsAttendance(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data(), source: "gps" })));
       setGpsAttendanceLoading(false);
     }, (error) => {
       console.error("Monthly GPS attendance load failed:", error);
@@ -222,20 +252,39 @@ export default function Staff({ C, isMobile }) {
     [members],
   );
 
-  const presentDatesByStaff = useMemo(() => {
-    const datesByStaff = new Map();
-    const allRecords = [...manualAttendance, ...gpsAttendance];
-    allRecords.forEach((record) => {
+  const allAttendanceRecords = useMemo(() => {
+    const recordsByStaffDate = new Map();
+    [...gpsAttendance, ...manualAttendance].forEach((record) => {
       const staffId = getStaffId(record);
-      const date = record.date;
-      const isPresent = record.status?.toLowerCase() === "present"
-        || record.action === "present";
-      if (!staffId || !date?.startsWith(`${month}-`) || !isPresent) return;
-      if (!datesByStaff.has(staffId)) datesByStaff.set(staffId, new Set());
-      datesByStaff.get(staffId).add(date);
+      if (!staffId || !record.date) return;
+      const key = `${staffId}_${record.date}`;
+      const status = normalizedAttendanceStatus(record);
+      if (!status) return;
+      const normalized = {
+        ...record,
+        status,
+        source: attendanceSource(record),
+      };
+      const current = recordsByStaffDate.get(key);
+      if (!current || (current.source === "gps" && normalized.source === "manual")) {
+        recordsByStaffDate.set(key, normalized);
+      }
     });
-    return datesByStaff;
-  }, [gpsAttendance, manualAttendance, month]);
+    return recordsByStaffDate;
+  }, [gpsAttendance, manualAttendance]);
+
+  const attendanceStatsByStaff = useMemo(() => {
+    const stats = new Map();
+    allAttendanceRecords.forEach((record) => {
+      if (!record.date?.startsWith(`${month}-`)) return;
+      const staffId = getStaffId(record);
+      const current = stats.get(staffId) || { presentDays: 0, paidLeaveDays: 0 };
+      if (record.status === "Paid Leave") current.paidLeaveDays += 1;
+      else current.presentDays += attendanceDayValue(record.status);
+      stats.set(staffId, current);
+    });
+    return stats;
+  }, [allAttendanceRecords, month]);
 
   const approvedAdvanceTotals = useMemo(() => {
     const totals = new Map();
@@ -251,6 +300,31 @@ export default function Staff({ C, isMobile }) {
     });
     return totals;
   }, [advanceRequests, legacyAdvances, month]);
+
+  const approvedAdvancesByStaff = useMemo(() => {
+    const advancesByStaff = new Map();
+    [...advanceRequests, ...legacyAdvances].forEach((advance) => {
+      const staffId = getStaffId(advance);
+      if (!staffId
+        || String(advance.status || "").toLowerCase() !== "approved"
+        || getRecordMonth(advance) !== month) return;
+      const list = advancesByStaff.get(staffId) || [];
+      list.push(advance);
+      advancesByStaff.set(staffId, list);
+    });
+    advancesByStaff.forEach((list) => list.sort((a, b) => {
+      const dateA = a.date || getRecordMonth(a);
+      const dateB = b.date || getRecordMonth(b);
+      return String(dateB).localeCompare(String(dateA));
+    }));
+    return advancesByStaff;
+  }, [advanceRequests, legacyAdvances, month]);
+
+  const payrollMembers = useMemo(() => activeMembers.filter((member) => {
+    const monthlySalary = Number(legacyPayroll[member.id]?.monthlySalary ?? member.monthlySalary ?? 0);
+    return Number.isFinite(monthlySalary) && monthlySalary > 0;
+  }), [activeMembers, legacyPayroll]);
+  const selectedMember = members.find((member) => member.id === selectedMemberId) || null;
 
   const pendingRequests = useMemo(
     () => [...advanceRequests, ...legacyAdvances]
@@ -273,25 +347,27 @@ export default function Staff({ C, isMobile }) {
     const name = newStaff.name.trim();
     const monthlySalary = Number(newStaff.monthlySalary);
     if (!uid || !name || !Number.isFinite(monthlySalary) || monthlySalary < 0) {
-      window.alert("Firebase Auth UID, name, and a valid non-negative salary are required.");
+      setActionError("Firebase Auth UID, name, aur valid non-negative salary required hain.");
       return;
     }
     setBusyId("add-staff");
     try {
-      const staffRef = doc(db, "staff", uid);
-      if ((await getDoc(staffRef)).exists()) {
-        window.alert("A staff profile with this Firebase Auth UID already exists.");
-        return;
-      }
-      await setDoc(staffRef, {
-        name,
-        role: newStaff.role,
-        monthlySalary,
-        active: newStaff.active,
+      await runTransaction(db, async (transaction) => {
+        const staffRef = doc(db, "staff", uid);
+        if ((await transaction.get(staffRef)).exists()) {
+          throw new Error("Is Auth UID ka staff profile pehle se maujood hai.");
+        }
+        transaction.set(staffRef, {
+          name,
+          role: newStaff.role,
+          monthlySalary,
+          active: newStaff.active,
+        });
       });
       setNewStaff({ uid: "", name: "", role: "staff", monthlySalary: "", active: true });
     } catch (error) {
-      reportError("Staff member add nahi hua", error);
+      setActionError(`Staff member add nahi hua: ${getErrorMessage(error)}`);
+      console.error("Staff member add failed:", error);
     } finally {
       setBusyId("");
     }
@@ -300,24 +376,61 @@ export default function Staff({ C, isMobile }) {
   const handleSaveGps = async (event) => {
     event.preventDefault();
     setActionError("");
+    setGpsError("");
     const lat = Number(gpsForm.lat);
     const lng = Number(gpsForm.lng);
     const radius = Number(gpsForm.radius);
     if (!Number.isFinite(lat) || lat < -90 || lat > 90
       || !Number.isFinite(lng) || lng < -180 || lng > 180
       || !Number.isFinite(radius) || radius <= 0 || radius > 10000) {
-      window.alert("Valid latitude, longitude, and radius (1–10,000 meters) enter karein.");
+      setGpsError("Valid latitude, longitude aur radius (1–10,000 meters) enter karein.");
       return;
     }
     setBusyId("gps");
     try {
       await setDoc(doc(db, "settings", "restaurant"), { lat, lng, radius });
-      window.alert("Restaurant GPS settings save ho gayi.");
+      setGpsSaved({ lat, lng });
     } catch (error) {
-      reportError("GPS settings save nahi hui", error);
+      setGpsError(`GPS settings save nahi hui: ${getErrorMessage(error)}`);
+      console.error("GPS settings save failed:", error);
     } finally {
       setBusyId("");
     }
+  };
+
+  const handleUseCurrentLocation = () => {
+    setGpsError("");
+    setGpsAccuracy(null);
+    if (!window.isSecureContext && !["localhost", "127.0.0.1"].includes(window.location.hostname)) {
+      setGpsError("Location ke liye HTTPS connection zaroori hai. Secure URL par app kholkar dobara try karein.");
+      return;
+    }
+    if (!navigator.geolocation) {
+      setGpsError("Is browser mein location service available nahi hai.");
+      return;
+    }
+    setGpsLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      ({ coords }) => {
+        setGpsForm((form) => ({
+          ...form,
+          lat: String(coords.latitude),
+          lng: String(coords.longitude),
+        }));
+        setGpsAccuracy(Math.round(coords.accuracy));
+        setGpsLocating(false);
+      },
+      (error) => {
+        const message = error.code === 1
+          ? "Location permission deny hui. Browser settings mein permission allow karein."
+          : error.code === 3
+            ? "Location request timeout ho gayi. GPS on karke dobara try karein."
+            : "Current location nahi mil saki. Device GPS/location settings check karein.";
+        setGpsError(message);
+        setGpsLocating(false);
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
+    );
   };
 
   const handleApproveAdvance = async (advance) => {
@@ -341,35 +454,49 @@ export default function Staff({ C, isMobile }) {
     }
   };
 
-  const handleMarkAttendance = async (event) => {
-    event.preventDefault();
+  const saveAttendance = async (staffId, date, status) => {
     setActionError("");
-    if (!attendanceForm.staffId || !/^\d{4}-\d{2}-\d{2}$/.test(attendanceForm.date)) {
-      window.alert("Staff member aur valid attendance date select karein.");
+    const parsedDate = new Date(`${date}T00:00:00Z`);
+    const validDate = /^\d{4}-\d{2}-\d{2}$/.test(date)
+      && !Number.isNaN(parsedDate.getTime())
+      && parsedDate.toISOString().slice(0, 10) === date;
+    if (!staffId || !validDate || date > todayKey() || !ATTENDANCE_STATUSES.includes(status)) {
+      setActionError("Staff, aaj ya usse pehle ki valid date, aur attendance status select karein.");
       return;
     }
     setBusyId("attendance");
     try {
       const [manualSnapshot, gpsSnapshot] = await Promise.all([
-        getDocs(query(collection(db, "attendance"), where("date", "==", attendanceForm.date))),
-        getDocs(query(collection(db, "staffAttendance"), where("date", "==", attendanceForm.date))),
+        getDocs(query(collection(db, "attendance"), where("date", "==", date))),
+        getDocs(query(collection(db, "staffAttendance"), where("date", "==", date))),
       ]);
-      const alreadyMarked = [...manualSnapshot.docs, ...gpsSnapshot.docs].some((entry) => {
+      const alreadyMarked = [...manualSnapshot.docs, ...gpsSnapshot.docs].find((entry) => {
         const record = entry.data();
-        return getStaffId(record) === attendanceForm.staffId
-          && (record.status?.toLowerCase() === "present" || record.action === "present");
+        return getStaffId(record) === staffId && normalizedAttendanceStatus(record);
       });
       if (alreadyMarked) {
-        window.alert("Is staff ki attendance is date par pehle se marked hai.");
-        return;
+        const record = alreadyMarked.data();
+        const existingStatus = normalizedAttendanceStatus(record) || "GPS attendance";
+        if (!window.confirm(`Already marked as ${existingStatus}, replace?`)) return;
       }
-      await addDoc(collection(db, "attendance"), {
-        staffId: attendanceForm.staffId,
-        date: attendanceForm.date,
-        status: "Present",
+      const attendanceRef = doc(db, "attendance", `${staffId}_${date}`);
+      const batch = writeBatch(db);
+      batch.set(attendanceRef, {
+        staffId,
+        date,
+        status,
         markedBy: "Admin",
+        source: "manual",
       });
-      window.alert("Attendance successfully mark ho gayi.");
+      manualSnapshot.docs.forEach((entry) => {
+        if (entry.id !== attendanceRef.id && getStaffId(entry.data()) === staffId) {
+          batch.delete(entry.ref);
+        }
+      });
+      await batch.commit();
+      setMonth(date.slice(0, 7));
+      setAttendanceForm((form) => ({ ...form, staffId, date, status }));
+      setActionError("");
     } catch (error) {
       reportError("Attendance mark nahi hui", error);
     } finally {
@@ -377,28 +504,65 @@ export default function Staff({ C, isMobile }) {
     }
   };
 
-  const handleSaveSalary = async (member) => {
-    const rawSalary = salaryInputs[member.id] ?? member.monthlySalary ?? legacyPayroll[member.id]?.monthlySalary ?? "";
-    const monthlySalary = Number(rawSalary);
-    const adminUid = auth.currentUser?.uid;
-    if (rawSalary === "" || !Number.isFinite(monthlySalary) || monthlySalary < 0 || !adminUid) {
-      window.alert("Valid salary aur active admin session required hai.");
-      return;
-    }
-    setActionError("");
-    setBusyId(`salary-${member.id}`);
+  const handleMarkAttendance = (event) => {
+    event.preventDefault();
+    return saveAttendance(attendanceForm.staffId, attendanceForm.date, attendanceForm.status);
+  };
+
+  const handleSaveStaffField = async (member, field) => {
+    const value = staffDrafts[member.id]?.[field];
+    if (value === undefined) return;
+    const saveKey = `${member.id}-${field}`;
+    setStaffSaveStates((current) => ({ ...current, [saveKey]: { status: "saving", message: "" } }));
     try {
-      await setDoc(doc(db, "staffPayroll", member.id), {
-        uid: member.id,
-        monthlySalary,
-        updatedAt: Date.now(),
-        updatedBy: adminUid,
-      }, { merge: true });
-      setSalaryInputs((current) => ({ ...current, [member.id]: String(monthlySalary) }));
+      let updates = { [field]: value };
+      if (field === "name") {
+        updates.name = String(value).trim();
+        if (!updates.name) throw new Error("Staff name khali nahi ho sakta.");
+      } else if (field === "monthlySalary") {
+        updates.monthlySalary = Number(value);
+        if (value === "" || !Number.isFinite(updates.monthlySalary) || updates.monthlySalary < 0) {
+          throw new Error("Valid non-negative monthly salary enter karein.");
+        }
+      } else if (field === "role" && !STAFF_ROLES.includes(value)) {
+        throw new Error("Valid staff role select karein.");
+      }
+
+      if (field === "monthlySalary") {
+        const adminUid = auth.currentUser?.uid;
+        if (!adminUid) throw new Error("Admin session expire ho gaya. Dobara sign in karein.");
+        const batch = writeBatch(db);
+        batch.update(doc(db, "staff", member.id), updates);
+        batch.set(doc(db, "staffPayroll", member.id), {
+          uid: member.id,
+          monthlySalary: updates.monthlySalary,
+          updatedAt: Date.now(),
+          updatedBy: adminUid,
+        }, { merge: true });
+        await batch.commit();
+      } else {
+        await updateDoc(doc(db, "staff", member.id), updates);
+      }
+      setStaffDrafts((current) => ({
+        ...current,
+        [member.id]: { ...current[member.id], [field]: field === "monthlySalary" ? String(updates.monthlySalary) : updates[field] },
+      }));
+      setStaffSaveStates((current) => ({ ...current, [saveKey]: { status: "saved", message: "" } }));
     } catch (error) {
-      reportError("Salary save nahi hui", error);
-    } finally {
-      setBusyId("");
+      setStaffSaveStates((current) => ({ ...current, [saveKey]: { status: "error", message: getErrorMessage(error) } }));
+      console.error(`Staff ${field} save failed for ${member.id}:`, error);
+    }
+  };
+
+  const handleToggleActive = async (member, active) => {
+    const saveKey = `${member.id}-active`;
+    setStaffSaveStates((current) => ({ ...current, [saveKey]: { status: "saving", message: "" } }));
+    try {
+      await updateDoc(doc(db, "staff", member.id), { active });
+      setStaffSaveStates((current) => ({ ...current, [saveKey]: { status: "saved", message: "" } }));
+    } catch (error) {
+      setStaffSaveStates((current) => ({ ...current, [saveKey]: { status: "error", message: getErrorMessage(error) } }));
+      console.error(`Staff active status save failed for ${member.id}:`, error);
     }
   };
 
@@ -430,6 +594,13 @@ export default function Staff({ C, isMobile }) {
     padding: 16,
   };
   const labelStyle = { display: "grid", gap: 6, color: C.gray, fontSize: 12, fontWeight: 700 };
+  const renderStaffSaveStatus = (member, field) => {
+    const state = staffSaveStates[`${member.id}-${field}`];
+    if (!state) return null;
+    if (state.status === "saving") return <small style={{ color: C.gray }}>Saving...</small>;
+    if (state.status === "saved") return <small style={{ color: C.green }}>Saved ✓</small>;
+    return <small role="alert" style={{ color: "#FCA5A5" }}>{state.message}</small>;
+  };
 
   return (
     <section style={{ marginTop: 24 }}>
@@ -522,7 +693,7 @@ export default function Staff({ C, isMobile }) {
               ? <div style={{ color: C.gray, fontSize: 13 }}>No staff profiles found.</div>
               : (
                 <div style={{ overflowX: "auto" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 520, color: C.ink, fontSize: 13 }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760, color: C.ink, fontSize: 13 }}>
                     <thead>
                       <tr style={{ color: C.gray, textAlign: "left" }}>
                         {["Name", "Role", "Monthly salary", "Status", "Auth UID"].map((heading) => (
@@ -533,10 +704,49 @@ export default function Staff({ C, isMobile }) {
                     <tbody>
                       {members.map((member) => (
                         <tr key={member.id}>
-                          <td style={{ padding: "10px 8px", borderBottom: `1px solid ${C.line}`, fontWeight: 700 }}>{member.name || "—"}</td>
-                          <td style={{ padding: "10px 8px", borderBottom: `1px solid ${C.line}` }}>{member.role || "staff"}</td>
-                          <td style={{ padding: "10px 8px", borderBottom: `1px solid ${C.line}` }}>{formatCurrency(Number(legacyPayroll[member.id]?.monthlySalary ?? member.monthlySalary ?? 0))}</td>
-                          <td style={{ padding: "10px 8px", borderBottom: `1px solid ${C.line}`, color: member.active === false ? C.gray : C.green }}>{member.active === false ? "Inactive" : "Active"}</td>
+                          <td style={{ padding: "8px", borderBottom: `1px solid ${C.line}` }}>
+                            <input
+                              aria-label={`Name for ${member.id}`}
+                              maxLength={80}
+                              value={staffDrafts[member.id]?.name ?? member.name ?? ""}
+                              onChange={(event) => setStaffDrafts((current) => ({ ...current, [member.id]: { ...current[member.id], name: event.target.value } }))}
+                              onBlur={() => handleSaveStaffField(member, "name")}
+                              style={{ ...inputStyle, minWidth: 120, padding: "7px 8px" }}
+                            />
+                            {renderStaffSaveStatus(member, "name")}
+                          </td>
+                          <td style={{ padding: "8px", borderBottom: `1px solid ${C.line}` }}>
+                            <select
+                              aria-label={`Role for ${member.id}`}
+                              value={staffDrafts[member.id]?.role ?? member.role ?? "staff"}
+                              onChange={(event) => setStaffDrafts((current) => ({ ...current, [member.id]: { ...current[member.id], role: event.target.value } }))}
+                              onBlur={() => handleSaveStaffField(member, "role")}
+                              style={{ ...inputStyle, minWidth: 110, padding: "7px 8px" }}
+                            >
+                              {STAFF_ROLES.map((role) => <option key={role} value={role}>{role}</option>)}
+                            </select>
+                            {renderStaffSaveStatus(member, "role")}
+                          </td>
+                          <td style={{ padding: "8px", borderBottom: `1px solid ${C.line}` }}>
+                            <input
+                              aria-label={`Monthly salary for ${member.id}`}
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={staffDrafts[member.id]?.monthlySalary ?? legacyPayroll[member.id]?.monthlySalary ?? member.monthlySalary ?? ""}
+                              onChange={(event) => setStaffDrafts((current) => ({ ...current, [member.id]: { ...current[member.id], monthlySalary: event.target.value } }))}
+                              onBlur={() => handleSaveStaffField(member, "monthlySalary")}
+                              style={{ ...inputStyle, minWidth: 120, padding: "7px 8px" }}
+                            />
+                            {renderStaffSaveStatus(member, "monthlySalary")}
+                          </td>
+                          <td style={{ padding: "8px", borderBottom: `1px solid ${C.line}` }}>
+                            <label style={{ display: "flex", alignItems: "center", gap: 6, color: member.active === false ? C.gray : C.green }}>
+                              <input type="checkbox" checked={member.active !== false} onChange={(event) => handleToggleActive(member, event.target.checked)} />
+                              {member.active === false ? "Inactive" : "Active"}
+                            </label>
+                            {renderStaffSaveStatus(member, "active")}
+                          </td>
                           <td style={{ padding: "10px 8px", borderBottom: `1px solid ${C.line}`, fontSize: 11 }}>{member.id}</td>
                         </tr>
                       ))}
@@ -557,6 +767,9 @@ export default function Staff({ C, isMobile }) {
             </div>
           </div>
           {gpsLoading && <div style={{ color: C.gray, fontSize: 12 }}>Loading saved GPS settings...</div>}
+          <button type="button" onClick={handleUseCurrentLocation} disabled={gpsLocating} style={{ ...buttonStyle, justifySelf: "start" }}>
+            {gpsLocating ? "Getting location..." : "Use Current Location"}
+          </button>
           <label style={labelStyle}>
             Latitude
             <input required type="number" min="-90" max="90" step="any" value={gpsForm.lat} onChange={(event) => setGpsForm((form) => ({ ...form, lat: event.target.value }))} style={inputStyle} />
@@ -569,8 +782,25 @@ export default function Staff({ C, isMobile }) {
             Allowed radius (meters)
             <input required type="number" min="1" max="10000" step="1" value={gpsForm.radius} onChange={(event) => setGpsForm((form) => ({ ...form, radius: event.target.value }))} style={inputStyle} />
           </label>
+          {(gpsAccuracy != null || gpsForm.lat || gpsForm.lng) && (
+            <div style={{ color: C.gray, fontSize: 12 }}>
+              Preview: {gpsForm.lat}, {gpsForm.lng}
+              {gpsAccuracy != null ? ` · Accuracy ±${gpsAccuracy} m` : ""}
+            </div>
+          )}
+          {gpsSaved && (
+            <a
+              href={`https://www.google.com/maps?q=${gpsSaved.lat},${gpsSaved.lng}`}
+              target="_blank"
+              rel="noreferrer"
+              style={{ color: C.gold, fontWeight: 800, fontSize: 13, justifySelf: "start" }}
+            >
+              Open in Maps
+            </a>
+          )}
+          {gpsError && <div role="alert" style={{ color: "#FCA5A5", background: "#451A1A", borderRadius: 9, padding: 10, fontSize: 12 }}>{gpsError}</div>}
           <button type="submit" disabled={busyId === "gps"} style={{ ...buttonStyle, justifySelf: "start" }}>
-            {busyId === "gps" ? "Saving..." : "Save GPS settings"}
+            {busyId === "gps" ? "Saving..." : "Save Location"}
           </button>
         </form>
       )}
@@ -633,73 +863,214 @@ export default function Staff({ C, isMobile }) {
             </label>
           </div>
 
-          <form onSubmit={handleMarkAttendance} style={{ ...cardStyle, display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(180px, 1fr) minmax(160px, 220px) auto", gap: 10, alignItems: "end", marginBottom: 14 }}>
+          <form onSubmit={handleMarkAttendance} style={{ ...cardStyle, display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(180px, 1fr) minmax(150px, 190px) minmax(140px, 180px) auto", gap: 10, alignItems: "end", marginBottom: 14 }}>
             <label style={labelStyle}>
               Staff member
               <select required value={attendanceForm.staffId} onChange={(event) => setAttendanceForm((form) => ({ ...form, staffId: event.target.value }))} style={inputStyle}>
                 <option value="">Select staff</option>
-                {activeMembers.map((member) => <option key={member.id} value={member.id}>{member.name || member.id}</option>)}
+                {activeMembers.map((member) => <option key={member.id} value={member.id}>{displayStaffName(member)}</option>)}
               </select>
             </label>
             <label style={labelStyle}>
               Attendance date
-              <input required type="date" value={attendanceForm.date} onChange={(event) => setAttendanceForm((form) => ({ ...form, date: event.target.value }))} style={inputStyle} />
+              <input required type="date" max={todayKey()} value={attendanceForm.date} onChange={(event) => setAttendanceForm((form) => ({ ...form, date: event.target.value }))} style={inputStyle} />
+            </label>
+            <label style={labelStyle}>
+              Status
+              <select value={attendanceForm.status} onChange={(event) => setAttendanceForm((form) => ({ ...form, status: event.target.value }))} style={inputStyle}>
+                {ATTENDANCE_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
+              </select>
             </label>
             <button type="submit" disabled={busyId === "attendance" || !activeMembers.length} style={buttonStyle}>
-              {busyId === "attendance" ? "Saving..." : "Mark Present"}
+              {busyId === "attendance" ? "Saving..." : "Save Attendance"}
             </button>
           </form>
 
           {(gpsAttendanceLoading || manualAttendanceLoading) && (
             <div style={{ color: C.gray, padding: 12 }}>Attendance data load ho raha hai...</div>
           )}
-          <div style={{ overflowX: "auto", ...cardStyle, padding: 0 }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 850, color: C.ink, fontSize: 12 }}>
+          <div style={{ ...cardStyle, overflowX: "auto", padding: 0 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1050, color: C.ink, fontSize: 12 }}>
               <thead>
                 <tr style={{ background: C.cardAlt, textAlign: "left", color: C.gray }}>
-                  {["Staff", "Present days", "Earned leaves", "Paid days", "Monthly salary", "Per day", "Gross salary", "Approved advances", "Final payable"].map((heading) => (
+                  {["Staff", "Present days", "Paid leave", "Earned leaves", "Paid days", "Monthly salary", "Per day", "Gross salary", "Approved advances", "Carry forward advance", "Final payable"].map((heading) => (
                     <th key={heading} style={{ padding: 11, borderBottom: `1px solid ${C.line}`, whiteSpace: "nowrap" }}>{heading}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {members.map((member) => {
-                  const presentDays = presentDatesByStaff.get(member.id)?.size || 0;
+                {payrollMembers.map((member) => {
+                  const stats = attendanceStatsByStaff.get(member.id) || { presentDays: 0, paidLeaveDays: 0 };
+                  const { presentDays, paidLeaveDays } = stats;
                   const approvedAdvance = approvedAdvanceTotals.get(member.id) || 0;
-                  const salaryValue = salaryInputs[member.id] ?? legacyPayroll[member.id]?.monthlySalary ?? member.monthlySalary ?? 0;
-                  const monthlySalary = Number(salaryValue);
-                  const safeSalary = Number.isFinite(monthlySalary) && monthlySalary >= 0 ? monthlySalary : 0;
+                  const monthlySalary = Number(legacyPayroll[member.id]?.monthlySalary ?? member.monthlySalary ?? 0);
                   const salary = calculateStaffSalary({
-                    monthlySalary: safeSalary,
+                    monthlySalary,
                     presentDays,
+                    paidLeaveDays,
                     totalApprovedAdvance: approvedAdvance,
+                    daysInPayPeriod: daysInMonth(month),
                   });
-                  const salaryBusy = busyId === `salary-${member.id}`;
+                  const dateValue = presentDays.toLocaleString("en-IN", { maximumFractionDigits: 1 });
                   return (
-                    <tr key={member.id} style={{ opacity: member.active === false ? 0.6 : 1 }}>
-                      <td style={{ padding: 10, borderBottom: `1px solid ${C.line}`, fontWeight: 800, whiteSpace: "nowrap" }}>{member.name || member.id}</td>
-                      <td style={{ padding: 10, borderBottom: `1px solid ${C.line}` }}>{presentDays}</td>
+                    <tr
+                      key={member.id}
+                      onClick={() => setSelectedMemberId(member.id)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          setSelectedMemberId(member.id);
+                        }
+                      }}
+                      tabIndex={0}
+                      aria-label={`View payroll details for ${displayStaffName(member)}`}
+                      style={{ cursor: "pointer" }}
+                    >
+                      <td style={{ padding: 10, borderBottom: `1px solid ${C.line}`, fontWeight: 800, whiteSpace: "nowrap" }}>{displayStaffName(member)}</td>
+                      <td style={{ padding: 10, borderBottom: `1px solid ${C.line}` }}>{dateValue}</td>
+                      <td style={{ padding: 10, borderBottom: `1px solid ${C.line}` }}>{paidLeaveDays}</td>
                       <td style={{ padding: 10, borderBottom: `1px solid ${C.line}` }}>{salary.earnedLeaves}</td>
                       <td style={{ padding: 10, borderBottom: `1px solid ${C.line}` }}>{salary.totalPaidDays}</td>
-                      <td style={{ padding: 8, borderBottom: `1px solid ${C.line}`, minWidth: 150 }}>
-                        <div style={{ display: "flex", gap: 6 }}>
-                          <input type="number" min="0" step="0.01" aria-label={`Monthly salary for ${member.name || member.id}`} value={salaryValue} onChange={(event) => setSalaryInputs((current) => ({ ...current, [member.id]: event.target.value }))} style={{ ...inputStyle, minWidth: 100, padding: "7px 8px" }} />
-                          <button type="button" disabled={salaryBusy} onClick={() => handleSaveSalary(member)} style={{ ...buttonStyle, padding: "7px 9px" }}>{salaryBusy ? "..." : "Save"}</button>
-                        </div>
-                      </td>
+                      <td style={{ padding: 10, borderBottom: `1px solid ${C.line}`, whiteSpace: "nowrap" }}>{formatCurrency(monthlySalary)}</td>
                       <td style={{ padding: 10, borderBottom: `1px solid ${C.line}`, whiteSpace: "nowrap" }}>{formatCurrency(salary.perDaySalary)}</td>
                       <td style={{ padding: 10, borderBottom: `1px solid ${C.line}`, whiteSpace: "nowrap" }}>{formatCurrency(salary.grossSalary)}</td>
                       <td style={{ padding: 10, borderBottom: `1px solid ${C.line}`, whiteSpace: "nowrap" }}>− {formatCurrency(approvedAdvance)}</td>
+                      <td style={{ padding: 10, borderBottom: `1px solid ${C.line}`, whiteSpace: "nowrap", color: salary.carryForwardAdvance > 0 ? "#FCA5A5" : C.gray }}>{formatCurrency(salary.carryForwardAdvance)}</td>
                       <td style={{ padding: 10, borderBottom: `1px solid ${C.line}`, whiteSpace: "nowrap", color: C.gold, fontWeight: 900 }}>{formatCurrency(salary.finalPayable)}</td>
                     </tr>
                   );
                 })}
-                {!members.length && (
-                  <tr><td colSpan={9} style={{ padding: 18, color: C.gray, textAlign: "center" }}>No staff profiles found.</td></tr>
+                {!payrollMembers.length && (
+                  <tr><td colSpan={11} style={{ padding: 18, color: C.gray, textAlign: "center" }}>No active staff with monthly salary above ₹0.</td></tr>
                 )}
               </tbody>
             </table>
           </div>
+
+          {selectedMember && (() => {
+            const stats = attendanceStatsByStaff.get(selectedMember.id) || { presentDays: 0, paidLeaveDays: 0 };
+            const approvedAdvance = approvedAdvanceTotals.get(selectedMember.id) || 0;
+            const monthlySalary = Number(legacyPayroll[selectedMember.id]?.monthlySalary ?? selectedMember.monthlySalary ?? 0);
+            const salary = calculateStaffSalary({
+              monthlySalary,
+              presentDays: stats.presentDays,
+              paidLeaveDays: stats.paidLeaveDays,
+              totalApprovedAdvance: approvedAdvance,
+              daysInPayPeriod: daysInMonth(month),
+            });
+            const calendarCount = daysInMonth(month);
+            const firstWeekday = new Date(`${month}-01T00:00:00`).getDay();
+            const selectedDateRecord = allAttendanceRecords.get(`${selectedMember.id}_${attendanceForm.date}`);
+            return (
+              <div
+                role="presentation"
+                onClick={() => setSelectedMemberId("")}
+                style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.72)", display: "grid", placeItems: "center", padding: 14 }}
+              >
+                <section
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="payroll-detail-title"
+                  onClick={(event) => event.stopPropagation()}
+                  style={{ ...cardStyle, width: "min(900px, 100%)", maxHeight: "90vh", overflowY: "auto", boxSizing: "border-box" }}
+                >
+                  <header style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
+                    <div>
+                      <h3 id="payroll-detail-title" style={{ margin: 0, color: C.ink }}>{displayStaffName(selectedMember)}</h3>
+                      <div style={{ color: C.gray, marginTop: 4, fontSize: 12 }}>{selectedMember.role || "staff"} · Salary {formatCurrency(monthlySalary)} · {month}</div>
+                    </div>
+                    <button type="button" onClick={() => setSelectedMemberId("")} aria-label="Close payroll details" style={{ ...buttonStyle, padding: "7px 11px" }}>Close</button>
+                  </header>
+
+                  <div style={{ marginTop: 16, display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, 1fr)", gap: 8 }}>
+                    {[
+                      ["Per day", salary.perDaySalary],
+                      ["Gross", salary.grossSalary],
+                      ["Advances", approvedAdvance],
+                      ["Final payable", salary.finalPayable],
+                    ].map(([label, amount]) => (
+                      <div key={label} style={{ background: C.cardAlt, padding: 10, borderRadius: 9 }}>
+                        <div style={{ color: C.gray, fontSize: 11 }}>{label}</div>
+                        <strong style={{ display: "block", color: label === "Final payable" ? C.gold : C.ink, marginTop: 4 }}>{formatCurrency(amount)}</strong>
+                      </div>
+                    ))}
+                  </div>
+                  {salary.carryForwardAdvance > 0 && (
+                    <div style={{ color: "#FCA5A5", fontSize: 12, marginTop: 8 }}>Carry forward advance: {formatCurrency(salary.carryForwardAdvance)}</div>
+                  )}
+
+                  <h4 style={{ color: C.ink, margin: "20px 0 8px" }}>Attendance calendar</h4>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 4, color: C.gray, fontSize: 10, textAlign: "center" }}>
+                    {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => <strong key={day} style={{ padding: 4 }}>{day}</strong>)}
+                    {Array.from({ length: firstWeekday }, (_, index) => <span key={`blank-${index}`} />)}
+                    {Array.from({ length: calendarCount }, (_, index) => {
+                      const day = index + 1;
+                      const date = `${month}-${String(day).padStart(2, "0")}`;
+                      const record = allAttendanceRecords.get(`${selectedMember.id}_${date}`);
+                      const status = record?.status || "";
+                      const color = status === "Present" ? C.green
+                        : status === "Half Day" ? C.gold
+                          : status === "Absent" ? "#F87171"
+                            : status === "Paid Leave" ? C.blue
+                              : C.gray;
+                      return (
+                        <button
+                          key={date}
+                          type="button"
+                          disabled={date > todayKey()}
+                          onClick={() => setAttendanceForm((form) => ({
+                            ...form,
+                            staffId: selectedMember.id,
+                            date,
+                            status: status || "Present",
+                          }))}
+                          title={status ? `${status} · ${record.source === "gps" ? "GPS" : "Manual"}` : "Not marked"}
+                          style={{ minWidth: 0, padding: "6px 2px", border: `1px solid ${date === attendanceForm.date ? C.gold : C.line}`, borderRadius: 7, background: C.bg, color: date > todayKey() ? C.gray : color, cursor: date > todayKey() ? "not-allowed" : "pointer", opacity: date > todayKey() ? 0.45 : 1 }}
+                        >
+                          <span style={{ display: "block", fontSize: 12, fontWeight: 800 }}>{day}</span>
+                          <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", fontSize: 8 }}>{status || "—"}</span>
+                          {record && <span style={{ display: "block", fontSize: 7 }}>{record.source === "gps" ? "GPS" : "Manual"}</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <form
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      saveAttendance(selectedMember.id, attendanceForm.date, attendanceForm.status);
+                    }}
+                    style={{ display: "flex", alignItems: "end", gap: 8, flexWrap: "wrap", marginTop: 12 }}
+                  >
+                    <label style={{ ...labelStyle, flex: 1, minWidth: 170 }}>
+                      Update {attendanceForm.date}
+                      <select value={attendanceForm.status} onChange={(event) => setAttendanceForm((form) => ({ ...form, status: event.target.value }))} style={inputStyle}>
+                        {ATTENDANCE_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
+                      </select>
+                    </label>
+                    <button type="submit" disabled={busyId === "attendance" || attendanceForm.date > todayKey()} style={buttonStyle}>
+                      {busyId === "attendance" ? "Saving..." : "Save status"}
+                    </button>
+                  </form>
+                  {selectedDateRecord && (
+                    <div style={{ marginTop: 6, color: C.gray, fontSize: 11 }}>
+                      Current: {selectedDateRecord.status} · {selectedDateRecord.source === "gps" ? "GPS" : "Manual"}
+                    </div>
+                  )}
+
+                  <h4 style={{ color: C.ink, margin: "20px 0 8px" }}>Approved advances</h4>
+                  {(approvedAdvancesByStaff.get(selectedMember.id) || []).length === 0
+                    ? <div style={{ color: C.gray, fontSize: 12 }}>Is month mein approved advance nahi hai.</div>
+                    : (approvedAdvancesByStaff.get(selectedMember.id) || []).map((advance) => (
+                      <div key={`${advance.source}-${advance.id}`} style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "8px 0", borderTop: `1px solid ${C.line}`, color: C.ink, fontSize: 12 }}>
+                        <span>{advance.date || advance.month || (advance.createdAt ? new Date(typeof advance.createdAt.toDate === "function" ? advance.createdAt.toDate() : advance.createdAt).toLocaleDateString("en-CA") : "Date unavailable")}</span>
+                        <strong>{formatCurrency(Number(advance.amount || 0))}</strong>
+                      </div>
+                    ))}
+                </section>
+              </div>
+            );
+          })()}
         </section>
       )}
     </section>
