@@ -102,6 +102,30 @@ function getRecordMonth(record) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 }
 
+function normalizeStaffPhone(value) {
+  const digits = String(value || "").replace(/\D/g, "");
+  if (digits.length === 10) return `+91${digits}`;
+  if (digits.length === 11 && digits.startsWith("0")) return `+91${digits.slice(1)}`;
+  if (digits.length === 12 && digits.startsWith("91")) return `+${digits}`;
+  if (digits.length >= 11 && digits.length <= 15) return `+${digits}`;
+  return "";
+}
+
+function staffWelcomeWhatsAppUrl(member, name, phone) {
+  const normalizedPhone = normalizeStaffPhone(phone);
+  if (!normalizedPhone) return "";
+  const message = [
+    `Namaste ${name || member.name || "Staff"}, Eat & Park mein aapka swagat hai.`,
+    ...(member.email ? [`Login ID: ${member.email}`] : []),
+    "Login link: https://eatndpark.vercel.app/staff",
+    member.mustChangePassword === true
+      ? "Pehli baar login karne par apna naya password set karna hoga."
+      : "Apne existing password se login karein.",
+    "- Team Eat & Park",
+  ].join("\n");
+  return `https://wa.me/${normalizedPhone.replace(/\D/g, "")}?text=${encodeURIComponent(message)}`;
+}
+
 export default function Staff({ C, isMobile }) {
   const [activeTab, setActiveTab] = useState("staff");
   const [month, setMonth] = useState(currentMonthKey);
@@ -112,6 +136,8 @@ export default function Staff({ C, isMobile }) {
   const [shiftSettingsLoading, setShiftSettingsLoading] = useState(true);
   const [staffDrafts, setStaffDrafts] = useState({});
   const [staffSaveStates, setStaffSaveStates] = useState({});
+  const [addStaffOpen, setAddStaffOpen] = useState(false);
+  const [createdStaffCredentials, setCreatedStaffCredentials] = useState(null);
   const [selectedMemberId, setSelectedMemberId] = useState("");
   const [paymentMemberId, setPaymentMemberId] = useState("");
   const [paymentForm, setPaymentForm] = useState({
@@ -147,7 +173,7 @@ export default function Staff({ C, isMobile }) {
     accountMode: "create",
     uid: "",
     email: "",
-    password: "",
+    phone: "",
     name: "",
     role: "staff",
     monthlySalary: "",
@@ -174,6 +200,21 @@ export default function Staff({ C, isMobile }) {
 
   const currentAdminRole = members.find((member) => member.id === auth.currentUser?.uid)?.role;
   const canEditShifts = currentAdminRole === "admin" || currentAdminRole === "owner";
+  const whatsappPhone = createdStaffCredentials?.phone
+    ? String(createdStaffCredentials.phone).replace(/\D/g, "")
+    : "";
+  const whatsappMessage = createdStaffCredentials
+    ? [
+      `Namaste ${createdStaffCredentials.name}, aapka Eat & Park account ban gaya hai.`,
+      `Login ID: ${createdStaffCredentials.email}`,
+      `Temporary password: ${createdStaffCredentials.temporaryPassword}`,
+      "Login link: https://eatndpark.vercel.app/staff",
+      "Pehli baar login karne par apna naya password set karna hoga",
+    ].join("\n")
+    : "";
+  const whatsappHref = whatsappPhone
+    ? `https://wa.me/${whatsappPhone}?text=${encodeURIComponent(whatsappMessage)}`
+    : "";
 
   useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, "staff"), (snapshot) => {
@@ -533,35 +574,44 @@ export default function Staff({ C, isMobile }) {
   const handleAddStaff = async (event) => {
     event.preventDefault();
     setActionError("");
+    setCreatedStaffCredentials(null);
     const uid = newStaff.uid.trim();
     const email = newStaff.email.trim().toLowerCase();
     const name = newStaff.name.trim();
+    const phone = normalizeStaffPhone(newStaff.phone);
     const monthlySalary = newStaff.monthlySalary.trim() ? Number(newStaff.monthlySalary) : NaN;
     const validRole = ROLES.some((role) => role.value === newStaff.role);
     if (
       !name ||
+      (newStaff.accountMode === "create" && !phone) ||
       !validRole ||
       !Number.isFinite(monthlySalary) ||
       monthlySalary < 0 ||
       (newStaff.accountMode === "create"
-        ? (!email || newStaff.password.length < 12)
+        ? !email
         : !uid)
     ) {
-      setActionError("Name, role, valid salary, aur account ke required details sahi bharein.");
+      setActionError(newStaff.accountMode === "create"
+        ? "Name, role, valid salary, email, aur sahi WhatsApp number bharein."
+        : "Name, role, valid salary, aur existing Auth UID sahi bharein.");
       return;
     }
     setBusyId("add-staff");
     try {
       if (newStaff.accountMode === "create") {
-        await httpsCallable(functions, "createStaffAccount")({
+        const response = await httpsCallable(functions, "createStaffAccount")({
           email,
-          password: newStaff.password,
           name,
+          phone,
           role: newStaff.role,
           monthlySalary,
           active: newStaff.active,
           shiftId: newStaff.shiftId || "",
         });
+        setCreatedStaffCredentials(response.data);
+        if (!response.data.emailSent) {
+          setActionError("Account ban gaya, email nahi gaya, WhatsApp wala button use karo.");
+        }
       } else {
         await runTransaction(db, async (transaction) => {
           const staffRef = doc(db, "staff", uid);
@@ -581,13 +631,14 @@ export default function Staff({ C, isMobile }) {
         accountMode: "create",
         uid: "",
         email: "",
-        password: "",
+        phone: "",
         name: "",
         role: "staff",
         monthlySalary: "",
         active: true,
         shiftId: "morning",
       });
+      setAddStaffOpen(false);
     } catch (error) {
       const message = error?.code === "functions/not-found"
         ? "createStaffAccount Cloud Function deploy karein, phir dobara try karein."
@@ -1135,6 +1186,10 @@ export default function Staff({ C, isMobile }) {
         throw new Error("Valid staff role select karein.");
       } else if (field === "shiftId" && value && !shifts[value]) {
         throw new Error("Valid shift select karein.");
+      } else if (field === "phone") {
+        const phone = String(value || "").trim();
+        updates.phone = phone ? normalizeStaffPhone(phone) : "";
+        if (phone && !updates.phone) throw new Error("Valid WhatsApp number enter karein.");
       }
 
       if (field === "monthlySalary") {
@@ -1275,7 +1330,12 @@ export default function Staff({ C, isMobile }) {
           <button
             key={tab.id}
             type="button"
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => {
+              if (tab.id !== "staff") {
+                setCreatedStaffCredentials(null);
+              }
+              setActiveTab(tab.id);
+            }}
             aria-pressed={activeTab === tab.id}
             style={{
               flexShrink: 0,
@@ -1305,13 +1365,57 @@ export default function Staff({ C, isMobile }) {
           {actionError}
         </div>
       )}
+      {activeTab === "staff" && createdStaffCredentials && (
+        <section
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="created-staff-title"
+          style={{ ...cardStyle, marginBottom: 14, border: `1px solid ${C.gold}` }}
+        >
+          <h3 id="created-staff-title" style={{ margin: "0 0 10px", color: C.ink }}>Staff account created</h3>
+          <div style={{ color: C.gray, fontSize: 13, lineHeight: 1.7 }}>
+            <div>Name: {createdStaffCredentials.name}</div>
+            <div>Login ID: {createdStaffCredentials.email}</div>
+            <div>
+              Temporary password: <strong style={{ color: C.ink, userSelect: "all" }}>{createdStaffCredentials.temporaryPassword}</strong>
+            </div>
+            <div>
+              {createdStaffCredentials.emailSent
+                ? "Welcome email sent."
+                : "Account ban gaya, email nahi gaya, WhatsApp wala button use karo."}
+            </div>
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 9, marginTop: 14 }}>
+            <a
+              href={whatsappHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => setCreatedStaffCredentials(null)}
+              style={{ ...buttonStyle, width: "auto", display: "inline-flex", alignItems: "center", textDecoration: "none" }}
+            >
+              WhatsApp par bhejo
+            </a>
+            <button type="button" onClick={() => setCreatedStaffCredentials(null)} style={{ ...buttonStyle, width: "auto", background: C.cardAlt }}>
+              Close
+            </button>
+          </div>
+        </section>
+      )}
 
       {activeTab === "staff" && (
-        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(280px, 360px) 1fr", gap: 14 }}>
-          <form onSubmit={handleAddStaff} style={{ ...cardStyle, display: "grid", alignContent: "start", gap: 12 }}>
-            <h3 style={{ margin: 0, color: C.ink, fontSize: 16 }}>Add staff profile</h3>
+        <div>
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+            <button type="button" onClick={() => setAddStaffOpen((open) => !open)}
+              aria-expanded={addStaffOpen}
+              style={{ ...buttonStyle, width: "auto", background: addStaffOpen ? C.cardAlt : C.gold }}>
+              {addStaffOpen ? "✕ Close staff profile" : "+ Add staff profile"}
+            </button>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile || !addStaffOpen ? "1fr" : "minmax(280px, 360px) 1fr", gap: 14 }}>
+          {addStaffOpen && (
+            <form onSubmit={handleAddStaff} style={{ ...cardStyle, display: "grid", alignContent: "start", gap: 12 }}>
             <div style={{ color: C.gray, fontSize: 12 }}>
-              Naya Firebase Auth account server-side create hota hai. Temporary password staff ke saath privately share karein.
+              Temporary password server par generate hoga. Staff ko email bheja jayega aur aap WhatsApp se bhi share kar sakte hain.
             </div>
             <label style={labelStyle}>
               Name
@@ -1348,8 +1452,8 @@ export default function Staff({ C, isMobile }) {
                   <input required type="email" autoComplete="email" value={newStaff.email} onChange={(event) => setNewStaff((form) => ({ ...form, email: event.target.value }))} style={inputStyle} />
                 </label>
                 <label style={labelStyle}>
-                  Temporary password (12+ characters)
-                  <input required type="password" autoComplete="new-password" minLength={12} value={newStaff.password} onChange={(event) => setNewStaff((form) => ({ ...form, password: event.target.value }))} style={inputStyle} />
+                  Staff WhatsApp number
+                  <input required type="tel" autoComplete="tel" value={newStaff.phone} onChange={(event) => setNewStaff((form) => ({ ...form, phone: event.target.value }))} placeholder="10-digit number or +country code" style={inputStyle} />
                 </label>
               </>
             ) : (
@@ -1365,7 +1469,8 @@ export default function Staff({ C, isMobile }) {
             <button type="submit" disabled={busyId === "add-staff"} style={buttonStyle}>
               {busyId === "add-staff" ? "Adding..." : "Add staff"}
             </button>
-          </form>
+            </form>
+          )}
 
           <section style={cardStyle}>
             <h3 style={{ margin: "0 0 12px", color: C.ink, fontSize: 16 }}>Existing staff ({members.length})</h3>
@@ -1373,10 +1478,10 @@ export default function Staff({ C, isMobile }) {
               ? <div style={{ color: C.gray, fontSize: 13 }}>No staff profiles found.</div>
               : (
                 <div style={{ overflowX: "auto" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900, color: C.ink, fontSize: 13 }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1200, color: C.ink, fontSize: 13 }}>
                     <thead>
                       <tr style={{ color: C.gray, textAlign: "left" }}>
-                        {["Name", "Shift", "Role", "Monthly salary", "Status", "Auth UID"].map((heading) => (
+                        {["Name", "WhatsApp number", "Shift", "Role", "Monthly salary", "Status", "Auth UID", "WhatsApp welcome"].map((heading) => (
                           <th key={heading} style={{ padding: "9px 8px", borderBottom: `1px solid ${C.line}` }}>{heading}</th>
                         ))}
                       </tr>
@@ -1394,6 +1499,19 @@ export default function Staff({ C, isMobile }) {
                               style={{ ...inputStyle, minWidth: 120, padding: "7px 8px" }}
                             />
                             {renderStaffSaveStatus(member, "name")}
+                          </td>
+                          <td style={{ padding: "8px", borderBottom: `1px solid ${C.line}` }}>
+                            <input
+                              aria-label={`WhatsApp number for ${member.id}`}
+                              type="tel"
+                              autoComplete="tel"
+                              value={staffDrafts[member.id]?.phone ?? member.phone ?? ""}
+                              onChange={(event) => setStaffDrafts((current) => ({ ...current, [member.id]: { ...current[member.id], phone: event.target.value } }))}
+                              onBlur={() => handleSaveStaffField(member, "phone")}
+                              placeholder="+91..."
+                              style={{ ...inputStyle, minWidth: 145, padding: "7px 8px" }}
+                            />
+                            {renderStaffSaveStatus(member, "phone")}
                           </td>
                           <td style={{ padding: "8px", borderBottom: `1px solid ${C.line}` }}>
                             <select
@@ -1442,6 +1560,30 @@ export default function Staff({ C, isMobile }) {
                             {renderStaffSaveStatus(member, "active")}
                           </td>
                           <td style={{ padding: "10px 8px", borderBottom: `1px solid ${C.line}`, fontSize: 11 }}>{member.id}</td>
+                          <td style={{ padding: "8px", borderBottom: `1px solid ${C.line}` }}>
+                            {staffWelcomeWhatsAppUrl(
+                              member,
+                              staffDrafts[member.id]?.name ?? member.name,
+                              staffDrafts[member.id]?.phone ?? member.phone ?? "",
+                            ) ? (
+                              <a
+                                href={staffWelcomeWhatsAppUrl(
+                                  member,
+                                  staffDrafts[member.id]?.name ?? member.name,
+                                  staffDrafts[member.id]?.phone ?? member.phone ?? "",
+                                )}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{ ...buttonStyle, width: "auto", display: "inline-flex", alignItems: "center", textDecoration: "none", whiteSpace: "nowrap" }}
+                              >
+                                WhatsApp par bhejo
+                              </a>
+                            ) : (
+                              <button type="button" disabled style={{ ...buttonStyle, width: "auto", padding: "8px 10px", whiteSpace: "nowrap", opacity: 0.55 }}>
+                                Pehle number add karein
+                              </button>
+                            )}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -1449,6 +1591,7 @@ export default function Staff({ C, isMobile }) {
                 </div>
               )}
           </section>
+                  </div>
         </div>
       )}
 

@@ -34,6 +34,7 @@ import {
 import "./AttendanceApp.css";
 import { STAFF_ROLES } from "./lib/roles";
 import { ATTENDANCE_STRINGS } from "./lib/attendanceStrings";
+import StaffPasswordChange from "./StaffPasswordChange";
 
 const STAFF_ROLE_SET = new Set(STAFF_ROLES);
 
@@ -448,6 +449,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
       !authInitialized ||
       !user?.uid ||
       !staff ||
+      staff.mustChangePassword === true ||
       auth.currentUser?.uid !== user.uid ||
       staffUid !== user.uid
     ) return undefined;
@@ -1102,6 +1104,14 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
     fontWeight: 800,
     cursor: "pointer",
   };
+
+  if (staff?.mustChangePassword === true) {
+    return (
+      <StaffPasswordChange
+        onComplete={() => setStaff((current) => current ? { ...current, mustChangePassword: false } : current)}
+      />
+    );
+  }
 
   if (loading || (staff && Object.values(dataLoaded).some((loaded) => !loaded))) {
     return (

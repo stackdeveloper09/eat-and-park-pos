@@ -1,8 +1,10 @@
 import { tryRecover } from "./recover";
 /* eslint-disable */
 import React, { useState, useEffect, useMemo, useRef, useContext, createContext, useCallback } from "react";
-import { db, auth } from "./firebase";
+import { db, auth, functions } from "./firebase";
+import { httpsCallable } from "firebase/functions";
 import StaffPayroll from "./Staff";
+import StaffPasswordChange from "./StaffPasswordChange";
 import { ADMIN_ROLES, normalizeRole } from "./lib/roles";
 import { assertEditable, resolveVendorId } from "./lib/guards";
 import { PAID_STATUSES, OPEN_WINDOW_MS, isOpenParcel, isOpenDineIn, isActiveOrder, paidOrders, paidRevenue, buildPaidPatch, isDeliveryOrder, nextKitchenStatus } from "./lib/orderRules";
@@ -706,6 +708,7 @@ function StaffAppInner() {
 
   const [user, setUser] = useState(null);
   const [staffData, setStaffData] = useState(null);
+  const passwordChangeRequired = staffData?.mustChangePassword === true;
   const [loading, setLoading] = useState(true);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -747,7 +750,7 @@ function StaffAppInner() {
   const [bookings, setBookings] = useState([]);
   const prevCallsRef = useRef(0);
   useEffect(() => {
-    if (!user) return;
+    if (!user || passwordChangeRequired) return;
     const unsub = onSnapshot(
       query(collection(db, "calls"), where("status", "==", "active")),
       (snap) => {
@@ -761,31 +764,31 @@ function StaffAppInner() {
       () => {}
     );
     return () => unsub();
-  }, [user]);
+  }, [passwordChangeRequired, user]);
   useEffect(() => {
-    if (!user) return;
+    if (!user || passwordChangeRequired) return;
     const unsub = onSnapshot(
       collection(db, "loyaltyUsers"),
       (snap) => setLoyaltyUsers(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
       () => {}
     );
     return () => unsub();
-  }, [user]);
+  }, [passwordChangeRequired, user]);
   useEffect(() => {
-    if (!user) return;
+    if (!user || passwordChangeRequired) return;
     const unsub = onSnapshot(
       collection(db, "bookings"),
       (snap) => setBookings(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
       () => {}
     );
     return () => unsub();
-  }, [user]);
+  }, [passwordChangeRequired, user]);
   const resolveCall = async (id) => {
     try { await updateDoc(doc(db, "calls", id), { status: "resolved", resolvedAt: Date.now() }); }
     catch (e) { setCalls(prev => prev.filter(c => c.id !== id)); }
   };
   useEffect(() => {
-    if (!user) return;
+    if (!user || passwordChangeRequired) return;
     let invItems = [], invStock = {};
     const calc = () => {
       const low = invItems.filter((it) => Number(it.min) > 0 && invStock[it.id] !== undefined && Number(invStock[it.id]) <= Number(it.min));
@@ -795,7 +798,7 @@ function StaffAppInner() {
     const u1 = onSnapshot(doc(db, "inventory", "items"), (s) => { invItems = s.exists() && Array.isArray(s.data().list) ? s.data().list : []; calc(); }, () => {});
     const u2 = onSnapshot(doc(db, "inventory", "state"), (s) => { invStock = s.exists() ? (s.data().stock || {}) : {}; calc(); }, () => {});
     return () => { u1(); u2(); };
-  }, [user]);
+  }, [passwordChangeRequired, user]);
   const [viewMode, setViewMode] = useState(() => safeStorageGet("staff_view_mode", "auto"));
   const [autoMobile, setAutoMobile] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches);
 
@@ -857,14 +860,8 @@ function StaffAppInner() {
             setUser(u);
             setStaffData(s.data());
             setWaiterName(s.data().name || "Staff");
-            addDoc(collection(db, "staffAttendance"), {
-              uid: u.uid,
-              name: s.data().name || "Staff",
-              role: s.data().role || "staff",
-              action: "login",
-              at: Date.now(),
-              date: invDateKey(),
-            }).catch(() => {});
+            httpsCallable(functions, "recordStaffAttendance")({ action: "login" })
+              .catch((error) => console.error("Staff login attendance record failed:", error));
           } else {
             console.warn("⚠️ staff account inactive or missing");
             await signOut(auth);
@@ -887,7 +884,7 @@ function StaffAppInner() {
   }, []);
   // Data
   useEffect(() => {
-    if (!user) return;
+    if (!user || passwordChangeRequired) return;
     const startToday = new Date(); startToday.setHours(0,0,0,0);
     // 🔍 DEBUG: Auth state log karo
 
@@ -923,11 +920,11 @@ function StaffAppInner() {
       }
     );
     return () => { unsubMenu(); unsubOrders(); unsubDue(); };
-  }, [user]);
+  }, [passwordChangeRequired, user]);
 
   useEffect(() => {
-    if (user && "Notification" in window && Notification.permission === "default") Notification.requestPermission().catch(() => {});
-  }, [user]);
+    if (!passwordChangeRequired && user && "Notification" in window && Notification.permission === "default") Notification.requestPermission().catch(() => {});
+  }, [passwordChangeRequired, user]);
 
   const playSound = () => { if (safeStorageGet("staff_mute", "0") === "1") return; try { const a = new Audio("https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3"); a.volume = 0.6; a.play().catch(() => {}); } catch (e) {} };
   const clickSound = () => { try { const a = new Audio("data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuBzvLZiTYIG2m98OScTgwOUarm7blmGgU7k9n1unEiBC13yO/eizEIHWq+8+OWT");
@@ -1015,14 +1012,11 @@ function StaffAppInner() {
       Object.keys(localStorage).filter(k => k.startsWith("staff_draft_")).forEach(k => { try { localStorage.removeItem(k); } catch (e) {} });
     } catch (e) {}
     if (user) {
-      addDoc(collection(db, "staffAttendance"), {
-        uid: user.uid,
-        name: staffData?.name || waiterName || "Staff",
-        role: staffData?.role || "staff",
-        action: "logout",
-        at: Date.now(),
-        date: invDateKey(),
-      }).catch(() => {});
+      try {
+        await httpsCallable(functions, "recordStaffAttendance")({ action: "logout" });
+      } catch (error) {
+        console.error("Staff logout attendance record failed:", error);
+      }
     }
     setCart({}); setSelectedTable(null); setBillOrder(null); setAddMoreMode(false);
     setEstItems([]); try { localStorage.removeItem("staff_estimate_items"); } catch (e) {}
@@ -1054,6 +1048,14 @@ function StaffAppInner() {
           </form>
         </div>
       </div>
+    );
+  }
+
+  if (passwordChangeRequired) {
+    return (
+      <StaffPasswordChange
+        onComplete={() => setStaffData((current) => current ? { ...current, mustChangePassword: false } : current)}
+      />
     );
   }
 
@@ -4401,40 +4403,259 @@ function ExpensesView({ C, isMobile, isOwner, waiterName }) {
 // ---------------------------------------------------------------------------
 // STAFF ATTENDANCE
 // ---------------------------------------------------------------------------
+function groupStaffAttendance(rows) {
+  const grouped = new Map();
+  rows.forEach((record) => {
+    const uid = record.uid || record.staffId;
+    if (!uid || !record.date) return;
+    const key = `${uid}_${record.date}`;
+    const group = grouped.get(key) || {
+      uid,
+      date: record.date,
+      name: record.name || "Staff",
+      role: record.role || "staff",
+      loginTimes: new Set(),
+      logoutTimes: new Set(),
+      isPresent: false,
+    };
+    if (record.name) group.name = record.name;
+    if (record.role) group.role = record.role;
+
+    const addTime = (set, value) => {
+      const timestamp = Number(value);
+      if (Number.isFinite(timestamp) && timestamp > 0) set.add(timestamp);
+    };
+    if (record.action === "login") addTime(group.loginTimes, record.at);
+    addTime(group.loginTimes, record.firstLoginAt);
+    addTime(group.loginTimes, record.lastSeen);
+    if (record.action === "logout") addTime(group.logoutTimes, record.at);
+    addTime(group.logoutTimes, record.lastLogoutAt);
+    if (record.action === "present" || record.action === "login" || record.action === "logout"
+      || record.firstLoginAt || record.lastSeen) group.isPresent = true;
+    grouped.set(key, group);
+  });
+
+  return [...grouped.values()].map((group) => ({
+    ...group,
+    loginTimes: [...group.loginTimes].sort((a, b) => a - b),
+    logoutTimes: [...group.logoutTimes].sort((a, b) => a - b),
+  }));
+}
+
+function attendanceTimeLabel(timestamp) {
+  return timestamp
+    ? new Date(timestamp).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })
+    : "—";
+}
+
 function AttendanceView({ C, isMobile, isOwner }) {
-  const [rows, setRows] = useState([]);
+  const [staffMembers, setStaffMembers] = useState([]);
+  const [todayRows, setTodayRows] = useState([]);
+  const [todayAttendanceRecords, setTodayAttendanceRecords] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [staffDetailsOpen, setStaffDetailsOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyDate, setHistoryDate] = useState(invDateKey());
+  const [historyStaffId, setHistoryStaffId] = useState("");
+  const [historyRows, setHistoryRows] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState("");
+  const today = invDateKey();
 
   useEffect(() => {
     if (!isOwner) { setLoading(false); return; }
-    const unsub = onSnapshot(query(collection(db, "staffAttendance"), orderBy("at", "desc"), limit(200)),
-      (s) => { setRows(s.docs.map((d) => ({ id: d.id, ...d.data() }))); setLoading(false); },
-      (error) => { console.error("Attendance records load failed:", error); setLoading(false); });
-    return () => unsub();
-  }, [isOwner]);
+    let staffLoaded = false;
+    let loginEventsLoaded = false;
+    let attendanceRecordsLoaded = false;
+    const updateLoading = () => setLoading(!staffLoaded || !loginEventsLoaded || !attendanceRecordsLoaded);
+    const unsubscribeStaff = onSnapshot(collection(db, "staff"), (snapshot) => {
+      setStaffMembers(snapshot.docs
+        .map((entry) => ({ id: entry.id, ...entry.data() }))
+        .sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id))));
+      staffLoaded = true;
+      updateLoading();
+    }, (error) => {
+      console.error("Attendance staff list load failed:", error);
+      setLoadError("Staff list load nahi hui.");
+      staffLoaded = true;
+      updateLoading();
+    });
+    const unsubscribeLoginEvents = onSnapshot(
+      query(collection(db, "staffAttendance"), where("date", "==", today)),
+      (snapshot) => {
+        setTodayRows(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() })));
+        loginEventsLoaded = true;
+        updateLoading();
+      },
+      (error) => {
+        console.error("Today's staff login events load failed:", error);
+        setLoadError("Aaj ke login events load nahi hue.");
+        loginEventsLoaded = true;
+        updateLoading();
+      },
+    );
+    const unsubscribeAttendance = onSnapshot(
+      query(collection(db, "attendance"), where("date", "==", today)),
+      (snapshot) => {
+        setTodayAttendanceRecords(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() })));
+        attendanceRecordsLoaded = true;
+        updateLoading();
+      },
+      (error) => {
+        console.error("Today's attendance status load failed:", error);
+        setLoadError("Aaj ka attendance status load nahi hua.");
+        attendanceRecordsLoaded = true;
+        updateLoading();
+      },
+    );
+    return () => {
+      unsubscribeStaff();
+      unsubscribeLoginEvents();
+      unsubscribeAttendance();
+    };
+  }, [isOwner, today]);
+
+  useEffect(() => {
+    if (!isOwner || !historyOpen) return undefined;
+    setHistoryLoading(true);
+    setHistoryError("");
+    const unsubscribe = onSnapshot(
+      query(collection(db, "staffAttendance"), where("date", "==", historyDate)),
+      (snapshot) => {
+        setHistoryRows(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() })));
+        setHistoryLoading(false);
+      },
+      (error) => {
+        console.error("Staff login history load failed:", error);
+        setHistoryError("Login history load nahi hui.");
+        setHistoryLoading(false);
+      },
+    );
+    return unsubscribe;
+  }, [historyDate, historyOpen, isOwner]);
+
+  const todayGroups = useMemo(
+    () => new Map(groupStaffAttendance(todayRows).map((group) => [group.uid, group])),
+    [todayRows],
+  );
+  const todayAttendanceByStaff = useMemo(() => {
+    const recordsByStaff = new Map();
+    todayAttendanceRecords.forEach((record) => {
+      const staffId = record.staffId || record.uid;
+      if (!staffId) return;
+      const current = recordsByStaff.get(staffId);
+      if (!current || record.id === `${staffId}_${today}`) recordsByStaff.set(staffId, record);
+    });
+    return recordsByStaff;
+  }, [today, todayAttendanceRecords]);
+  const filteredHistory = useMemo(
+    () => groupStaffAttendance(historyRows)
+      .filter((group) => !historyStaffId || group.uid === historyStaffId)
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    [historyRows, historyStaffId],
+  );
 
   if (!isOwner) return <div style={{ textAlign: "center", padding: 50, color: C.gray }}><div style={{ fontSize: 44 }}>🔒</div><div style={{ fontWeight: 800, marginTop: 8 }}>Staff payroll sirf owner dekh sakta hai</div></div>;
   return (
     <div>
-      <h2 style={{ margin: "0 0 14px", fontSize: isMobile ? 18 : 22, color: C.ink }}>Staff Attendance & Payroll</h2>
-      {loading && <div style={{ color: C.gray, textAlign: "center", padding: 30 }}>Attendance load ho rahi hai...</div>}
-      {!loading && rows.length === 0 && <div style={{ color: C.gray, textAlign: "center", padding: 30 }}>Abhi koi attendance record nahi</div>}
-      {rows.map((r) => {
-        const actionLabel = r.action === "present" ? "PRESENT" : r.action === "login" ? "LOGIN" : "LOGOUT";
-        const actionColor = r.action === "present" ? C.green : r.action === "login" ? C.blue : C.gray;
-        return (
-          <div key={r.id} style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 10, padding: 12, marginBottom: 8, display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontWeight: 800, color: C.ink, fontSize: 13 }}>{r.name || "Staff"} <span style={{ color: C.gray, fontWeight: 700 }}>({r.role || "staff"})</span></div>
-              <div style={{ color: C.gray, fontSize: 11, marginTop: 3 }}>{r.date || ""}{r.action === "present" && Number.isFinite(r.distanceMeters) ? ` · ${r.distanceMeters}m from restaurant` : ""}</div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+        <h2 style={{ margin: 0, fontSize: isMobile ? 18 : 22, color: C.ink }}>Staff Attendance & Payroll</h2>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button type="button" onClick={() => setStaffDetailsOpen(!staffDetailsOpen)}
+            aria-expanded={staffDetailsOpen}
+            style={{ background: C.cardAlt, color: C.ink, border: `1px solid ${C.line}`, borderRadius: 9, padding: "9px 13px", fontWeight: 800, cursor: "pointer" }}>
+            {staffDetailsOpen ? "✕ Hide Today's Staff" : "☰ Today's Staff"}
+          </button>
+          <button type="button" onClick={() => setHistoryOpen((open) => !open)}
+            aria-expanded={historyOpen}
+            style={{ background: C.cardAlt, color: C.ink, border: `1px solid ${C.line}`, borderRadius: 9, padding: "9px 13px", fontWeight: 800, cursor: "pointer" }}>
+            {historyOpen ? "✕ Close Login History" : "☰ Login History"}
+          </button>
+        </div>
+      </div>
+      <div
+        aria-hidden={!staffDetailsOpen}
+        style={{
+          display: "grid",
+          gridTemplateRows: staffDetailsOpen ? "1fr" : "0fr",
+          opacity: staffDetailsOpen ? 1 : 0,
+          transition: "grid-template-rows 260ms ease, opacity 180ms ease",
+          marginBottom: staffDetailsOpen ? 16 : 0,
+        }}
+      >
+        <div style={{ minHeight: 0, overflow: "hidden" }}>
+          {loadError && <div role="alert" style={{ color: C.red, marginBottom: 12 }}>{loadError}</div>}
+          {loading && <div style={{ color: C.gray, textAlign: "center", padding: 30 }}>Attendance load ho rahi hai...</div>}
+          {!loading && staffMembers.length === 0 && <div style={{ color: C.gray, textAlign: "center", padding: 30 }}>Koi staff member nahi mila</div>}
+          {!loading && staffMembers.length > 0 && (
+            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(260px, 1fr))", gap: 10, marginBottom: 16 }}>
+              {staffMembers.map((member) => {
+                const group = todayGroups.get(member.id);
+                const attendance = todayAttendanceByStaff.get(member.id);
+                const attendanceStatus = String(attendance?.status || "").toLowerCase();
+                const hasAttendanceStatus = ["present", "half day", "half-day", "absent", "paid leave", "leave"]
+                  .includes(attendanceStatus);
+                const present = hasAttendanceStatus
+                  ? ["present", "half day", "half-day"].includes(attendanceStatus)
+                  : Boolean(group?.isPresent);
+                return (
+                  <article key={member.id} style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 10, padding: 14 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ color: C.ink, fontSize: 14, fontWeight: 800 }}>{member.name || member.id.slice(0, 6)}</div>
+                        <div style={{ color: C.gray, fontSize: 12, marginTop: 3 }}>{member.role || "staff"}</div>
+                      </div>
+                      <span style={{ color: present ? C.green : C.red, background: present ? C.greenLight : C.redLight, borderRadius: 12, padding: "4px 9px", fontSize: 11, fontWeight: 900 }}>
+                        {present ? "Present" : "Absent"}
+                      </span>
+                    </div>
+                  </article>
+                );
+              })}
             </div>
-            <div style={{ textAlign: "right", flexShrink: 0 }}>
-              <div style={{ color: actionColor, fontWeight: 900, fontSize: 12 }}>{actionLabel}</div>
-              <div style={{ color: C.gray, fontSize: 11, marginTop: 3 }}>{r.at ? new Date(r.at).toLocaleTimeString("en-IN") : ""}</div>
-            </div>
+          )}
+        </div>
+      </div>
+      {historyOpen && (
+        <section style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: 14, marginBottom: 20 }}>
+          <h3 style={{ margin: "0 0 12px", color: C.ink, fontSize: 16 }}>Login History</h3>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10, marginBottom: 12 }}>
+            <label style={{ color: C.gray, fontSize: 11, fontWeight: 800 }}>
+              Date
+              <input type="date" value={historyDate} max={today} onChange={(event) => setHistoryDate(event.target.value)}
+                style={{ display: "block", width: "100%", boxSizing: "border-box", marginTop: 5, padding: 9, borderRadius: 8, border: `1px solid ${C.line}`, background: C.bg, color: C.ink }} />
+            </label>
+            <label style={{ color: C.gray, fontSize: 11, fontWeight: 800 }}>
+              Staff
+              <select value={historyStaffId} onChange={(event) => setHistoryStaffId(event.target.value)}
+                style={{ display: "block", width: "100%", boxSizing: "border-box", marginTop: 5, padding: 9, borderRadius: 8, border: `1px solid ${C.line}`, background: C.bg, color: C.ink }}>
+                <option value="">All staff</option>
+                {staffMembers.map((member) => <option key={member.id} value={member.id}>{member.name || member.id.slice(0, 6)}</option>)}
+              </select>
+            </label>
           </div>
-        );
-      })}
+          {historyError && <div role="alert" style={{ color: C.red, marginBottom: 10 }}>{historyError}</div>}
+          {historyLoading && <div style={{ color: C.gray, textAlign: "center", padding: 20 }}>History load ho rahi hai...</div>}
+          {!historyLoading && filteredHistory.length === 0 && <div style={{ color: C.gray, textAlign: "center", padding: 20 }}>Is date par koi login history nahi</div>}
+          {!historyLoading && filteredHistory.map((group) => (
+            <article key={`${group.uid}_${group.date}`} style={{ borderTop: `1px solid ${C.line}`, padding: "12px 0" }}>
+              <div style={{ color: C.ink, fontSize: 13, fontWeight: 800 }}>{group.name} <span style={{ color: C.gray }}>({group.role})</span></div>
+              {group.loginTimes.length > 0 && (
+                <div style={{ color: C.gray, fontSize: 12, marginTop: 6 }}>
+                  Login: {group.loginTimes.map(attendanceTimeLabel).join(" · ")}
+                </div>
+              )}
+              {group.logoutTimes.length > 0 && (
+                <div style={{ color: C.gray, fontSize: 12, marginTop: 4 }}>
+                  Logout: {group.logoutTimes.map(attendanceTimeLabel).join(" · ")}
+                </div>
+              )}
+              {!group.loginTimes.length && !group.logoutTimes.length && <div style={{ color: C.gray, fontSize: 12, marginTop: 6 }}>Present marked</div>}
+            </article>
+          ))}
+        </section>
+      )}
       <StaffPayroll C={C} isMobile={isMobile} />
     </div>
   );

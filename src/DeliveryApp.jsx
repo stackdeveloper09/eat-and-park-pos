@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { db, auth } from "./firebase";
 import { isDeliveryOrder } from "./lib/orderRules";
+import StaffPasswordChange from "./StaffPasswordChange";
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged, setPersistence, browserLocalPersistence } from "firebase/auth";
 import { collection, query, where, onSnapshot, doc, updateDoc, getDoc, limit } from "firebase/firestore";
 
@@ -78,6 +79,7 @@ const navStyle = (active, color) => ({
 
 export default function DeliveryApp() {
   const [user, setUser] = useState(null);
+  const [staff, setStaff] = useState(null);
   const [loading, setLoading] = useState(true);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -131,6 +133,7 @@ export default function DeliveryApp() {
     const unsub = onAuthStateChanged(auth, async (u) => {
       if (!u) {
         setUser(null);
+        setStaff(null);
         setLoading(false);
         setPage("orders");
         setMenuOpen(false);
@@ -142,13 +145,16 @@ export default function DeliveryApp() {
         const data = s.exists() ? s.data() : null;
         if (data && data.role === "delivery" && data.active !== false) {
           setUser(u);
+          setStaff(data);
           setLoginError("");
         } else {
+          setStaff(null);
           await signOut(auth);
           setLoginError("Ye account delivery boy ka nahi hai.");
         }
       } catch (e) {
         console.error("Delivery staff verify failed:", e);
+        setStaff(null);
         await signOut(auth).catch(() => {});
         setLoginError("Account verify nahi hua: " + (e.code || e.message));
       } finally {
@@ -160,7 +166,7 @@ export default function DeliveryApp() {
 
   // Fetch orders
   useEffect(() => {
-    if (!user) {
+    if (!user || staff?.mustChangePassword === true) {
       setActiveOrders([]);
       setServedOrders([]);
       setSelectedOrder(null);
@@ -224,7 +230,7 @@ export default function DeliveryApp() {
       alert("Orders load nahi ho rahe: " + (err.code || err.message));
     });
     return () => unsub();
-  }, [user]);
+  }, [staff?.mustChangePassword, user]);
 
   // Keep open modal in sync with live order data
   useEffect(() => {
@@ -296,6 +302,14 @@ export default function DeliveryApp() {
       setBusyId("");
     }
   };
+
+  if (staff?.mustChangePassword === true) {
+    return (
+      <StaffPasswordChange
+        onComplete={() => setStaff((current) => current ? { ...current, mustChangePassword: false } : current)}
+      />
+    );
+  }
 
   if (loading) {
     return <div style={{ padding: 50, textAlign: "center", color: "#fff", background: "#0B111A", minHeight: "100vh" }}>Loading...</div>;
