@@ -103,6 +103,19 @@ input:focus, textarea:focus { border-color: #B8860B !important; box-shadow: 0 0 
 ::-webkit-scrollbar-track { background: transparent; }
 .ep-noscroll { scrollbar-width: none; -ms-overflow-style: none; }
 .ep-noscroll::-webkit-scrollbar { display: none; }
+/* Order panel: keep the cart as the only scrolling region and let billing controls overlay it. */
+.ep-order-panel { min-height: 0; }
+.ep-order-items { flex: 1 1 auto; min-height: 480px; overflow-y: auto; overscroll-behavior: contain; }
+.ep-order-items-header { position: sticky; top: 0; z-index: 2; }
+.ep-order-billing-section { position: relative; z-index: 5; flex: 0 0 40px; margin: 0 8px; }
+.ep-order-billing-popover { position: absolute; bottom: calc(100% + 6px); left: 0; right: 0; max-height: 220px; overflow-y: auto; overscroll-behavior: contain; }
+.ep-order-payment-options { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
+.ep-order-payment-options button { min-width: 0; height: 38px; padding: 4px 2px; font-size: 11px; }
+.ep-order-footer { flex: 0 0 auto; position: sticky; bottom: 0; z-index: 3; }
+@media (max-width: 700px) {
+  .ep-order-items { min-height: 180px; }
+  .ep-order-billing-popover { max-height: 220px; }
+}
 @media (hover: hover) { .ep-card:hover { box-shadow: 0 8px 20px rgba(184,134,11,0.22) !important; border-color: #B8860B !important; transform: translateY(-1px); } }
 button:focus-visible, select:focus-visible { outline: 2px solid #B8860B; outline-offset: 2px; }
 ::selection { background: rgba(184,134,11,0.28); }
@@ -2829,25 +2842,26 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
           </div>
         </div>
 
-        <div style={{ position: "relative", background: C.card, border: `1px solid ${C.line}`, borderRadius: 16, boxShadow: "0 12px 32px rgba(0,0,0,0.16)", display: "flex", flexDirection: "column", overflow: "hidden", flexShrink: 0, width: isMobile ? "100%" : 420, minHeight: isMobile ? 400 : 0, height: isMobile ? undefined : "100%" }}>
-          <div style={{ padding: isMobile ? "12px 14px" : "10px 12px", borderBottom: `1px solid ${C.line}`, background: C.cardAlt, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        {/* Layout update: fixed panel header/footer, with the cart as the primary scroll area. */}
+        <div className="ep-order-panel" style={{ position: "relative", background: C.card, border: `1px solid ${C.line}`, borderRadius: 16, boxShadow: "0 12px 32px rgba(0,0,0,0.16)", display: "flex", flexDirection: "column", overflow: "hidden", flexShrink: 0, width: isMobile ? "100%" : 420, minHeight: isMobile ? 400 : 0, height: isMobile ? undefined : "100%" }}>
+          <div style={{ padding: isMobile ? "5px 8px" : "4px 8px", borderBottom: `1px solid ${C.line}`, background: C.cardAlt, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, minHeight: 38, boxSizing: "border-box" }}>
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontWeight: 900, fontSize: isMobile ? 14 : 16, color: C.ink, letterSpacing: 0.1 }}>{addMoreMode ? "Add items" : existingOrder ? "Checkout" : "New order"}</div>
-              <div style={{ marginTop: 3, fontSize: 11, color: C.gray, fontWeight: 700 }}>{table === "parcel" ? "Parcel" : "Table " + table} · {cartItems.length} {cartItems.length === 1 ? "item" : "items"}</div>
+              <div style={{ fontWeight: 900, fontSize: isMobile ? 13 : 14, color: C.ink, letterSpacing: 0.1 }}>{addMoreMode ? "Add items" : existingOrder ? "Checkout" : "New order"}</div>
+              <div style={{ marginTop: 2, fontSize: 10, color: C.gray, fontWeight: 700 }}>{table === "parcel" ? "Parcel" : "Table " + table} · {cartItems.length} {cartItems.length === 1 ? "item" : "items"}</div>
             </div>
             <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-              {!existingOrder && cartItems.length > 0 && <button onClick={() => { if (window.confirm("Poora cart khaali karein?")) { setCart({}); try { localStorage.removeItem("staff_draft_" + table); } catch (e) {} } }} style={{ padding: "7px 10px", border: `1px solid ${C.red}55`, borderRadius: 8, background: C.redLight, color: C.red, fontWeight: 800, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>Clear</button>}
-              {isOwner && <button onClick={() => setAddMenuOpen(true)} style={{ padding: "7px 10px", border: "none", borderRadius: 8, background: C.green, color: "#fff", fontWeight: 800, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>+ Menu</button>}
+              {!existingOrder && cartItems.length > 0 && <button onClick={() => { if (window.confirm("Poora cart khaali karein?")) { setCart({}); try { localStorage.removeItem("staff_draft_" + table); } catch (e) {} } }} style={{ padding: "6px 8px", border: `1px solid ${C.red}55`, borderRadius: 7, background: C.redLight, color: C.red, fontWeight: 800, fontSize: 10, cursor: "pointer", fontFamily: "inherit" }}>Clear</button>}
+              {isOwner && <button onClick={() => setAddMenuOpen(true)} style={{ padding: "6px 8px", border: "none", borderRadius: 7, background: C.green, color: "#fff", fontWeight: 800, fontSize: 10, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>+ Menu</button>}
             </div>
           </div>
-                    <div style={{ flex: isMobile ? "none" : "0 1 28%", overflowY: isMobile ? "visible" : "auto", minHeight: isMobile ? 0 : 70, maxHeight: isMobile ? "none" : "32%" }}>
+          <div className="ep-order-items" style={{ minHeight: isMobile ? 180 : existingOrder && !addMoreMode ? 140 : 480 }}>
             {cartItems.length === 0 && <div style={{ textAlign: "center", padding: "40px 20px", color: C.gray, fontSize: 13, fontWeight: 700 }}><div style={{ fontSize: 40, marginBottom: 8, opacity: 0.5 }}>🧾</div>Menu se item tap karo</div>}
             {cartItems.length > 0 && (
-              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", background: C.cardAlt, borderBottom: "1px solid " + C.line, fontSize: 10, fontWeight: 800, color: C.gray, letterSpacing: 0.5, textTransform: "uppercase" }}>
+              <div className="ep-order-items-header" style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", background: C.cardAlt, borderBottom: "1px solid " + C.line, fontSize: 10, fontWeight: 800, color: C.gray, letterSpacing: 0.5, textTransform: "uppercase" }}>
                 <div style={{ flex: 1 }}>Item</div>
-                <div style={{ width: 84, textAlign: "center" }}>Qty</div>
-                <div style={{ width: 64, textAlign: "right" }}>Amount</div>
-                <div style={{ width: 16 }} />
+                <div style={{ width: 82, textAlign: "center" }}>Qty</div>
+                <div style={{ width: 62, textAlign: "right" }}>Amount</div>
+                <div style={{ width: 18 }} />
               </div>
             )}
             {cartItems.map(([id, q]) => {
@@ -2856,133 +2870,106 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
               const existingQty = existingItems.filter(e => e.itemId === id).reduce((s, e) => s + e.qty, 0);
               const isNew = !!existingOrder && !addMoreMode && existingQty === 0;
               return (
-                <div key={id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", borderBottom: "1px dashed " + C.line, background: isNew ? C.greenLight : "transparent" }}>
+                <div key={id} style={{ display: "flex", alignItems: "center", gap: 6, minHeight: 44, boxSizing: "border-box", padding: "4px 8px", borderBottom: "1px dashed " + C.line, background: isNew ? C.greenLight : "transparent" }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: C.ink, lineHeight: 1.25 }}>
+                    <div style={{ fontSize: 14, fontWeight: 800, color: C.ink, lineHeight: 1.2 }}>
                       {m.name}{m.portion ? " (" + m.portion + ")" : ""}
                       {isNew && <span style={{ marginLeft: 6, background: C.green, color: "#fff", fontSize: 8, padding: "1px 5px", borderRadius: 3, fontWeight: 800, verticalAlign: "middle" }}>NEW</span>}
                     </div>
-                    <div style={{ fontSize: 11, color: C.gray, marginTop: 2, fontFamily: "monospace", cursor: "pointer", textDecoration: "underline dotted" }} onClick={() => editRate(id, rates[id] ?? m.price, m.name)}>✎ {inr(rates[id] ?? m.price)} x {q}</div>
+                    <div style={{ fontSize: 11, color: C.gray, marginTop: 1, fontFamily: "monospace", cursor: "pointer", textDecoration: "underline dotted", lineHeight: 1.1 }} onClick={() => editRate(id, rates[id] ?? m.price, m.name)}>✎ {inr(rates[id] ?? m.price)} x {q}</div>
                   </div>
-                  <div style={{ display: "flex", alignItems: "center", width: 84, justifyContent: "center", border: "1px solid " + C.line, borderRadius: 6, overflow: "hidden", flexShrink: 0 }}>
-                    <button onClick={() => setQty(id, q - 1)} style={{ width: 26, height: 26, border: "none", background: C.cardAlt, color: C.ink, fontSize: 15, fontWeight: 900, cursor: "pointer", padding: 0 }}>-</button>
-                    <QtyInput value={q} onCommit={(v) => setQty(id, v)} style={{ flex: 1, width: "100%", minWidth: 30, textAlign: "center", fontWeight: 900, fontSize: 13, color: C.ink, border: "none", background: "transparent", outline: "none", fontFamily: "monospace" }} />
-                    <button onClick={() => setQty(id, q + 1)} style={{ width: 26, height: 26, border: "none", background: C.goldLight, color: C.goldText, fontSize: 15, fontWeight: 900, cursor: "pointer", padding: 0 }}>+</button>
+                  <div style={{ display: "flex", alignItems: "center", width: 82, justifyContent: "center", border: "1px solid " + C.line, borderRadius: 6, overflow: "hidden", flexShrink: 0 }}>
+                    <button onClick={() => setQty(id, q - 1)} style={{ width: 28, height: 28, flexShrink: 0, border: "none", background: C.cardAlt, color: C.ink, fontSize: 15, fontWeight: 900, cursor: "pointer", padding: 0 }}>-</button>
+                    <QtyInput value={q} onCommit={(v) => setQty(id, v)} style={{ flex: 1, width: "100%", minWidth: 24, textAlign: "center", fontWeight: 900, fontSize: 13, color: C.ink, border: "none", background: "transparent", outline: "none", fontFamily: "monospace" }} />
+                    <button onClick={() => setQty(id, q + 1)} style={{ width: 28, height: 28, flexShrink: 0, border: "none", background: C.goldLight, color: C.goldText, fontSize: 15, fontWeight: 900, cursor: "pointer", padding: 0 }}>+</button>
                   </div>
-                  <div style={{ width: 64, textAlign: "right", fontWeight: 800, fontSize: 13, color: C.ink, fontFamily: "monospace", flexShrink: 0 }}>{inr((rates[id] ?? m.price) * (Number(q) || 0))}</div>
-                  <button onClick={() => setQty(id, 0)} style={{ width: 16, background: "transparent", border: "none", color: C.gray, fontSize: 13, cursor: "pointer", padding: 0, flexShrink: 0 }}>x</button>
+                  <div style={{ width: 62, textAlign: "right", fontWeight: 800, fontSize: 13, color: C.ink, fontFamily: "monospace", flexShrink: 0 }}>{inr((rates[id] ?? m.price) * (Number(q) || 0))}</div>
+                  <button aria-label={`Remove ${m.name}`} onClick={() => setQty(id, 0)} style={{ width: 18, background: "transparent", border: "none", color: C.gray, fontSize: 13, cursor: "pointer", padding: 0, flexShrink: 0 }}>x</button>
                 </div>
               );
             })}
           </div>
-<div style={{ borderTop: `2px solid ${C.line}`, padding: isMobile ? 10 : 8, background: C.light, overflowY: isMobile ? "visible" : "auto", maxHeight: isMobile ? "none" : "none", minHeight: 0, flex: isMobile ? "none" : "1 1 auto" }}>
-            {!addMoreMode && (
-              <button onClick={() => setShowAdj((v) => !v)} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 10px", marginBottom: 8, border: "1px solid " + C.line, borderRadius: 8, background: C.card, color: C.ink, fontWeight: 700, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
-                <span>Disc {discount}% - GST {gstRate ? gstRate + "%" : "No"} - {String(payMode).toUpperCase()}</span>
-                <span style={{ color: C.gray }}>{showAdj ? "▲ Band" : "▼ Badlo"}</span>
+          {/* This 40px accordion row stays compact; its expanded content overlays the cart. */}
+          {!addMoreMode && (
+            <div className="ep-order-billing-section">
+              <button type="button" aria-expanded={showAdj} onClick={() => setShowAdj((v) => !v)} style={{ width: "100%", height: 40, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 10px", border: `1px solid ${C.line}`, borderRadius: 8, background: C.cardAlt, color: C.ink, fontWeight: 800, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
+                <span>Billing &amp; Customer details</span><span style={{ color: C.gray }}>{showAdj ? "▲" : "▼"}</span>
               </button>
-            )}
-            {!addMoreMode && (
-              <div style={{ display: showAdj ? "flex" : "none", gap: 6, marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
+              {showAdj && <div className="ep-order-billing-popover" style={{ padding: 8, border: `1px solid ${C.line}`, borderRadius: 10, background: C.light, boxShadow: "0 10px 28px rgba(0,0,0,0.35)" }}>
+              <div style={{ display: "flex", gap: 6, marginBottom: 7, flexWrap: "wrap", alignItems: "center" }}>
                 <span style={{ fontSize: 10, color: C.gray, fontWeight: 800, minWidth: 38 }}>DISC</span>
-                {[0,5,10,20].map(d => <button key={d} onClick={() => (isOwner ? setDiscount(d) : toast("Discount sirf owner de sakta hai", "warning"))} style={{ padding: "3px 8px", borderRadius: 4, border: `1px solid ${discount === d ? C.green : C.line}`, background: discount === d ? C.greenLight : C.card, color: discount === d ? C.green : C.ink, fontWeight: 700, fontSize: 10, cursor: "pointer", fontFamily: "inherit" }}>{d === 0 ? "0" : `${d}%`}</button>)}
-                <input type="number" min={0} max={100} disabled={!isOwner} value={discount || ""} onChange={e => setDiscount(Math.min(100, Math.max(0, Number(e.target.value) || 0)))} placeholder="%" style={{ width: 44, padding: "3px 6px", border: `1px solid ${C.line}`, borderRadius: 4, fontSize: 10, background: C.card, color: C.ink, fontWeight: 700, textAlign: "center", outline: "none" }} />
+                {[0,5,10,20].map(d => <button key={d} onClick={() => (isOwner ? setDiscount(d) : toast("Discount sirf owner de sakta hai", "warning"))} style={{ padding: "4px 8px", borderRadius: 5, border: `1px solid ${discount === d ? C.green : C.line}`, background: discount === d ? C.greenLight : C.card, color: discount === d ? C.green : C.ink, fontWeight: 700, fontSize: 10, cursor: "pointer", fontFamily: "inherit" }}>{d === 0 ? "0" : `${d}%`}</button>)}
+                <input type="number" min={0} max={100} disabled={!isOwner} value={discount || ""} onChange={e => setDiscount(Math.min(100, Math.max(0, Number(e.target.value) || 0)))} placeholder="%" style={{ width: 48, padding: "4px 6px", border: `1px solid ${C.line}`, borderRadius: 5, fontSize: 11, background: C.card, color: C.ink, fontWeight: 700, textAlign: "center", outline: "none" }} />
               </div>
-            )}
-            {!addMoreMode && (
-              <div style={{ display: showAdj ? "flex" : "none", gap: 6, marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <div style={{ display: "flex", gap: 6, marginBottom: 7, flexWrap: "wrap", alignItems: "center" }}>
                 <span style={{ fontSize: 10, color: C.gray, fontWeight: 800, minWidth: 38 }}>GST</span>
-                {[0,5,12,18].map(g => <button key={g} onClick={() => setGstRate(g)} style={{ padding: "3px 8px", borderRadius: 4, border: `1px solid ${gstRate === g ? C.gold : C.line}`, background: gstRate === g ? C.redLight : C.card, color: gstRate === g ? C.gold : C.ink, fontWeight: 700, fontSize: 10, cursor: "pointer", fontFamily: "inherit" }}>{g === 0 ? "No" : `${g}%`}</button>)}
+                {[0,5,12,18].map(g => <button key={g} onClick={() => setGstRate(g)} style={{ padding: "4px 8px", borderRadius: 5, border: `1px solid ${gstRate === g ? C.gold : C.line}`, background: gstRate === g ? C.redLight : C.card, color: gstRate === g ? C.gold : C.ink, fontWeight: 700, fontSize: 10, cursor: "pointer", fontFamily: "inherit" }}>{g === 0 ? "No" : `${g}%`}</button>)}
               </div>
-            )}
-            {!addMoreMode && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 12 }}>
-                <div style={{ padding: isMobile ? 12 : 8, background: C.cardAlt, border: `1px solid ${C.line}`, borderRadius: 10 }}>
-                  <div style={{ fontSize: 10, color: C.gray, fontWeight: 900, letterSpacing: 0.8, marginBottom: 8 }}>CUSTOMER DETAILS <span style={{ fontWeight: 600, letterSpacing: 0, textTransform: "none" }}>· Optional</span></div>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <input aria-label="Customer name" placeholder="Customer name" value={custName} onChange={e => setCustName(e.target.value)} style={{ minWidth: 0, flex: 1, boxSizing: "border-box", padding: "10px 11px", border: `1px solid ${C.line}`, borderRadius: 8, fontSize: 12, background: C.card, color: C.ink, outline: "none" }} />
-                    <input aria-label="Customer phone number" placeholder="Phone number" value={custPhone} onChange={e => setCustPhone(e.target.value)} type="tel" style={{ minWidth: 0, flex: 1, boxSizing: "border-box", padding: "10px 11px", border: `1px solid ${C.line}`, borderRadius: 8, fontSize: 12, background: C.card, color: C.ink, outline: "none" }} />
-                  </div>
-                  {table === "parcel" && (
-                    <input aria-label="Delivery address" placeholder="Delivery address" value={custAddress} onChange={e => setCustAddress(e.target.value)} style={{ width: "100%", boxSizing: "border-box", marginTop: 8, padding: "10px 11px", border: `1px solid ${C.line}`, borderRadius: 8, fontSize: 12, background: C.card, color: C.ink, outline: "none" }} />
-                  )}
-                </div>
-                <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontSize: 11, color: C.gray, fontWeight: 800 }}>
-                  Cash discount
-                  <input aria-label="Cash discount" type="number" min={0} max={grossSub - discAmt + gstAmt} value={cashDiscount || ""} onChange={e => setCashDiscount(Math.min(grossSub - discAmt + gstAmt, Math.max(0, Number(e.target.value) || 0)))} placeholder="₹" style={{ width: 82, padding: "8px 9px", border: `1px solid ${C.line}`, borderRadius: 7, fontSize: 12, background: C.card, color: C.ink, fontWeight: 700, outline: "none" }} />
-                </label>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-                    <div>
-                      <div style={{ fontSize: 12, fontWeight: 800, color: C.ink }}>Payment method</div>
-                      <div style={{ fontSize: 10, color: C.gray, marginTop: 2 }}>Choose how the customer pays</div>
-                    </div>
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 5 }}>
-                    {[["cash", "Cash", "₹"], ["upi", "UPI", "↗"], ["card", "Card", "▤"], ["due", "Due", "◷"], ["split", "Split", "⇄"]].map(([id, label, icon]) => (
-                      <button key={id} type="button" aria-pressed={payMode === id} onClick={() => { if (id === "split" && payMode !== "split") setSplitCash(String(totalAmount)); if (id === "cash") setCashReceived(""); setPayMode(id); }} style={{ minHeight: 38, display: "flex", alignItems: "center", justifyContent: "center", gap: 4, padding: "6px 4px", borderRadius: 8, border: `1px solid ${payMode === id ? C.gold : C.line}`, background: payMode === id ? C.goldLight : C.card, color: payMode === id ? C.goldText : C.ink, fontWeight: 800, fontSize: 10, cursor: "pointer", fontFamily: "inherit", boxShadow: payMode === id ? `inset 0 0 0 1px ${C.gold}` : "none" }}>
-                        <span aria-hidden="true" style={{ fontSize: 14 }}>{icon}</span>{label}
-                      </button>
-                    ))}
-                  </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+              <div style={{ display: "flex", gap: 6 }}>
+                <input aria-label="Customer name" placeholder="Customer name" value={custName} onChange={e => setCustName(e.target.value)} style={{ minWidth: 0, flex: 1, height: 34, boxSizing: "border-box", padding: "6px 9px", border: `1px solid ${C.line}`, borderRadius: 7, fontSize: 13, background: C.card, color: C.ink, outline: "none" }} />
+                <input aria-label="Customer phone number" placeholder="Phone number" value={custPhone} onChange={e => setCustPhone(e.target.value)} type="tel" style={{ minWidth: 0, flex: 1, height: 34, boxSizing: "border-box", padding: "6px 9px", border: `1px solid ${C.line}`, borderRadius: 7, fontSize: 13, background: C.card, color: C.ink, outline: "none" }} />
+              </div>
+              {table === "parcel" && <input aria-label="Delivery address" placeholder="Delivery address" value={custAddress} onChange={e => setCustAddress(e.target.value)} style={{ width: "100%", height: 34, boxSizing: "border-box", padding: "6px 9px", border: `1px solid ${C.line}`, borderRadius: 7, fontSize: 13, background: C.card, color: C.ink, outline: "none" }} />}
+              <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontSize: 11, color: C.gray, fontWeight: 800 }}>
+                Cash discount
+                <input aria-label="Cash discount" type="number" min={0} max={grossSub - discAmt + gstAmt} value={cashDiscount || ""} onChange={e => setCashDiscount(Math.min(grossSub - discAmt + gstAmt, Math.max(0, Number(e.target.value) || 0)))} placeholder="₹" style={{ width: 82, height: 34, boxSizing: "border-box", padding: "6px 9px", border: `1px solid ${C.line}`, borderRadius: 7, fontSize: 13, background: C.card, color: C.ink, fontWeight: 700, outline: "none" }} />
+              </label>
+              <div className="ep-order-payment-options" aria-label="Payment method">
+                {[["cash", "Cash"], ["upi", "UPI"], ["card", "Card"], ["split", "Split"], ["due", "Due/Part"]].map(([id, label]) => (
+                  <button key={id} type="button" aria-pressed={payMode === id} onClick={() => { if (id === "split" && payMode !== "split") setSplitCash(String(totalAmount)); if (id === "due") { setSplitCash("0"); setPartialOnline("0"); } if (id === "cash") setCashReceived(""); setPayMode(id); }} style={{ borderRadius: 7, border: `1px solid ${payMode === id ? C.gold : C.line}`, background: payMode === id ? C.goldLight : C.card, color: payMode === id ? C.goldText : C.ink, fontWeight: 800, cursor: "pointer", fontFamily: "inherit", boxShadow: payMode === id ? `inset 0 0 0 1px ${C.gold}` : "none" }}>{label}</button>
+                ))}
+              </div>
                   {payMode === "cash" && (
-                    <div style={{ padding: 10, border: `1px solid ${C.line}`, borderRadius: 9, background: C.cardAlt }}>
+                    <div style={{ padding: 7, border: `1px solid ${C.line}`, borderRadius: 8, background: C.cardAlt }}>
                       <label style={{ display: "block", fontSize: 10, color: C.gray, fontWeight: 800 }}>CASH RECEIVED
-                        <input aria-label="Cash received" type="number" min={0} value={cashReceived} onChange={e => setCashReceived(e.target.value)} placeholder={String(totalAmount)} style={{ display: "block", width: "100%", boxSizing: "border-box", marginTop: 5, padding: "9px 10px", border: `1px solid ${C.line}`, borderRadius: 7, fontSize: 14, fontWeight: 800, background: C.card, color: C.ink }} />
+                        <input aria-label="Cash received" type="number" min={0} value={cashReceived} onChange={e => setCashReceived(e.target.value)} placeholder={String(totalAmount)} style={{ display: "block", width: "100%", height: 34, boxSizing: "border-box", marginTop: 4, padding: "6px 9px", border: `1px solid ${C.line}`, borderRadius: 7, fontSize: 13, fontWeight: 800, background: C.card, color: C.ink }} />
                       </label>
-                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+                      <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 6 }}>
                         {cashSuggestions.map((amount, index) => <button key={`${amount}-${index}`} type="button" onClick={() => setCashReceived(String(amount))} style={{ padding: "5px 9px", border: `1px solid ${C.line}`, borderRadius: 7, background: C.card, color: C.ink, fontWeight: 700, fontSize: 10, cursor: "pointer" }}>{index === 0 ? "Exact" : inr(amount)}</button>)}
                       </div>
-                      {cashBalance !== null && Number.isFinite(cashBalance) && <div aria-live="polite" style={{ marginTop: 8, fontSize: 12, fontWeight: 800, color: cashBalance >= 0 ? C.green : C.amber }}>{cashBalance >= 0 ? `Change to return: ${inr(cashBalance)}` : `Still due: ${inr(Math.abs(cashBalance))}`}</div>}
+                      {cashBalance !== null && Number.isFinite(cashBalance) && <div aria-live="polite" style={{ marginTop: 5, fontSize: 11, fontWeight: 800, color: cashBalance >= 0 ? C.green : C.amber }}>{cashBalance >= 0 ? `Change to return: ${inr(cashBalance)}` : `Still due: ${inr(Math.abs(cashBalance))}`}</div>}
                     </div>
                   )}
                   {payMode === "split" && (
-                    <div style={{ display: "flex", gap: 8, alignItems: "center", background: C.cardAlt, padding: 10, borderRadius: 9, border: `1px solid ${C.line}` }}>
+                    <div style={{ display: "flex", gap: 7, alignItems: "center", background: C.cardAlt, padding: 7, borderRadius: 8, border: `1px solid ${C.line}` }}>
                       <label style={{ flex: 1, minWidth: 0, fontSize: 10, color: C.gray, fontWeight: 800 }}>Cash
-                        <input aria-label="Cash portion" type="number" min={0} max={totalAmount} value={splitAmounts.cash} onChange={e => setSplitCash(e.target.value)} placeholder="₹" style={{ display: "block", width: "100%", boxSizing: "border-box", marginTop: 5, padding: "8px 9px", border: `1px solid ${C.line}`, borderRadius: 7, fontSize: 12, fontWeight: 700, background: C.card, color: C.ink }} />
+                        <input aria-label="Cash portion" type="number" min={0} max={totalAmount} value={splitAmounts.cash} onChange={e => setSplitCash(e.target.value)} placeholder="₹" style={{ display: "block", width: "100%", height: 34, boxSizing: "border-box", marginTop: 4, padding: "6px 8px", border: `1px solid ${C.line}`, borderRadius: 7, fontSize: 13, fontWeight: 700, background: C.card, color: C.ink }} />
                       </label>
                       <label style={{ flex: 1, minWidth: 0, fontSize: 10, color: C.gray, fontWeight: 800 }}>UPI / Online
-                        <input aria-label="UPI or online portion" type="number" min={0} max={totalAmount} value={splitAmounts.online} onChange={e => { const online = Math.min(totalAmount, Math.max(0, Number(e.target.value) || 0)); setSplitCash(String(totalAmount - online)); }} placeholder="₹" style={{ display: "block", width: "100%", boxSizing: "border-box", marginTop: 5, padding: "8px 9px", border: `1px solid ${C.line}`, borderRadius: 7, fontSize: 12, fontWeight: 700, background: C.card, color: C.ink }} />
+                        <input aria-label="UPI or online portion" type="number" min={0} max={totalAmount} value={splitAmounts.online} onChange={e => { const online = Math.min(totalAmount, Math.max(0, Number(e.target.value) || 0)); setSplitCash(String(totalAmount - online)); }} placeholder="₹" style={{ display: "block", width: "100%", height: 34, boxSizing: "border-box", marginTop: 4, padding: "6px 8px", border: `1px solid ${C.line}`, borderRadius: 7, fontSize: 13, fontWeight: 700, background: C.card, color: C.ink }} />
                       </label>
                     </div>
                   )}
-                </div>
-              </div>
-            )}
-
-            <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 10, padding: "10px 12px", marginBottom: 8 }}>
-              {addMoreMode && <>
-                <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 12 }}><span style={{ color: C.gray }}>Running ({existingItems.length})</span><span style={{ fontWeight: 700, fontFamily: "monospace", color: C.ink }}>{inr(existingSubtotal)}</span></div>
-                <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 12, color: C.green }}><span>New ({cartItems.length})</span><span style={{ fontFamily: "monospace", fontWeight: 700 }}>+{inr(cartSubtotal)}</span></div>
-              </>}
-              {!addMoreMode && <>
-                <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 12 }}><span style={{ color: C.gray }}>Subtotal</span><span style={{ fontWeight: 700, fontFamily: "monospace", color: C.ink }}>{inr(grossSub)}</span></div>
-                {discount > 0 && <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 12, color: C.green }}><span>Discount ({discount}%)</span><span style={{ fontFamily: "monospace" }}>-{inr(discAmt)}</span></div>}
-                {gstRate > 0 && <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 12, color: C.red }}><span>GST ({gstRate}%)</span><span style={{ fontFamily: "monospace" }}>+{inr(gstAmt)}</span></div>}
-                {cashDiscount > 0 && <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 12, color: C.green }}><span>Cash discount</span><span style={{ fontFamily: "monospace" }}>-{inr(cashDiscount)}</span></div>}
-              </>}
-            </div>
-            <div style={{ background: `linear-gradient(135deg, ${C.gold} 0%, ${C.goldDark} 100%)`, borderRadius: 11, padding: "13px 15px", display: "flex", justifyContent: "space-between", alignItems: "center", boxShadow: `0 6px 16px ${C.gold}35` }}>
-              <div><div style={{ color: "rgba(255,255,255,0.78)", fontSize: 10, fontWeight: 800, letterSpacing: 1 }}>AMOUNT DUE</div><div style={{ color: "#fff", fontSize: 12, fontWeight: 700, marginTop: 2 }}>Total</div></div>
-              <span style={{ color: "#fff", fontSize: 23, fontWeight: 900, fontFamily: "monospace" }}>{inr(addMoreMode ? grossSub : totalAmount)}</span>
-            </div>
-            <div style={{ position: "sticky", zIndex: 2, bottom: 0, padding: "8px 0 0", background: C.light, borderTop: `1px solid ${C.line}`, boxShadow: "0 -8px 18px rgba(0,0,0,0.12)" }}>
-            {!addMoreMode && (
-              <>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 5, marginBottom: 6 }}>
-                  {[["cash", "Cash"], ["upi", "UPI"], ["split", "Split"], ["due", "Due / Part"]].map(([id, label]) => (
-                    <button key={id} type="button" onClick={() => { if (id === "split") setSplitCash(String(totalAmount)); if (id === "due") { setSplitCash("0"); setPartialOnline("0"); } setPayMode(id); }} style={{ padding: "7px 3px", borderRadius: 7, border: `1px solid ${payMode === id ? C.gold : C.line}`, background: payMode === id ? C.goldLight : C.card, color: payMode === id ? C.goldText : C.ink, fontWeight: 800, fontSize: 10, cursor: "pointer", fontFamily: "inherit" }}>{label}</button>
-                  ))}
-                </div>
-                {payMode === "due" && (
-                  <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6 }}>
-                    <input aria-label="Partial cash received" type="number" min={0} max={totalAmount} value={splitCash} onChange={e => setSplitCash(e.target.value)} placeholder="Cash received" style={{ width: "50%", boxSizing: "border-box", padding: "8px", border: `1px solid ${C.line}`, borderRadius: 7, background: C.card, color: C.ink, fontSize: 11, fontWeight: 800 }} />
-                    <input aria-label="Partial online received" type="number" min={0} max={totalAmount} value={partialOnline} onChange={e => setPartialOnline(e.target.value)} placeholder="Online received" style={{ width: "50%", boxSizing: "border-box", padding: "8px", border: `1px solid ${C.line}`, borderRadius: 7, background: C.card, color: C.ink, fontSize: 11, fontWeight: 800 }} />
+              {payMode === "due" && (
+                <div>
+                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <input aria-label="Partial cash received" type="number" min={0} max={totalAmount} value={splitCash} onChange={e => setSplitCash(e.target.value)} placeholder="Cash received" style={{ width: "50%", height: 34, boxSizing: "border-box", padding: "6px 8px", border: `1px solid ${C.line}`, borderRadius: 7, background: C.card, color: C.ink, fontSize: 13, fontWeight: 700 }} />
+                    <input aria-label="Partial online received" type="number" min={0} max={totalAmount} value={partialOnline} onChange={e => setPartialOnline(e.target.value)} placeholder="Online received" style={{ width: "50%", height: 34, boxSizing: "border-box", padding: "6px 8px", border: `1px solid ${C.line}`, borderRadius: 7, background: C.card, color: C.ink, fontSize: 13, fontWeight: 700 }} />
                   </div>
-                )}
-                {payMode === "due" && <div style={{ fontSize: 11, color: C.amber, fontWeight: 900, marginBottom: 5, textAlign: "right" }}>Received {inr(partialAmounts.received)} · Due {inr(partialAmounts.due)}</div>}
-              </>
-            )}
+                  <div style={{ marginTop: 4, fontSize: 11, color: C.amber, fontWeight: 900, textAlign: "right" }}>Received {inr(partialAmounts.received)} · Due {inr(partialAmounts.due)}</div>
+                </div>
+              )}
+            </div>
+              </div>}
+            </div>
+          )}
+
+          {/* Fixed footer keeps totals and the order action visible without scrolling the panel. */}
+          <div className="ep-order-footer" style={{ padding: "4px 8px", background: C.light, borderTop: `1px solid ${C.line}`, boxShadow: "0 -6px 14px rgba(0,0,0,0.16)" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: existingOrder && !addMoreMode ? 6 : 0 }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
+                  {!addMoreMode && <span style={{ fontSize: 10, color: C.gray, fontWeight: 700 }}>Subtotal {inr(grossSub)}</span>}
+                  {addMoreMode && <span style={{ fontSize: 10, color: C.gray, fontWeight: 700 }}>Running {inr(existingSubtotal)} · New +{inr(cartSubtotal)}</span>}
+                  <strong style={{ color: C.ink, fontSize: 14 }}>Total {inr(addMoreMode ? grossSub : totalAmount)}</strong>
+                </div>
+                {!addMoreMode && (discount > 0 || gstRate > 0 || cashDiscount > 0) && <div style={{ marginTop: 2, fontSize: 9, color: C.gray }}>Discount {inr(discAmt)} · GST {inr(gstAmt)} · Cash discount {inr(cashDiscount)}</div>}
+              </div>
+              {(!existingOrder || addMoreMode) && (
+                <button onClick={handlePlaceOrder} disabled={cartItems.length === 0 || placing} style={{ minWidth: 132, height: 48, padding: "8px 12px", border: "none", borderRadius: 9, background: cartItems.length === 0 ? C.line : `linear-gradient(135deg, ${addMoreMode ? C.green : C.gold} 0%, ${addMoreMode ? "#15803D" : C.goldDark} 100%)`, color: cartItems.length === 0 ? C.gray : "#fff", fontWeight: 900, fontSize: 14, cursor: cartItems.length === 0 ? "not-allowed" : "pointer", fontFamily: "inherit", boxShadow: cartItems.length === 0 ? "none" : `0 5px 14px ${C.gold}35`, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, flexShrink: 0 }}>{placing ? <><Spinner /> {addMoreMode ? "Adding..." : "Placing..."}</> : addMoreMode ? "Add to Running KOT" : "Send KOT"}</button>
+              )}
+            </div>
             {existingOrder && !addMoreMode && (
               <div style={{ marginTop: 0 }}>
                 {existingOrder.paid && <div style={{ padding: 8, borderRadius: 6, background: C.greenLight, color: C.green, fontWeight: 900, fontSize: 12, textAlign: "center", border: "1px solid " + C.green, marginBottom: 6 }}>PAID</div>}
@@ -3002,13 +2989,6 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
                 )}
               </div>
             )}
-            {addMoreMode && (
-              <button onClick={handlePlaceOrder} disabled={cartItems.length === 0 || placing} style={{ width: "100%", padding: 10, marginTop: 8, border: "none", borderRadius: 10, background: cartItems.length === 0 ? C.line : `linear-gradient(135deg, ${C.green} 0%, #15803D 100%)`, color: cartItems.length === 0 ? C.gray : "#fff", fontWeight: 800, fontSize: 14, cursor: cartItems.length === 0 ? "not-allowed" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>{placing ? <><Spinner /> Adding...</> : "Add Items to Running KOT"}</button>
-            )}
-            {!existingOrder && (
-              <button onClick={handlePlaceOrder} disabled={cartItems.length === 0 || placing} style={{ width: "100%", padding: 10, marginTop: 8, border: "none", borderRadius: 10, background: cartItems.length === 0 ? C.line : `linear-gradient(135deg, ${C.gold} 0%, ${C.goldDark} 100%)`, color: cartItems.length === 0 ? C.gray : "#fff", fontWeight: 800, fontSize: 14, cursor: cartItems.length === 0 ? "not-allowed" : "pointer", fontFamily: "inherit", boxShadow: cartItems.length === 0 ? "none" : `0 6px 16px ${C.gold}40`, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>{placing ? <><Spinner /> Placing...</> : "Send KOT"}</button>
-            )}
-            </div>
           </div>
         </div>
       </div>
