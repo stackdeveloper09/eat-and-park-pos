@@ -103,18 +103,30 @@ input:focus, textarea:focus { border-color: #B8860B !important; box-shadow: 0 0 
 ::-webkit-scrollbar-track { background: transparent; }
 .ep-noscroll { scrollbar-width: none; -ms-overflow-style: none; }
 .ep-noscroll::-webkit-scrollbar { display: none; }
-/* Order panel: keep the cart as the only scrolling region and let billing controls overlay it. */
-.ep-order-panel { min-height: 0; }
-.ep-order-items { flex: 1 1 auto; min-height: 480px; overflow-y: auto; overscroll-behavior: contain; }
+/* Order entry uses independent scroll areas for the menu grid and the cart only. */
+.ep-billing-layout { flex: 1 1 auto; min-height: 0; display: flex; gap: 8px; overflow: hidden; padding: 2px; box-sizing: border-box; }
+.ep-billing-menu-column { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 6px; overflow: hidden; }
+.ep-menu-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; flex: 1 1 auto; min-height: 0; overflow-y: auto; align-content: start; padding: 0 2px 2px 0; }
+.ep-order-panel { flex: 0 0 432px; min-width: 0; min-height: 0; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+.ep-order-customer { flex: 0 0 38px; display: flex; align-items: center; gap: 6px; padding: 4px 8px; box-sizing: border-box; border-bottom: 1px solid #273449; }
+.ep-order-customer input { min-width: 0; flex: 1 1 0; height: 30px; box-sizing: border-box; padding: 5px 8px; font-size: 13px; }
+.ep-order-items { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .ep-order-items-header { position: sticky; top: 0; z-index: 2; }
-.ep-order-billing-section { position: relative; z-index: 5; flex: 0 0 40px; margin: 0 8px; }
-.ep-order-billing-popover { position: absolute; bottom: calc(100% + 6px); left: 0; right: 0; max-height: 220px; overflow-y: auto; overscroll-behavior: contain; }
-.ep-order-payment-options { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
-.ep-order-payment-options button { min-width: 0; height: 38px; padding: 4px 2px; font-size: 11px; }
-.ep-order-footer { flex: 0 0 auto; position: sticky; bottom: 0; z-index: 3; }
+.ep-order-extras { flex: 0 0 84px; display: grid; grid-template-rows: 24px 24px 26px; gap: 1px; padding: 3px 8px; box-sizing: border-box; border-top: 1px solid #273449; }
+.ep-order-extras-row { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.ep-order-extras-label { flex: 0 0 34px; color: #8B9BB4; font-size: 10px; font-weight: 900; }
+.ep-order-extras-chip { height: 24px; padding: 0 8px; border-radius: 6px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.ep-order-footer { flex: 0 0 44px; display: flex; align-items: center; padding: 2px 8px; box-sizing: border-box; border-top: 1px solid #273449; }
+.ep-payment-bar { flex: 0 0 auto; padding: 4px 8px; border-top: 1px solid #273449; background: #0B111A; }
+.ep-payment-options { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; min-width: 0; }
+.ep-payment-options button { min-width: 0; height: 42px; padding: 5px 4px; font-size: 13px; }
+.ep-payment-inputs { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.ep-payment-inputs input { flex: 1 1 0; min-width: 0; width: 0; height: 32px; box-sizing: border-box; padding: 5px 8px; font-size: 12px; }
 @media (max-width: 700px) {
-  .ep-order-items { min-height: 180px; }
-  .ep-order-billing-popover { max-height: 220px; }
+  .ep-billing-layout { overflow: auto; padding: 8px; }
+  .ep-billing-menu-column { flex: 0 0 44vh; }
+  .ep-order-panel { flex: 0 0 auto; width: 100%; height: auto; min-height: 400px; }
+  .ep-order-items { min-height: 0; }
 }
 @media (hover: hover) { .ep-card:hover { box-shadow: 0 8px 20px rgba(184,134,11,0.22) !important; border-color: #B8860B !important; transform: translateY(-1px); } }
 button:focus-visible, select:focus-visible { outline: 2px solid #B8860B; outline-offset: 2px; }
@@ -2391,7 +2403,6 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
     setRates((prev) => ({ ...prev, [id]: n }));
     logAudit("rate_changed", { table: table === "parcel" ? "" : table, reason: (name || "Item") + ": " + cur + " -> " + n });
   };
-  const [showAdj, setShowAdj] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const handlePrintBill = async () => {
     if (!existingOrder || placing) return;
@@ -2793,71 +2804,113 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
 
   return (
     <div style={{ position: "fixed", inset: 0, background: C.bg, zIndex: 100, display: "flex", flexDirection: "column", animation: "fadeIn 0.2s" }}>
-      <div style={{ background: `linear-gradient(135deg, ${C.gold} 0%, ${C.goldDark} 100%)`, color: "#fff", padding: isMobile ? "10px 12px" : "14px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-        <button onClick={onBack} style={{ background: "rgba(255,255,255,0.18)", border: "none", color: "#fff", padding: isMobile ? "8px 12px" : "9px 16px", borderRadius: 8, fontWeight: 700, cursor: "pointer", fontSize: isMobile ? 12 : 13, flexShrink: 0 }}>← Back</button>
-        <div style={{ fontWeight: 800, fontSize: isMobile ? 13 : 16, textAlign: "center", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+      <div style={{ background: `linear-gradient(135deg, ${C.gold} 0%, ${C.goldDark} 100%)`, color: "#fff", padding: isMobile ? "10px 12px" : "4px 12px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+            <button onClick={onBack} style={{ background: "rgba(255,255,255,0.18)", border: "none", color: "#fff", padding: isMobile ? "8px 12px" : "5px 10px", borderRadius: 7, fontWeight: 700, cursor: "pointer", fontSize: isMobile ? 12 : 12, flexShrink: 0 }}>← Back</button>
+            <div style={{ fontWeight: 800, fontSize: isMobile ? 13 : 14, textAlign: "center", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {existingOrder ? (addMoreMode ? `Add - ${table === "parcel" ? "Parcel" : "T" + table}` : `Bill - ${table === "parcel" ? "Parcel" : "T" + table} - ${existingItems.length} items`) : (table === "parcel" ? "New - Parcel" : `New - Table ${table}`)}
         </div>
-        <div style={{ background: "rgba(255,255,255,0.18)", borderRadius: 20, padding: "6px 12px", fontWeight: 900, fontSize: isMobile ? 12 : 14, fontFamily: "monospace", flexShrink: 0, minWidth: isMobile ? 40 : 60, textAlign: "center" }}>{cartItems.length > 0 ? inr(addMoreMode ? grossSub : totalAmount) : "—"}</div>
+        <div style={{ background: "rgba(255,255,255,0.18)", borderRadius: 18, padding: isMobile ? "6px 10px" : "4px 8px", fontWeight: 900, fontSize: isMobile ? 12 : 12, fontFamily: "monospace", flexShrink: 0, minWidth: isMobile ? 40 : 60, textAlign: "center" }}>{cartItems.length > 0 ? inr(addMoreMode ? grossSub : totalAmount) : "—"}</div>
       </div>
 
       {runningOrders.length > 0 && !existingOrder && (
-        <div style={{ background: C.amberLight, padding: "8px 12px", borderBottom: `1px solid ${C.line}`, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <div style={{ fontSize: isMobile ? 11 : 13, color: C.ink, fontWeight: 700, flex: 1, minWidth: 120 }}>Table {table} has {runningOrders.length} running order(s)</div>
-          <button onClick={() => addRunningItems(runningOrders[0].id)} disabled={cartItems.length === 0} style={{ background: cartItems.length === 0 ? C.line : C.blue, color: "#fff", border: "none", padding: "7px 12px", borderRadius: 6, fontWeight: 800, fontSize: 11, cursor: cartItems.length === 0 ? "not-allowed" : "pointer", fontFamily: "inherit", flexShrink: 0 }}>Add to Running</button>
+        <div style={{ background: C.amberLight, padding: "4px 8px", borderBottom: `1px solid ${C.line}`, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          <div style={{ fontSize: isMobile ? 11 : 11, color: C.ink, fontWeight: 700, flex: 1, minWidth: 120 }}>Table {table} has {runningOrders.length} running order(s)</div>
+          <button onClick={() => addRunningItems(runningOrders[0].id)} disabled={cartItems.length === 0} style={{ background: cartItems.length === 0 ? C.line : C.blue, color: "#fff", border: "none", padding: "4px 8px", borderRadius: 6, fontWeight: 800, fontSize: 10, cursor: cartItems.length === 0 ? "not-allowed" : "pointer", fontFamily: "inherit", flexShrink: 0 }}>Add to Running</button>
         </div>
       )}
 
-      <div style={{ flex: 1, display: "flex", flexDirection: isMobile ? "column" : "row", gap: 12, overflow: isMobile ? "auto" : "hidden", padding: isMobile ? 8 : 12, paddingBottom: isMobile ? 80 : 12 }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 12, overflow: "hidden", height: isMobile ? "44vh" : undefined, flex: isMobile ? undefined : 1, flexShrink: 0, minWidth: 0 }}>
+      {/* Menu and order columns fill the space below the orange header; each column owns its own scroll area. */}
+      <div className="ep-billing-layout" style={{ flexDirection: isMobile ? "column" : "row", overflow: isMobile ? "auto" : "hidden", padding: isMobile ? 8 : 6, paddingBottom: isMobile ? 80 : 6 }}>
+        <div className="ep-billing-menu-column" style={{ height: isMobile ? "44vh" : "100%", flex: isMobile ? "0 0 44vh" : "1 1 auto" }}>
           {favItems.length > 0 && !search.trim() && (
-            <button onClick={() => { haptic(); setShowFav((v) => { const n = !v; try { localStorage.setItem("staff_fav_open", n ? "1" : "0"); } catch (e) {} return n; }); }} style={{ alignSelf: "flex-start", display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 999, border: "1px solid " + C.gold, background: showFav ? C.gold : C.card, color: showFav ? "#fff" : C.goldText, fontWeight: 800, fontSize: 12, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>⭐ Favourites ({favItems.length}) {showFav ? "▲" : "▼"}</button>
+            <button onClick={() => { haptic(); setShowFav((v) => { const n = !v; try { localStorage.setItem("staff_fav_open", n ? "1" : "0"); } catch (e) {} return n; }); }} style={{ alignSelf: "flex-start", display: "flex", alignItems: "center", gap: 5, padding: "6px 10px", borderRadius: 999, border: "1px solid " + C.gold, background: showFav ? C.gold : C.card, color: showFav ? "#fff" : C.goldText, fontWeight: 800, fontSize: 11, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>⭐ Favourites ({favItems.length}) {showFav ? "▲" : "▼"}</button>
           )}
           {showFav && favItems.length > 0 && !search.trim() && (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, padding: 8, maxHeight: 150, overflowY: "auto", background: C.goldLight, border: "1px solid " + C.line, borderRadius: 12, flexShrink: 0 }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, padding: 6, background: C.goldLight, border: "1px solid " + C.line, borderRadius: 10, flexShrink: 0 }}>
               {favItems.map((m) => (
-                <button key={"fav" + m.id} onClick={() => setQty(m.id, (cart[m.id] || 0) + 1)} style={{ padding: "7px 12px", borderRadius: 20, border: "1px solid " + (C.gold || C.red), background: cart[m.id] ? (C.gold || C.red) : C.card, color: cart[m.id] ? "#fff" : C.ink, fontWeight: 800, fontSize: 12, cursor: "pointer", whiteSpace: "nowrap", fontFamily: "inherit", flexShrink: 0 }}>{pinnedIds.includes(m.id) ? "📌" : "⭐"} {m.name}{cart[m.id] ? " ×" + cart[m.id] : ""}</button>
+                <button key={"fav" + m.id} onClick={() => setQty(m.id, (cart[m.id] || 0) + 1)} style={{ padding: "5px 8px", borderRadius: 20, border: "1px solid " + (C.gold || C.red), background: cart[m.id] ? (C.gold || C.red) : C.card, color: cart[m.id] ? "#fff" : C.ink, fontWeight: 800, fontSize: 10, cursor: "pointer", whiteSpace: "nowrap", fontFamily: "inherit", flexShrink: 0 }}>{pinnedIds.includes(m.id) ? "📌" : "⭐"} {m.name}{cart[m.id] ? " ×" + cart[m.id] : ""}</button>
               ))}
             </div>
           )}
-          <div style={{ position: "relative", flexShrink: 0 }}><input placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)} style={{ width: "100%", boxSizing: "border-box", padding: "10px 38px 10px 14px", border: `1px solid ${C.line}`, borderRadius: 8, fontSize: 14, outline: "none", background: C.card, color: C.ink }} />{search && <button aria-label="Search clear" onClick={() => setSearch("")} style={{ position: "absolute", top: 6, right: 6, width: 28, height: 28, border: "none", borderRadius: 14, background: C.cardAlt, color: C.gray, fontSize: 13, fontWeight: 800, cursor: "pointer", padding: 0 }}>✕</button>}</div>
-          <div className="ep-noscroll" style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 2, flexShrink: 0 }}>
+          <div style={{ position: "relative", flexShrink: 0 }}><input placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)} style={{ width: "100%", boxSizing: "border-box", height: 34, padding: "6px 36px 6px 10px", border: `1px solid ${C.line}`, borderRadius: 7, fontSize: 13, outline: "none", background: C.card, color: C.ink }} />{search && <button aria-label="Search clear" onClick={() => setSearch("")} style={{ position: "absolute", top: 3, right: 4, width: 28, height: 28, border: "none", borderRadius: 14, background: C.cardAlt, color: C.gray, fontSize: 13, fontWeight: 800, cursor: "pointer", padding: 0 }}>✕</button>}</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 4, overflow: "hidden", paddingBottom: 1, flexShrink: 0 }}>
             {categories.map(c => (
-              <button key={c} onClick={() => { haptic(); setCategory(c); }} style={{ padding: "8px 16px", borderRadius: 999, boxShadow: category === c ? "0 3px 10px rgba(184,134,11,0.30)" : "none", border: `1px solid ${category === c ? C.gold : C.line}`, background: category === c ? C.gold : C.card, color: category === c ? "#fff" : C.gray, fontWeight: 700, fontSize: 12, cursor: "pointer", whiteSpace: "nowrap", fontFamily: "inherit", flexShrink: 0 }}>{c}</button>
+              <button key={c} onClick={() => { haptic(); setCategory(c); }} style={{ padding: "5px 10px", borderRadius: 999, boxShadow: category === c ? "0 3px 10px rgba(184,134,11,0.30)" : "none", border: `1px solid ${category === c ? C.gold : C.line}`, background: category === c ? C.gold : C.card, color: category === c ? "#fff" : C.gray, fontWeight: 700, fontSize: 11, cursor: "pointer", whiteSpace: "nowrap", fontFamily: "inherit", flexShrink: 0 }}>{c}</button>
             ))}
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(auto-fill, minmax(170px, 1fr))", gap: 10, overflowY: "auto", flex: 1, alignContent: "start", paddingBottom: 4, paddingRight: 2 }}>
+          <div className="ep-menu-grid" style={{ gridTemplateColumns: isMobile ? "1fr 1fr" : undefined }}>
             {filtered.map(m => {
               const q = cart[m.id] || 0;
               return (
-                <button key={m.id} onClick={() => setQty(m.id, q + 1)} className="ep-card" style={{ textAlign: "left", padding: isMobile ? 10 : 12, borderRadius: 12, border: `1.5px solid ${q > 0 ? C.green : C.line}`, background: q > 0 ? C.greenLight : C.card, boxShadow: q > 0 ? "0 2px 10px rgba(22,163,74,0.15)" : "0 1px 3px rgba(0,0,0,0.05)", cursor: "pointer", position: "relative", fontFamily: "inherit", minHeight: isMobile ? 70 : 78, color: C.ink, display: "flex", flexDirection: "column", justifyContent: "space-between", gap: 4 }}>
-                  <div style={{ fontSize: isMobile ? 12 : 13, fontWeight: 700, color: C.ink, marginBottom: 4, lineHeight: 1.25, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", paddingRight: 24 }}>{m.name}</div>
+                <button key={m.id} onClick={() => setQty(m.id, q + 1)} className="ep-card" style={{ textAlign: "left", padding: 8, borderRadius: 10, border: `1.5px solid ${q > 0 ? C.green : C.line}`, background: q > 0 ? C.greenLight : C.card, boxShadow: q > 0 ? "0 2px 10px rgba(22,163,74,0.15)" : "0 1px 3px rgba(0,0,0,0.05)", cursor: "pointer", position: "relative", fontFamily: "inherit", minHeight: 64, color: C.ink, display: "flex", flexDirection: "column", justifyContent: "space-between", gap: 3 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: C.ink, marginBottom: 2, lineHeight: 1.2, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", paddingRight: 20 }}>{m.name}</div>
                   {isOwner && <span role="button" title="Favourite pin" onClick={(e) => { e.stopPropagation(); togglePin(m.id); }} style={{ position: "absolute", bottom: 4, right: 6, fontSize: 16, lineHeight: 1, padding: 4, cursor: "pointer", opacity: pinnedIds.includes(m.id) ? 1 : 0.35 }}>{pinnedIds.includes(m.id) ? "⭐" : "☆"}</span>}
-                  <div style={{ fontSize: isMobile ? 12 : 14, fontWeight: 900, color: C.goldText, fontFamily: "monospace" }}>{inr(m.price)}</div>
+                  <div style={{ fontSize: 13, fontWeight: 900, color: C.goldText, fontFamily: "monospace" }}>{inr(m.price)}</div>
                   {q > 0 && <span style={{ position: "absolute", top: 6, right: 6, background: C.green, color: "#fff", borderRadius: 12, padding: "2px 9px", fontSize: 11, fontWeight: 800, boxShadow: "0 2px 6px rgba(22,163,74,0.35)", animation: "successBounce 0.3s" }}>{q}</span>}
                 </button>
               );
             })}
             {filtered.length === 0 && <div style={{ gridColumn: "1 / -1", textAlign: "center", padding: 40, color: C.gray }}><div style={{ fontSize: 36, marginBottom: 8 }}>🍽️</div><div style={{ fontSize: 13, fontWeight: 700 }}>{menu.length === 0 ? "Menu load ho raha hai..." : "Koi matching item nahi"}</div></div>}
           </div>
+          {/* Payment controls stay fixed below the independently scrolling menu grid. */}
+          {!addMoreMode && (
+            <>
+              {payMode === "split" && (
+                <div className="ep-payment-inputs" style={{ padding: "0 8px" }}>
+                  <input aria-label="Cash portion" type="number" min={0} max={totalAmount} value={splitAmounts.cash} onChange={e => setSplitCash(e.target.value)} placeholder="Cash" style={{ border: `1px solid ${C.line}`, borderRadius: 6, background: C.card, color: C.ink, fontWeight: 700 }} />
+                  <input aria-label="UPI or online portion" type="number" min={0} max={totalAmount} value={splitAmounts.online} onChange={e => { const online = Math.min(totalAmount, Math.max(0, Number(e.target.value) || 0)); setSplitCash(String(totalAmount - online)); }} placeholder="UPI / Online" style={{ border: `1px solid ${C.line}`, borderRadius: 6, background: C.card, color: C.ink, fontWeight: 700 }} />
+                </div>
+              )}
+              {payMode === "due" && (
+                <div className="ep-payment-inputs" style={{ padding: "0 8px" }}>
+                  <input aria-label="Partial cash received" type="number" min={0} max={totalAmount} value={splitCash} onChange={e => setSplitCash(e.target.value)} placeholder="Cash received" style={{ border: `1px solid ${C.line}`, borderRadius: 6, background: C.card, color: C.ink, fontWeight: 700 }} />
+                  <input aria-label="Partial online received" type="number" min={0} max={totalAmount} value={partialOnline} onChange={e => setPartialOnline(e.target.value)} placeholder="Online received" style={{ border: `1px solid ${C.line}`, borderRadius: 6, background: C.card, color: C.ink, fontWeight: 700 }} />
+                  <span style={{ whiteSpace: "nowrap", color: C.amber, fontSize: 10, fontWeight: 800 }}>Due {inr(partialAmounts.due)}</span>
+                </div>
+              )}
+              {existingOrder && payMode === "cash" && (
+                <div className="ep-payment-inputs" style={{ padding: "0 8px" }}>
+                  <input aria-label="Cash received" type="number" min={0} value={cashReceived} onChange={e => setCashReceived(e.target.value)} placeholder={`Cash received (${inr(totalAmount)})`} style={{ border: `1px solid ${C.line}`, borderRadius: 6, background: C.card, color: C.ink, fontWeight: 700 }} />
+                  {cashSuggestions.map((amount, index) => <button key={`${amount}-${index}`} type="button" onClick={() => setCashReceived(String(amount))} style={{ padding: "4px 7px", border: `1px solid ${C.line}`, borderRadius: 6, background: C.card, color: C.ink, fontWeight: 700, fontSize: 10, cursor: "pointer" }}>{index === 0 ? "Exact" : inr(amount)}</button>)}
+                  {cashBalance !== null && Number.isFinite(cashBalance) && <span aria-live="polite" style={{ whiteSpace: "nowrap", fontSize: 10, fontWeight: 800, color: cashBalance >= 0 ? C.green : C.amber }}>{cashBalance >= 0 ? `Change ${inr(cashBalance)}` : `Due ${inr(Math.abs(cashBalance))}`}</span>}
+                </div>
+              )}
+              <div className="ep-payment-bar">
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <strong style={{ flex: "0 0 auto", color: C.ink, fontSize: 13 }}>Payment</strong>
+                  <div className="ep-payment-options" aria-label="Payment method">
+                    {[["cash", "Cash"], ["upi", "UPI"], ["card", "Card"], ["split", "Split"], ["due", "Due/Part"]].map(([id, label]) => (
+                      <button key={id} type="button" aria-pressed={payMode === id} onClick={() => { if (id === "split" && payMode !== "split") setSplitCash(String(totalAmount)); if (id === "due") { setSplitCash("0"); setPartialOnline("0"); } if (id === "cash") setCashReceived(""); setPayMode(id); }} style={{ borderRadius: 7, border: `1px solid ${payMode === id ? C.gold : C.line}`, background: payMode === id ? C.goldLight : C.card, color: payMode === id ? C.goldText : C.ink, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>{label}</button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
-        {/* Layout update: fixed panel header/footer, with the cart as the primary scroll area. */}
-        <div className="ep-order-panel" style={{ position: "relative", background: C.card, border: `1px solid ${C.line}`, borderRadius: 16, boxShadow: "0 12px 32px rgba(0,0,0,0.16)", display: "flex", flexDirection: "column", overflow: "hidden", flexShrink: 0, width: isMobile ? "100%" : 420, minHeight: isMobile ? 400 : 0, height: isMobile ? undefined : "100%" }}>
-          <div style={{ padding: isMobile ? "5px 8px" : "4px 8px", borderBottom: `1px solid ${C.line}`, background: C.cardAlt, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, minHeight: 38, boxSizing: "border-box" }}>
+        {/* Right panel: stable header/customer/extras/footer; only its cart list scrolls. */}
+        <div className="ep-order-panel" style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 16, boxShadow: "0 12px 32px rgba(0,0,0,0.16)", width: isMobile ? "100%" : 432, minHeight: isMobile ? 400 : 0, height: isMobile ? undefined : "100%" }}>
+          <div style={{ padding: "6px 10px", borderBottom: `1px solid ${C.line}`, background: C.cardAlt, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, minHeight: 40, boxSizing: "border-box" }}>
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontWeight: 900, fontSize: isMobile ? 13 : 14, color: C.ink, letterSpacing: 0.1 }}>{addMoreMode ? "Add items" : existingOrder ? "Checkout" : "New order"}</div>
-              <div style={{ marginTop: 2, fontSize: 10, color: C.gray, fontWeight: 700 }}>{table === "parcel" ? "Parcel" : "Table " + table} · {cartItems.length} {cartItems.length === 1 ? "item" : "items"}</div>
+              <div style={{ fontWeight: 900, fontSize: 13, color: C.ink, letterSpacing: 0.1 }}>{addMoreMode ? "Add items" : existingOrder ? "Checkout" : "New order"}</div>
+              <div style={{ marginTop: 1, fontSize: 10, color: C.gray, fontWeight: 700 }}>{table === "parcel" ? "Parcel" : "Table " + table} · {cartItems.length} {cartItems.length === 1 ? "item" : "items"}</div>
             </div>
             <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-              {!existingOrder && cartItems.length > 0 && <button onClick={() => { if (window.confirm("Poora cart khaali karein?")) { setCart({}); try { localStorage.removeItem("staff_draft_" + table); } catch (e) {} } }} style={{ padding: "6px 8px", border: `1px solid ${C.red}55`, borderRadius: 7, background: C.redLight, color: C.red, fontWeight: 800, fontSize: 10, cursor: "pointer", fontFamily: "inherit" }}>Clear</button>}
-              {isOwner && <button onClick={() => setAddMenuOpen(true)} style={{ padding: "6px 8px", border: "none", borderRadius: 7, background: C.green, color: "#fff", fontWeight: 800, fontSize: 10, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>+ Menu</button>}
+              {!existingOrder && cartItems.length > 0 && <button onClick={() => { if (window.confirm("Poora cart khaali karein?")) { setCart({}); try { localStorage.removeItem("staff_draft_" + table); } catch (e) {} } }} style={{ padding: "5px 8px", border: `1px solid ${C.red}55`, borderRadius: 7, background: C.redLight, color: C.red, fontWeight: 800, fontSize: 10, cursor: "pointer", fontFamily: "inherit" }}>Clear</button>}
+              {isOwner && <button onClick={() => setAddMenuOpen(true)} style={{ padding: "5px 8px", border: "none", borderRadius: 7, background: C.green, color: "#fff", fontWeight: 800, fontSize: 10, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>+ Menu</button>}
             </div>
           </div>
-          <div className="ep-order-items" style={{ minHeight: isMobile ? 180 : existingOrder && !addMoreMode ? 140 : 480 }}>
+          {/* Customer fields sit directly below the fixed panel header. */}
+          <div className="ep-order-customer">
+            <input aria-label="Customer name" placeholder="Customer name" value={custName} onChange={e => setCustName(e.target.value)} />
+            <input aria-label="Customer phone number" placeholder="Phone number" value={custPhone} onChange={e => setCustPhone(e.target.value)} type="tel" />
+          </div>
+          {table === "parcel" && <div style={{ flex: "0 0 38px", padding: "2px 8px 4px", boxSizing: "border-box" }}><input aria-label="Delivery address" placeholder="Delivery address" value={custAddress} onChange={e => setCustAddress(e.target.value)} style={{ width: "100%", height: 32, boxSizing: "border-box", padding: "5px 9px", border: `1px solid ${C.line}`, borderRadius: 7, fontSize: 13, background: C.card, color: C.ink, outline: "none" }} /></div>}
+          <div className="ep-order-items">
             {cartItems.length === 0 && <div style={{ textAlign: "center", padding: "40px 20px", color: C.gray, fontSize: 13, fontWeight: 700 }}><div style={{ fontSize: 40, marginBottom: 8, opacity: 0.5 }}>🧾</div>Menu se item tap karo</div>}
             {cartItems.length > 0 && (
-              <div className="ep-order-items-header" style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", background: C.cardAlt, borderBottom: "1px solid " + C.line, fontSize: 10, fontWeight: 800, color: C.gray, letterSpacing: 0.5, textTransform: "uppercase" }}>
+              <div className="ep-order-items-header" style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 8px", background: C.cardAlt, borderBottom: "1px solid " + C.line, fontSize: 10, fontWeight: 800, color: C.gray, letterSpacing: 0.5, textTransform: "uppercase" }}>
                 <div style={{ flex: 1 }}>Item</div>
                 <div style={{ width: 82, textAlign: "center" }}>Qty</div>
                 <div style={{ width: 62, textAlign: "right" }}>Amount</div>
@@ -2870,7 +2923,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
               const existingQty = existingItems.filter(e => e.itemId === id).reduce((s, e) => s + e.qty, 0);
               const isNew = !!existingOrder && !addMoreMode && existingQty === 0;
               return (
-                <div key={id} style={{ display: "flex", alignItems: "center", gap: 6, minHeight: 44, boxSizing: "border-box", padding: "4px 8px", borderBottom: "1px dashed " + C.line, background: isNew ? C.greenLight : "transparent" }}>
+                <div key={id} style={{ display: "flex", alignItems: "center", gap: 6, minHeight: 40, boxSizing: "border-box", padding: "3px 8px", borderBottom: "1px dashed " + C.line, background: isNew ? C.greenLight : "transparent" }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 14, fontWeight: 800, color: C.ink, lineHeight: 1.2 }}>
                       {m.name}{m.portion ? " (" + m.portion + ")" : ""}
@@ -2889,74 +2942,27 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
               );
             })}
           </div>
-          {/* This 40px accordion row stays compact; its expanded content overlays the cart. */}
+          {/* Fixed extras replace the old accordion: no overlay and no panel scroll. */}
           {!addMoreMode && (
-            <div className="ep-order-billing-section">
-              <button type="button" aria-expanded={showAdj} onClick={() => setShowAdj((v) => !v)} style={{ width: "100%", height: 40, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 10px", border: `1px solid ${C.line}`, borderRadius: 8, background: C.cardAlt, color: C.ink, fontWeight: 800, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
-                <span>Billing &amp; Customer details</span><span style={{ color: C.gray }}>{showAdj ? "▲" : "▼"}</span>
-              </button>
-              {showAdj && <div className="ep-order-billing-popover" style={{ padding: 8, border: `1px solid ${C.line}`, borderRadius: 10, background: C.light, boxShadow: "0 10px 28px rgba(0,0,0,0.35)" }}>
-              <div style={{ display: "flex", gap: 6, marginBottom: 7, flexWrap: "wrap", alignItems: "center" }}>
-                <span style={{ fontSize: 10, color: C.gray, fontWeight: 800, minWidth: 38 }}>DISC</span>
-                {[0,5,10,20].map(d => <button key={d} onClick={() => (isOwner ? setDiscount(d) : toast("Discount sirf owner de sakta hai", "warning"))} style={{ padding: "4px 8px", borderRadius: 5, border: `1px solid ${discount === d ? C.green : C.line}`, background: discount === d ? C.greenLight : C.card, color: discount === d ? C.green : C.ink, fontWeight: 700, fontSize: 10, cursor: "pointer", fontFamily: "inherit" }}>{d === 0 ? "0" : `${d}%`}</button>)}
-                <input type="number" min={0} max={100} disabled={!isOwner} value={discount || ""} onChange={e => setDiscount(Math.min(100, Math.max(0, Number(e.target.value) || 0)))} placeholder="%" style={{ width: 48, padding: "4px 6px", border: `1px solid ${C.line}`, borderRadius: 5, fontSize: 11, background: C.card, color: C.ink, fontWeight: 700, textAlign: "center", outline: "none" }} />
+            <div className="ep-order-extras">
+              <div className="ep-order-extras-row">
+                <span className="ep-order-extras-label">DISC</span>
+                {[0, 5, 10, 20].map(d => <button key={d} type="button" onClick={() => (isOwner ? setDiscount(d) : toast("Discount sirf owner de sakta hai", "warning"))} className="ep-order-extras-chip" style={{ border: `1px solid ${discount === d ? C.green : C.line}`, background: discount === d ? C.greenLight : C.card, color: discount === d ? C.green : C.ink }}>{d === 0 ? "0" : `${d}%`}</button>)}
+                <input aria-label="Custom discount percent" type="number" min={0} max={100} disabled={!isOwner} value={discount || ""} onChange={e => setDiscount(Math.min(100, Math.max(0, Number(e.target.value) || 0)))} placeholder="Custom %" style={{ width: 70, height: 24, boxSizing: "border-box", padding: "3px 6px", border: `1px solid ${C.line}`, borderRadius: 6, fontSize: 11, background: C.card, color: C.ink, fontWeight: 700, textAlign: "center", outline: "none" }} />
               </div>
-              <div style={{ display: "flex", gap: 6, marginBottom: 7, flexWrap: "wrap", alignItems: "center" }}>
-                <span style={{ fontSize: 10, color: C.gray, fontWeight: 800, minWidth: 38 }}>GST</span>
-                {[0,5,12,18].map(g => <button key={g} onClick={() => setGstRate(g)} style={{ padding: "4px 8px", borderRadius: 5, border: `1px solid ${gstRate === g ? C.gold : C.line}`, background: gstRate === g ? C.redLight : C.card, color: gstRate === g ? C.gold : C.ink, fontWeight: 700, fontSize: 10, cursor: "pointer", fontFamily: "inherit" }}>{g === 0 ? "No" : `${g}%`}</button>)}
+              <div className="ep-order-extras-row">
+                <span className="ep-order-extras-label">GST</span>
+                {[0, 5, 12, 18].map(g => <button key={g} type="button" onClick={() => setGstRate(g)} className="ep-order-extras-chip" style={{ border: `1px solid ${gstRate === g ? C.gold : C.line}`, background: gstRate === g ? C.redLight : C.card, color: gstRate === g ? C.gold : C.ink }}>{g === 0 ? "No" : `${g}%`}</button>)}
               </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-              <div style={{ display: "flex", gap: 6 }}>
-                <input aria-label="Customer name" placeholder="Customer name" value={custName} onChange={e => setCustName(e.target.value)} style={{ minWidth: 0, flex: 1, height: 34, boxSizing: "border-box", padding: "6px 9px", border: `1px solid ${C.line}`, borderRadius: 7, fontSize: 13, background: C.card, color: C.ink, outline: "none" }} />
-                <input aria-label="Customer phone number" placeholder="Phone number" value={custPhone} onChange={e => setCustPhone(e.target.value)} type="tel" style={{ minWidth: 0, flex: 1, height: 34, boxSizing: "border-box", padding: "6px 9px", border: `1px solid ${C.line}`, borderRadius: 7, fontSize: 13, background: C.card, color: C.ink, outline: "none" }} />
-              </div>
-              {table === "parcel" && <input aria-label="Delivery address" placeholder="Delivery address" value={custAddress} onChange={e => setCustAddress(e.target.value)} style={{ width: "100%", height: 34, boxSizing: "border-box", padding: "6px 9px", border: `1px solid ${C.line}`, borderRadius: 7, fontSize: 13, background: C.card, color: C.ink, outline: "none" }} />}
-              <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontSize: 11, color: C.gray, fontWeight: 800 }}>
-                Cash discount
-                <input aria-label="Cash discount" type="number" min={0} max={grossSub - discAmt + gstAmt} value={cashDiscount || ""} onChange={e => setCashDiscount(Math.min(grossSub - discAmt + gstAmt, Math.max(0, Number(e.target.value) || 0)))} placeholder="₹" style={{ width: 82, height: 34, boxSizing: "border-box", padding: "6px 9px", border: `1px solid ${C.line}`, borderRadius: 7, fontSize: 13, background: C.card, color: C.ink, fontWeight: 700, outline: "none" }} />
+              <label className="ep-order-extras-row" style={{ color: C.gray, fontSize: 11, fontWeight: 800 }}>
+                <span style={{ flex: 1 }}>Cash discount</span>
+                <input aria-label="Cash discount" type="number" min={0} max={grossSub - discAmt + gstAmt} value={cashDiscount || ""} onChange={e => setCashDiscount(Math.min(grossSub - discAmt + gstAmt, Math.max(0, Number(e.target.value) || 0)))} placeholder="₹" style={{ width: 82, height: 26, boxSizing: "border-box", padding: "3px 8px", border: `1px solid ${C.line}`, borderRadius: 6, fontSize: 12, background: C.card, color: C.ink, fontWeight: 700, outline: "none" }} />
               </label>
-              <div className="ep-order-payment-options" aria-label="Payment method">
-                {[["cash", "Cash"], ["upi", "UPI"], ["card", "Card"], ["split", "Split"], ["due", "Due/Part"]].map(([id, label]) => (
-                  <button key={id} type="button" aria-pressed={payMode === id} onClick={() => { if (id === "split" && payMode !== "split") setSplitCash(String(totalAmount)); if (id === "due") { setSplitCash("0"); setPartialOnline("0"); } if (id === "cash") setCashReceived(""); setPayMode(id); }} style={{ borderRadius: 7, border: `1px solid ${payMode === id ? C.gold : C.line}`, background: payMode === id ? C.goldLight : C.card, color: payMode === id ? C.goldText : C.ink, fontWeight: 800, cursor: "pointer", fontFamily: "inherit", boxShadow: payMode === id ? `inset 0 0 0 1px ${C.gold}` : "none" }}>{label}</button>
-                ))}
-              </div>
-                  {payMode === "cash" && (
-                    <div style={{ padding: 7, border: `1px solid ${C.line}`, borderRadius: 8, background: C.cardAlt }}>
-                      <label style={{ display: "block", fontSize: 10, color: C.gray, fontWeight: 800 }}>CASH RECEIVED
-                        <input aria-label="Cash received" type="number" min={0} value={cashReceived} onChange={e => setCashReceived(e.target.value)} placeholder={String(totalAmount)} style={{ display: "block", width: "100%", height: 34, boxSizing: "border-box", marginTop: 4, padding: "6px 9px", border: `1px solid ${C.line}`, borderRadius: 7, fontSize: 13, fontWeight: 800, background: C.card, color: C.ink }} />
-                      </label>
-                      <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 6 }}>
-                        {cashSuggestions.map((amount, index) => <button key={`${amount}-${index}`} type="button" onClick={() => setCashReceived(String(amount))} style={{ padding: "5px 9px", border: `1px solid ${C.line}`, borderRadius: 7, background: C.card, color: C.ink, fontWeight: 700, fontSize: 10, cursor: "pointer" }}>{index === 0 ? "Exact" : inr(amount)}</button>)}
-                      </div>
-                      {cashBalance !== null && Number.isFinite(cashBalance) && <div aria-live="polite" style={{ marginTop: 5, fontSize: 11, fontWeight: 800, color: cashBalance >= 0 ? C.green : C.amber }}>{cashBalance >= 0 ? `Change to return: ${inr(cashBalance)}` : `Still due: ${inr(Math.abs(cashBalance))}`}</div>}
-                    </div>
-                  )}
-                  {payMode === "split" && (
-                    <div style={{ display: "flex", gap: 7, alignItems: "center", background: C.cardAlt, padding: 7, borderRadius: 8, border: `1px solid ${C.line}` }}>
-                      <label style={{ flex: 1, minWidth: 0, fontSize: 10, color: C.gray, fontWeight: 800 }}>Cash
-                        <input aria-label="Cash portion" type="number" min={0} max={totalAmount} value={splitAmounts.cash} onChange={e => setSplitCash(e.target.value)} placeholder="₹" style={{ display: "block", width: "100%", height: 34, boxSizing: "border-box", marginTop: 4, padding: "6px 8px", border: `1px solid ${C.line}`, borderRadius: 7, fontSize: 13, fontWeight: 700, background: C.card, color: C.ink }} />
-                      </label>
-                      <label style={{ flex: 1, minWidth: 0, fontSize: 10, color: C.gray, fontWeight: 800 }}>UPI / Online
-                        <input aria-label="UPI or online portion" type="number" min={0} max={totalAmount} value={splitAmounts.online} onChange={e => { const online = Math.min(totalAmount, Math.max(0, Number(e.target.value) || 0)); setSplitCash(String(totalAmount - online)); }} placeholder="₹" style={{ display: "block", width: "100%", height: 34, boxSizing: "border-box", marginTop: 4, padding: "6px 8px", border: `1px solid ${C.line}`, borderRadius: 7, fontSize: 13, fontWeight: 700, background: C.card, color: C.ink }} />
-                      </label>
-                    </div>
-                  )}
-              {payMode === "due" && (
-                <div>
-                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                    <input aria-label="Partial cash received" type="number" min={0} max={totalAmount} value={splitCash} onChange={e => setSplitCash(e.target.value)} placeholder="Cash received" style={{ width: "50%", height: 34, boxSizing: "border-box", padding: "6px 8px", border: `1px solid ${C.line}`, borderRadius: 7, background: C.card, color: C.ink, fontSize: 13, fontWeight: 700 }} />
-                    <input aria-label="Partial online received" type="number" min={0} max={totalAmount} value={partialOnline} onChange={e => setPartialOnline(e.target.value)} placeholder="Online received" style={{ width: "50%", height: 34, boxSizing: "border-box", padding: "6px 8px", border: `1px solid ${C.line}`, borderRadius: 7, background: C.card, color: C.ink, fontSize: 13, fontWeight: 700 }} />
-                  </div>
-                  <div style={{ marginTop: 4, fontSize: 11, color: C.amber, fontWeight: 900, textAlign: "right" }}>Received {inr(partialAmounts.received)} · Due {inr(partialAmounts.due)}</div>
-                </div>
-              )}
-            </div>
-              </div>}
             </div>
           )}
 
-          {/* Fixed footer keeps totals and the order action visible without scrolling the panel. */}
-          <div className="ep-order-footer" style={{ padding: "4px 8px", background: C.light, borderTop: `1px solid ${C.line}`, boxShadow: "0 -6px 14px rgba(0,0,0,0.16)" }}>
+          {/* Footer stays fixed; actions for existing bills remain available. */}
+          <div className="ep-order-footer" style={{ flex: existingOrder && !addMoreMode ? "0 0 auto" : "0 0 44px", flexDirection: existingOrder && !addMoreMode ? "column" : "row", alignItems: existingOrder && !addMoreMode ? "stretch" : "center", padding: "2px 8px", background: C.light, borderTop: `1px solid ${C.line}`, boxShadow: "0 -6px 14px rgba(0,0,0,0.16)" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: existingOrder && !addMoreMode ? 6 : 0 }}>
               <div style={{ minWidth: 0 }}>
                 <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
@@ -2964,10 +2970,9 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
                   {addMoreMode && <span style={{ fontSize: 10, color: C.gray, fontWeight: 700 }}>Running {inr(existingSubtotal)} · New +{inr(cartSubtotal)}</span>}
                   <strong style={{ color: C.ink, fontSize: 14 }}>Total {inr(addMoreMode ? grossSub : totalAmount)}</strong>
                 </div>
-                {!addMoreMode && (discount > 0 || gstRate > 0 || cashDiscount > 0) && <div style={{ marginTop: 2, fontSize: 9, color: C.gray }}>Discount {inr(discAmt)} · GST {inr(gstAmt)} · Cash discount {inr(cashDiscount)}</div>}
               </div>
               {(!existingOrder || addMoreMode) && (
-                <button onClick={handlePlaceOrder} disabled={cartItems.length === 0 || placing} style={{ minWidth: 132, height: 48, padding: "8px 12px", border: "none", borderRadius: 9, background: cartItems.length === 0 ? C.line : `linear-gradient(135deg, ${addMoreMode ? C.green : C.gold} 0%, ${addMoreMode ? "#15803D" : C.goldDark} 100%)`, color: cartItems.length === 0 ? C.gray : "#fff", fontWeight: 900, fontSize: 14, cursor: cartItems.length === 0 ? "not-allowed" : "pointer", fontFamily: "inherit", boxShadow: cartItems.length === 0 ? "none" : `0 5px 14px ${C.gold}35`, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, flexShrink: 0 }}>{placing ? <><Spinner /> {addMoreMode ? "Adding..." : "Placing..."}</> : addMoreMode ? "Add to Running KOT" : "Send KOT"}</button>
+                <button onClick={handlePlaceOrder} disabled={cartItems.length === 0 || placing} style={{ minWidth: 132, height: 40, padding: "6px 12px", border: "none", borderRadius: 9, background: cartItems.length === 0 ? C.line : `linear-gradient(135deg, ${addMoreMode ? C.green : C.gold} 0%, ${addMoreMode ? "#15803D" : C.goldDark} 100%)`, color: cartItems.length === 0 ? C.gray : "#fff", fontWeight: 900, fontSize: 14, cursor: cartItems.length === 0 ? "not-allowed" : "pointer", fontFamily: "inherit", boxShadow: cartItems.length === 0 ? "none" : `0 5px 14px ${C.gold}35`, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, flexShrink: 0 }}>{placing ? <><Spinner /> {addMoreMode ? "Adding..." : "Placing..."}</> : addMoreMode ? "Add to Running KOT" : "Send KOT"}</button>
               )}
             </div>
             {existingOrder && !addMoreMode && (
