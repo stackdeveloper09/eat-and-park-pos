@@ -314,6 +314,47 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    match /staffNotifications/{id} {
+      allow create: if isAdmin()
+        && request.resource.data.keys().hasOnly([
+          'toStaffId', 'title', 'message', 'type', 'fromId', 'fromName',
+          'createdAt', 'expiresAt', 'read', 'readAt', 'batchId'
+        ])
+        && request.resource.data.keys().hasAll([
+          'toStaffId', 'title', 'message', 'type', 'fromId', 'fromName',
+          'createdAt', 'expiresAt', 'read', 'readAt', 'batchId'
+        ])
+        && request.resource.data.toStaffId is string
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0 && request.resource.data.title.size() <= 60
+        && request.resource.data.message is string
+        && request.resource.data.message.size() > 0 && request.resource.data.message.size() <= 300
+        && request.resource.data.type in ['Info', 'Important', 'Warning']
+        && request.resource.data.fromId == request.auth.uid
+        && request.resource.data.fromName is string
+        && request.resource.data.fromName.size() <= 80
+        && request.resource.data.createdAt is timestamp
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.expiresAt is timestamp
+        && request.resource.data.expiresAt > request.time
+        && request.resource.data.read == false
+        && request.resource.data.readAt == null
+        && request.resource.data.batchId is string
+        && request.resource.data.batchId.size() > 0
+        && request.resource.data.batchId.size() <= 100;
+      allow read: if isAdmin()
+        || (isStaff() && resource.data.toStaffId == request.auth.uid);
+      allow update: if hasStaffDoc()
+        && staffRole() in ['chef', 'cashier', 'waiter', 'delivery', 'staff']
+        && resource.data.toStaffId == request.auth.uid
+        && resource.data.read == false
+        && resource.data.readAt == null
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read', 'readAt'])
+        && request.resource.data.read == true
+        && request.resource.data.readAt == request.time;
+      allow delete: if isAdminOrOwner();
+    }
+
     match /notifications/{id} {
       allow read: if isAdminOrOwner()
         || (signedIn() && resource.data.userId == request.auth.uid);

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { auth, db, functions } from "./firebase";
 import { httpsCallable } from "firebase/functions";
 import {
@@ -7,9 +7,12 @@ import {
   doc,
   getDocs,
   onSnapshot,
+  orderBy,
   query,
   runTransaction,
+  serverTimestamp,
   setDoc,
+  Timestamp,
   updateDoc,
   where,
   writeBatch,
@@ -37,12 +40,14 @@ import {
 import { ROLES } from "./lib/roles";
 
 const ATTENDANCE_STATUSES = ["Present", "Half Day", "Absent", "Paid Leave"];
+const NOTIFICATION_RECIPIENT_ROLES = ["chef", "cashier", "waiter", "delivery", "staff"];
 const TABS = [
   { id: "staff", label: "Staff Management" },
   { id: "shifts", label: "Shift Settings" },
   { id: "gps", label: "GPS Settings" },
   { id: "advances", label: "Advance Requests" },
   { id: "leaves", label: "Leave Requests" },
+  { id: "notifications", label: "Notifications" },
   { id: "payroll", label: "Payroll & Attendance" },
 ];
 
@@ -72,6 +77,11 @@ function getStaffId(record) {
 
 function displayStaffName(member) {
   return String(member?.name || "").trim() || String(member?.id || "").slice(0, 6);
+}
+
+function canReceiveStaffNotification(member) {
+  return member.active === true
+    && NOTIFICATION_RECIPIENT_ROLES.includes(String(member.role || "").toLowerCase());
 }
 
 function normalizedAttendanceStatus(record) {
@@ -162,6 +172,19 @@ export default function Staff({ C, isMobile }) {
   const [salaryPayments, setSalaryPayments] = useState([]);
   const [salaryCarryForwards, setSalaryCarryForwards] = useState([]);
   const [leaveRequests, setLeaveRequests] = useState([]);
+  const [staffNotifications, setStaffNotifications] = useState([]);
+  const [notificationHistoryLoading, setNotificationHistoryLoading] = useState(true);
+  const [notificationMode, setNotificationMode] = useState("single");
+  const [notificationSearch, setNotificationSearch] = useState("");
+  const [notificationStaffId, setNotificationStaffId] = useState("");
+  const [notificationStaffIds, setNotificationStaffIds] = useState([]);
+  const [notificationTitle, setNotificationTitle] = useState("");
+  const [notificationMessage, setNotificationMessage] = useState("");
+  const [notificationType, setNotificationType] = useState("Info");
+  const [notificationError, setNotificationError] = useState("");
+  const [notificationSuccess, setNotificationSuccess] = useState("");
+  const [sendingNotification, setSendingNotification] = useState(false);
+  const notificationSendLock = useRef(false);
   const [manualAttendance, setManualAttendance] = useState([]);
   const [gpsAttendance, setGpsAttendance] = useState([]);
   const [gpsAttendanceLoading, setGpsAttendanceLoading] = useState(true);
@@ -199,6 +222,49 @@ export default function Staff({ C, isMobile }) {
   });
 
   const currentAdminRole = members.find((member) => member.id === auth.currentUser?.uid)?.role;
+  const currentAdminMember = members.find((member) => member.id === auth.currentUser?.uid);
+  const canSendStaffNotifications = currentAdminMember?.active !== false
+    && ["admin", "owner", "manager"].includes(String(currentAdminRole || "").toLowerCase());
+  const notificationRecipients = useMemo(() => {
+    if (notificationMode === "all") return members.filter(canReceiveStaffNotification);
+    if (notificationMode === "multiple") {
+      const selectedIds = new Set(notificationStaffIds);
+      return members.filter((member) => canReceiveStaffNotification(member) && selectedIds.has(member.id));
+    }
+    return members.filter((member) => canReceiveStaffNotification(member) && member.id === notificationStaffId);
+  }, [members, notificationMode, notificationStaffId, notificationStaffIds]);
+  const filteredNotificationMembers = useMemo(() => {
+    const search = notificationSearch.trim().toLowerCase();
+    return members.filter((member) => canReceiveStaffNotification(member) && (
+      !search
+      || String(member.name || "").toLowerCase().includes(search)
+      || String(member.role || "").toLowerCase().includes(search)
+      || member.id.toLowerCase().includes(search)
+    ));
+  }, [members, notificationSearch]);
+  const notificationHistory = useMemo(() => {
+    const groups = new Map();
+    staffNotifications.forEach((notification) => {
+      const group = groups.get(notification.batchId) || {
+        batchId: notification.batchId,
+        title: notification.title,
+        message: notification.message,
+        type: notification.type,
+        fromName: notification.fromName,
+        createdAt: notification.createdAt,
+        recipients: [],
+        readCount: 0,
+      };
+      const recipient = members.find((member) => member.id === notification.toStaffId);
+      group.recipients.push(recipient ? displayStaffName(recipient) : notification.toStaffId);
+      if (notification.read === true) group.readCount += 1;
+      groups.set(notification.batchId, group);
+    });
+    return [...groups.values()].sort((a, b) => {
+      const time = (value) => typeof value?.toMillis === "function" ? value.toMillis() : Number(value || 0);
+      return time(b.createdAt) - time(a.createdAt);
+    });
+  }, [members, staffNotifications]);
   const canEditShifts = currentAdminRole === "admin" || currentAdminRole === "owner";
   const whatsappPhone = createdStaffCredentials?.phone
     ? String(createdStaffCredentials.phone).replace(/\D/g, "")
@@ -239,6 +305,29 @@ export default function Staff({ C, isMobile }) {
     });
     return unsubscribe;
   }, []);
+
+  useEffect(() => {
+    if (!canSendStaffNotifications) {
+      setStaffNotifications([]);
+      setNotificationHistoryLoading(false);
+      return undefined;
+    }
+    setNotificationHistoryLoading(true);
+    const unsubscribe = onSnapshot(
+      query(collection(db, "staffNotifications"), orderBy("createdAt", "desc")),
+      (snapshot) => {
+        setStaffNotifications(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() })));
+        setNotificationHistoryLoading(false);
+        setLoadError("");
+      },
+      (error) => {
+        console.error("Staff notification history load failed:", error);
+        setNotificationHistoryLoading(false);
+        setLoadError(`Notification history load nahi hui: ${getErrorMessage(error)}`);
+      },
+    );
+    return unsubscribe;
+  }, [canSendStaffNotifications]);
 
   useEffect(() => {
     const shiftsRef = doc(db, "settings", "shifts");
@@ -647,6 +736,69 @@ export default function Staff({ C, isMobile }) {
       console.error("Staff member add failed:", error);
     } finally {
       setBusyId("");
+    }
+  };
+
+  const handleSendStaffNotification = async (event) => {
+    event.preventDefault();
+    if (notificationSendLock.current) return;
+    const title = notificationTitle.trim();
+    const message = notificationMessage.trim();
+    const recipients = notificationRecipients;
+    const adminUid = auth.currentUser?.uid;
+    const sender = members.find((member) => member.id === adminUid);
+    if (!adminUid || !canSendStaffNotifications || !sender) {
+      setNotificationError("Sirf active admin, owner, ya manager notification bhej sakte hain.");
+      return;
+    }
+    if (!recipients.length) {
+      setNotificationError("Kam se kam ek active staff select karein.");
+      return;
+    }
+    if (recipients.length > 500) {
+      setNotificationError("Ek baar mein zyada se zyada 500 staff ko bhej sakte hain.");
+      return;
+    }
+    if (title.length < 1 || title.length > 60 || message.length < 1 || message.length > 300) {
+      setNotificationError("Title 1–60 aur message 1–300 characters ka hona chahiye.");
+      return;
+    }
+    if (!window.confirm(`${recipients.length} staff ko notification bheja jayega. Continue?`)) return;
+
+    notificationSendLock.current = true;
+    setSendingNotification(true);
+    setNotificationError("");
+    setNotificationSuccess("");
+    try {
+      const batchId = doc(collection(db, "staffNotifications")).id;
+      const batch = writeBatch(db);
+      recipients.forEach((member) => {
+        batch.set(doc(collection(db, "staffNotifications")), {
+          toStaffId: member.id,
+          title,
+          message,
+          type: notificationType,
+          fromId: adminUid,
+          fromName: displayStaffName(sender),
+          createdAt: serverTimestamp(),
+          expiresAt: Timestamp.fromMillis(Date.now() + 60 * 24 * 60 * 60 * 1000),
+          read: false,
+          readAt: null,
+          batchId,
+        });
+      });
+      await batch.commit();
+      setNotificationSuccess(`Notification ${recipients.length} staff ko bhej diya.`);
+      setNotificationTitle("");
+      setNotificationMessage("");
+      setNotificationStaffId("");
+      setNotificationStaffIds([]);
+    } catch (error) {
+      console.error("Staff notification send failed:", error);
+      setNotificationError(`Notification nahi bheja gaya: ${getErrorMessage(error)}`);
+    } finally {
+      notificationSendLock.current = false;
+      setSendingNotification(false);
     }
   };
 
@@ -1326,7 +1478,7 @@ export default function Staff({ C, isMobile }) {
         borderBottom: `1px solid ${C.line}`,
         marginBottom: 16,
       }}>
-        {TABS.map((tab) => (
+        {TABS.filter((tab) => tab.id !== "notifications" || canSendStaffNotifications).map((tab) => (
           <button
             key={tab.id}
             type="button"
@@ -1893,6 +2045,142 @@ export default function Staff({ C, isMobile }) {
                 </article>
               );
             })}
+        </section>
+      )}
+
+      {activeTab === "notifications" && canSendStaffNotifications && (
+        <section style={{ display: "grid", gap: 14 }}>
+          <form onSubmit={handleSendStaffNotification} style={{ ...cardStyle, display: "grid", gap: 12 }}>
+            <div>
+              <h3 style={{ margin: 0, color: C.ink, fontSize: 16 }}>Notification bhejo</h3>
+              <div style={{ marginTop: 4, color: C.gray, fontSize: 12 }}>Sirf active staff members ko notification jayega.</div>
+            </div>
+            <label style={labelStyle}>
+              Receiver
+              <select value={notificationMode} onChange={(event) => setNotificationMode(event.target.value)} style={inputStyle}>
+                <option value="single">Ek staff</option>
+                <option value="multiple">Multiple staff</option>
+                <option value="all">Sabhi active staff</option>
+              </select>
+            </label>
+            {notificationMode === "all" ? (
+              <div style={{ color: C.gray, fontSize: 12 }}>
+                {members.filter(canReceiveStaffNotification).length} active staff ko bheja jayega.
+              </div>
+            ) : (
+              <div style={{ display: "grid", gap: 9 }}>
+                <label style={labelStyle}>
+                  Staff search
+                  <input
+                    type="search"
+                    value={notificationSearch}
+                    onChange={(event) => setNotificationSearch(event.target.value)}
+                    placeholder="Naam, role ya UID search karein"
+                    style={inputStyle}
+                  />
+                </label>
+                {notificationMode === "single" ? (
+                  <label style={labelStyle}>
+                    Staff member
+                    <select required value={notificationStaffId} onChange={(event) => setNotificationStaffId(event.target.value)} style={inputStyle}>
+                      <option value="">Select active staff</option>
+                      {filteredNotificationMembers.map((member) => (
+                        <option key={member.id} value={member.id}>{displayStaffName(member)} · {member.role || "staff"}</option>
+                      ))}
+                    </select>
+                  </label>
+                ) : (
+                  <fieldset style={{ border: `1px solid ${C.line}`, borderRadius: 9, padding: 10, maxHeight: 220, overflowY: "auto" }}>
+                    <legend style={{ color: C.gray, fontSize: 12 }}>Active staff · {notificationStaffIds.length} selected</legend>
+                    {filteredNotificationMembers.length === 0
+                      ? <div style={{ color: C.gray, fontSize: 12 }}>Matching active staff nahi mila.</div>
+                      : filteredNotificationMembers.map((member) => (
+                        <label key={member.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 2px", color: C.ink, fontSize: 12 }}>
+                          <input
+                            type="checkbox"
+                            checked={notificationStaffIds.includes(member.id)}
+                            onChange={(event) => setNotificationStaffIds((current) => event.target.checked
+                              ? [...new Set([...current, member.id])]
+                              : current.filter((id) => id !== member.id))}
+                          />
+                          <span>{displayStaffName(member)} · {member.role || "staff"}</span>
+                        </label>
+                      ))}
+                  </fieldset>
+                )}
+              </div>
+            )}
+            <label style={labelStyle}>
+              Title · {notificationTitle.length}/60
+              <input
+                required
+                maxLength={60}
+                value={notificationTitle}
+                onChange={(event) => setNotificationTitle(event.target.value)}
+                style={inputStyle}
+              />
+            </label>
+            <label style={labelStyle}>
+              Message · {notificationMessage.length}/300
+              <textarea
+                required
+                maxLength={300}
+                rows={4}
+                value={notificationMessage}
+                onChange={(event) => setNotificationMessage(event.target.value)}
+                style={{ ...inputStyle, resize: "vertical" }}
+              />
+            </label>
+            <label style={labelStyle}>
+              Type
+              <select value={notificationType} onChange={(event) => setNotificationType(event.target.value)} style={inputStyle}>
+                <option value="Info">Info</option>
+                <option value="Important">Important</option>
+                <option value="Warning">Warning</option>
+              </select>
+            </label>
+            {notificationError && <div role="alert" style={{ color: "#FCA5A5", background: "#451A1A", borderRadius: 9, padding: 10, fontSize: 12 }}>{notificationError}</div>}
+            {notificationSuccess && <div role="status" style={{ color: C.green, fontSize: 12 }}>{notificationSuccess}</div>}
+            <button type="submit" disabled={sendingNotification || !notificationRecipients.length || notificationRecipients.length > 500} style={{ ...buttonStyle, justifySelf: "start" }}>
+              {sendingNotification ? "Sending..." : "Notification bhejo"}
+            </button>
+            {notificationRecipients.length > 500 && (
+              <div role="alert" style={{ color: "#FCA5A5", fontSize: 12 }}>Ek atomic send mein maximum 500 recipients allowed hain.</div>
+            )}
+          </form>
+
+          <section style={cardStyle}>
+            <h3 style={{ margin: "0 0 12px", color: C.ink, fontSize: 16 }}>Bheji hui notifications</h3>
+            {notificationHistoryLoading
+              ? <div style={{ color: C.gray, fontSize: 13 }}>Notification history load ho rahi hai...</div>
+              : notificationHistory.length === 0
+                ? <div style={{ color: C.gray, fontSize: 13 }}>Abhi koi notification nahi bheji gayi.</div>
+                : <div style={{ display: "grid", gap: 10 }}>
+                  {notificationHistory.map((group) => {
+                    const createdAt = group.createdAt && typeof group.createdAt.toDate === "function"
+                      ? group.createdAt.toDate()
+                      : new Date(Number(group.createdAt || 0));
+                    const typeColor = group.type === "Warning" ? "#FCA5A5"
+                      : group.type === "Important" ? C.gold : C.blue;
+                    return (
+                      <article key={group.batchId} style={{ padding: 12, border: `1px solid ${C.line}`, borderRadius: 10, display: "grid", gap: 5 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                          <strong style={{ color: C.ink }}>{group.title}</strong>
+                          <span style={{ color: typeColor, fontSize: 11, fontWeight: 800 }}>{group.type || "Info"}</span>
+                        </div>
+                        <div style={{ color: C.gray, fontSize: 12, whiteSpace: "pre-wrap" }}>{group.message}</div>
+                        <div style={{ color: C.gray, fontSize: 11 }}>
+                          To: {group.recipients.join(", ") || "—"}
+                        </div>
+                        <div style={{ color: C.gray, fontSize: 11 }}>
+                          By {group.fromName || "Admin"} · {Number.isNaN(createdAt.getTime()) ? "Time unavailable" : createdAt.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}
+                          {" · "}{group.readCount}/{group.recipients.length} read
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>}
+          </section>
         </section>
       )}
 

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { beforeAll, afterAll, describe, test } from "vitest";
 import { initializeTestEnvironment, assertFails, assertSucceeds } from "@firebase/rules-unit-testing";
-import { doc, getDoc, setDoc, updateDoc, addDoc, deleteDoc, collection, getDocs, query, where } from "firebase/firestore";
+import { doc, getDoc, setDoc, updateDoc, addDoc, deleteDoc, collection, getDocs, query, serverTimestamp, where } from "firebase/firestore";
 
 let env;
 const as = (uid) => env.authenticatedContext(uid).firestore();
@@ -15,10 +15,12 @@ beforeAll(async () => {
   await env.clearFirestore();
   await env.withSecurityRulesDisabled(async (ctx) => {
     const db = ctx.firestore();
-    await setDoc(doc(db, "staff/w1"), { role: "waiter" });
+    await setDoc(doc(db, "staff/w1"), { role: "waiter", active: true });
     await setDoc(doc(db, "staff/a1"), { role: "admin" });
     await setDoc(doc(db, "staff/o1"), { role: "owner" });
     await setDoc(doc(db, "staff/m1"), { role: "manager" });
+    await setDoc(doc(db, "staff/inactive1"), { role: "staff", active: false });
+    await setDoc(doc(db, "staff/inactiveAdmin"), { role: "admin", active: false });
     await setDoc(doc(db, "staff/d1"), { role: "delivery" });
     await setDoc(doc(db, "staff/c1"), { role: "cashier" });
     await setDoc(doc(db, "staff/ch1"), { role: "chef" });
@@ -273,6 +275,108 @@ describe("other collections", () => {
     await assertSucceeds(getDocs(query(collection(as("w1"), "notifications"), where("userId", "==", "w1"))));
     await assertFails(getDocs(query(collection(as("w1"), "notifications"), where("userId", "==", "c1"))));
     await assertFails(updateDoc(doc(as("o1"), "notifications/for-w1"), { read: true }));
+  });
+  test("active admin roles can create staff notifications with valid fields", async () => {
+    const validNotification = (overrides = {}) => ({
+      toStaffId: "w1",
+      title: "Shift update",
+      message: "Please check your updated shift schedule.",
+      type: "Info",
+      fromId: "a1",
+      fromName: "Admin",
+      createdAt: serverTimestamp(),
+      expiresAt: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000),
+      read: false,
+      readAt: null,
+      batchId: "batch-001",
+      ...overrides,
+    });
+    await assertSucceeds(setDoc(doc(as("a1"), "staffNotifications/admin-to-w1"), validNotification()));
+    await assertSucceeds(setDoc(doc(as("o1"), "staffNotifications/owner-to-w1"), validNotification({ fromId: "o1", batchId: "batch-002" })));
+    await assertSucceeds(setDoc(doc(as("m1"), "staffNotifications/manager-to-w1"), validNotification({ fromId: "m1", batchId: "batch-003" })));
+    await assertFails(setDoc(doc(as("w1"), "staffNotifications/staff-create"), validNotification({ fromId: "w1" })));
+    await assertFails(setDoc(doc(as("inactiveAdmin"), "staffNotifications/inactive-sender"), validNotification({ fromId: "inactiveAdmin" })));
+    await assertFails(setDoc(doc(as("a1"), "staffNotifications/invalid-type"), validNotification({ type: "Urgent" })));
+    await assertFails(setDoc(doc(as("a1"), "staffNotifications/invalid-title"), validNotification({ title: "T".repeat(61) })));
+    await assertFails(setDoc(doc(as("a1"), "staffNotifications/invalid-message"), validNotification({ message: "M".repeat(301) })));
+    await assertFails(setDoc(doc(as("a1"), "staffNotifications/read-on-create"), validNotification({ read: true })));
+    await assertFails(setDoc(doc(as("a1"), "staffNotifications/read-at-on-create"), validNotification({ readAt: serverTimestamp() })));
+    await assertFails(setDoc(doc(as("a1"), "staffNotifications/wrong-sender"), validNotification({ fromId: "o1" })));
+  });
+  test("staff notification reads are recipient-scoped while admin roles can list all", async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "staffNotifications/for-w1"), {
+        toStaffId: "w1", title: "For waiter", message: "Only the recipient can read this.",
+        type: "Important", fromId: "a1", fromName: "Admin", createdAt: Date.now(),
+        read: false, readAt: null, batchId: "batch-read",
+      });
+      await setDoc(doc(ctx.firestore(), "staffNotifications/for-a1"), {
+        toStaffId: "a1", title: "For admin", message: "Admins cannot update notifications.",
+        type: "Info", fromId: "o1", fromName: "Owner", createdAt: Date.now(),
+        read: false, readAt: null, batchId: "batch-admin",
+      });
+      await setDoc(doc(ctx.firestore(), "staffNotifications/for-m1"), {
+        toStaffId: "m1", title: "For manager", message: "Managers cannot update notifications.",
+        type: "Info", fromId: "o1", fromName: "Owner", createdAt: Date.now(),
+        read: false, readAt: null, batchId: "batch-manager",
+      });
+      await setDoc(doc(ctx.firestore(), "staffNotifications/for-o1"), {
+        toStaffId: "o1", title: "For owner", message: "Owners cannot update notifications.",
+        type: "Info", fromId: "a1", fromName: "Admin", createdAt: Date.now(),
+        read: false, readAt: null, batchId: "batch-owner",
+      });
+    });
+    await assertSucceeds(getDoc(doc(as("w1"), "staffNotifications/for-w1")));
+    await assertFails(getDoc(doc(as("c1"), "staffNotifications/for-w1")));
+    await assertSucceeds(getDocs(query(collection(as("w1"), "staffNotifications"), where("toStaffId", "==", "w1"))));
+    await assertFails(getDocs(collection(as("w1"), "staffNotifications")));
+    await assertSucceeds(getDocs(collection(as("m1"), "staffNotifications")));
+    await assertSucceeds(getDocs(collection(as("a1"), "staffNotifications")));
+    await assertFails(updateDoc(doc(as("a1"), "staffNotifications/for-a1"), {
+      read: true, readAt: serverTimestamp(),
+    }));
+    await assertFails(updateDoc(doc(as("m1"), "staffNotifications/for-m1"), {
+      read: true, readAt: serverTimestamp(),
+    }));
+    await assertFails(updateDoc(doc(as("o1"), "staffNotifications/for-o1"), {
+      read: true, readAt: serverTimestamp(),
+    }));
+  });
+  test("staff can only mark their unread notification as read; admin cannot update it", async () => {
+    await setDoc(doc(as("a1"), "staffNotifications/read-w1"), {
+      toStaffId: "w1", title: "Read test", message: "Mark this notification as read.",
+      type: "Warning", fromId: "a1", fromName: "Admin", createdAt: serverTimestamp(),
+      expiresAt: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000),
+      read: false, readAt: null, batchId: "batch-update",
+    });
+    await assertSucceeds(updateDoc(doc(as("w1"), "staffNotifications/read-w1"), {
+      read: true, readAt: serverTimestamp(),
+    }));
+    await assertFails(updateDoc(doc(as("w1"), "staffNotifications/read-w1"), { message: "Edited" }));
+    await assertFails(updateDoc(doc(as("w1"), "staffNotifications/read-w1"), {
+      read: false, readAt: null,
+    }));
+    await assertFails(updateDoc(doc(as("a1"), "staffNotifications/read-w1"), {
+      read: true, readAt: serverTimestamp(),
+    }));
+  });
+  test("only admin and owner can delete staff notifications", async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      const record = {
+        toStaffId: "w1", title: "Delete test", message: "Delete permission test.",
+        type: "Info", fromId: "a1", fromName: "Admin", createdAt: Date.now(),
+        read: false, readAt: null, batchId: "batch-delete",
+      };
+      await setDoc(doc(db, "staffNotifications/admin-delete"), record);
+      await setDoc(doc(db, "staffNotifications/owner-delete"), record);
+      await setDoc(doc(db, "staffNotifications/manager-delete"), record);
+      await setDoc(doc(db, "staffNotifications/staff-delete"), record);
+    });
+    await assertSucceeds(deleteDoc(doc(as("a1"), "staffNotifications/admin-delete")));
+    await assertSucceeds(deleteDoc(doc(as("o1"), "staffNotifications/owner-delete")));
+    await assertFails(deleteDoc(doc(as("m1"), "staffNotifications/manager-delete")));
+    await assertFails(deleteDoc(doc(as("w1"), "staffNotifications/staff-delete")));
   });
   test("attendance portal list queries are scoped to the authenticated UID", async () => {
     await env.withSecurityRulesDisabled(async (ctx) => {

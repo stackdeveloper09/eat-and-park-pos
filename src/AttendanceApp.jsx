@@ -9,7 +9,7 @@ import {
   signOut,
   updatePassword,
 } from "firebase/auth";
-import { addDoc, collection, doc, getDoc, getDocs, onSnapshot, query, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
+import { addDoc, collection, doc, getDoc, getDocs, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
 import { auth } from "./firebase";
 import { db } from "./firebase";
 import {
@@ -124,10 +124,15 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
   const [legacyAdvanceRecords, setLegacyAdvanceRecords] = useState([]);
   const [leaveRequests, setLeaveRequests] = useState([]);
   const [notifications, setNotifications] = useState([]);
+  const [staffNotifications, setStaffNotifications] = useState([]);
   const [restaurantSettings, setRestaurantSettings] = useState({});
   const [shifts, setShifts] = useState(DEFAULT_SHIFTS);
   const [activeSection, setActiveSection] = useState("home");
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [markingAllNotifications, setMarkingAllNotifications] = useState(false);
+  const [notificationActionError, setNotificationActionError] = useState("");
+  const notificationReadLock = useRef(false);
   const [selectedMonth, setSelectedMonth] = useState(indiaDateKey().slice(0, 7));
   const [language, setLanguage] = useState(() => {
     try { return localStorage.getItem("attendance_language") === "hi" ? "hi" : "en"; } catch { return "en"; }
@@ -149,6 +154,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
     carryForwards: false,
     leaves: false,
     notifications: false,
+    staffNotifications: false,
   });
   const [loading, setLoading] = useState(true);
   const [email, setEmail] = useState("");
@@ -196,7 +202,19 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
   })[String(status || "").toLowerCase()] || status;
   const markDataLoaded = (key) => setDataLoaded((current) => ({ ...current, [key]: true }));
   const staffShift = shifts[staff?.shiftId] || null;
-  const unreadNotifications = notifications.filter((notification) => notification.read !== true).length;
+  const currentUserNotifications = useMemo(() => [
+    ...notifications
+      .filter((notification) => notification.userId === staffUid)
+      .map((notification) => ({ ...notification, collectionName: "notifications" })),
+    ...staffNotifications
+      .filter((notification) => notification.toStaffId === staffUid)
+      .map((notification) => ({ ...notification, userId: notification.toStaffId, collectionName: "staffNotifications" })),
+  ].sort((a, b) => timestampMillis(b.createdAt) - timestampMillis(a.createdAt)), [
+    notifications,
+    staffNotifications,
+    staffUid,
+  ]);
+  const unreadNotifications = currentUserNotifications.filter((notification) => notification.read !== true).length;
 
   const attendanceHistory = useMemo(() => {
     const recordsByDate = new Map();
@@ -337,6 +355,21 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
           setLegacyAdvanceRecords([]);
           setLeaveRequests([]);
           setNotifications([]);
+          setStaffNotifications([]);
+          setNotificationsOpen(false);
+          setNotificationActionError("");
+          setDataLoaded({
+            attendance: false,
+            legacyAttendance: false,
+            advances: false,
+            legacyAdvances: false,
+            payroll: false,
+            payments: false,
+            carryForwards: false,
+            leaves: false,
+            notifications: false,
+            staffNotifications: false,
+          });
           setOptimisticAttendance(null);
           setProfileError("");
           setLoading(false);
@@ -354,6 +387,9 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
         setLegacyAdvanceRecords([]);
         setLeaveRequests([]);
         setNotifications([]);
+        setStaffNotifications([]);
+        setNotificationsOpen(false);
+        setNotificationActionError("");
         setPayroll(null);
         setProfileError("");
         setDataLoaded({
@@ -366,6 +402,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
           carryForwards: false,
           leaves: false,
           notifications: false,
+          staffNotifications: false,
         });
       }
       try {
@@ -572,6 +609,18 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
         setProfileError(`Notifications load nahi hui: ${getErrorMessage(error)}`);
       },
     );
+    const unsubscribeStaffNotifications = onSnapshot(
+      query(collection(db, "staffNotifications"), where("toStaffId", "==", staffUid)),
+      (snapshot) => {
+        setStaffNotifications(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() })));
+        markDataLoaded("staffNotifications");
+      },
+      (error) => {
+        markDataLoaded("staffNotifications");
+        logFirestoreAccessError("Staff notification load failed:", error, staffUid);
+        setProfileError(`Staff notifications load nahi hui: ${getErrorMessage(error)}`);
+      },
+    );
 
     return () => {
       unsubscribeAttendance();
@@ -583,6 +632,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
       unsubscribeCarryForwards();
       unsubscribeLeaves();
       unsubscribeNotifications();
+      unsubscribeStaffNotifications();
     };
   }, [authInitialized, staff, staffUid, user]);
 
@@ -1054,12 +1104,47 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
   };
 
   const markNotificationRead = async (notification) => {
-    if (notification.read === true || notification.userId !== staffUid) return;
+    const isOwned = notification.collectionName === "staffNotifications"
+      ? notification.toStaffId === staffUid
+      : notification.userId === staffUid;
+    if (notification.read === true || !isOwned) return;
     try {
-      await updateDoc(doc(db, "notifications", notification.id), { read: true });
+      await updateDoc(
+        doc(db, notification.collectionName || "notifications", notification.id),
+        notification.collectionName === "staffNotifications"
+          ? { read: true, readAt: serverTimestamp() }
+          : { read: true },
+      );
     } catch (error) {
       console.error("Notification read update failed:", error);
       setProfileError(`Notification update nahi hui: ${getErrorMessage(error)}`);
+    }
+  };
+
+  const markAllNotificationsRead = async () => {
+    if (notificationReadLock.current) return;
+    const unread = currentUserNotifications.filter((notification) => notification.read !== true);
+    if (!unread.length) return;
+    notificationReadLock.current = true;
+    setMarkingAllNotifications(true);
+    setNotificationActionError("");
+    try {
+      for (let offset = 0; offset < unread.length; offset += 450) {
+        const batch = writeBatch(db);
+        unread.slice(offset, offset + 450).forEach((notification) => {
+          const ref = doc(db, notification.collectionName, notification.id);
+          batch.update(ref, notification.collectionName === "staffNotifications"
+            ? { read: true, readAt: serverTimestamp() }
+            : { read: true });
+        });
+        await batch.commit();
+      }
+    } catch (error) {
+      console.error("Mark all notifications read failed:", error);
+      setNotificationActionError(`Sab notifications read nahi hui: ${getErrorMessage(error)}`);
+    } finally {
+      notificationReadLock.current = false;
+      setMarkingAllNotifications(false);
     }
   };
 
@@ -1167,8 +1252,56 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
             <div className="attendance-brand-mark"><span>E<span>&</span>P</span></div>
             <div><strong>Eat & Park</strong><small>STAFF ATTENDANCE</small></div>
           </div>
-          <span className="attendance-topbar-role">{staff.role || "Staff"}</span>
+          <div className="attendance-topbar-actions">
+            <span className="attendance-topbar-role">{staff.role || "Staff"}</span>
+            <button
+              type="button"
+              className="attendance-notification-bell"
+              aria-label={`Notifications${unreadNotifications ? `, ${unreadNotifications} unread` : ""}`}
+              aria-expanded={notificationsOpen}
+              onClick={() => setNotificationsOpen((open) => !open)}
+            >
+              <span aria-hidden="true">🔔</span>
+              {unreadNotifications > 0 && <b>{unreadNotifications > 99 ? "99+" : unreadNotifications}</b>}
+            </button>
+          </div>
         </header>
+
+        {notificationsOpen && (
+          <section className="attendance-notification-popover" aria-label="Notifications">
+            <header>
+              <strong>Notifications{unreadNotifications ? ` · ${unreadNotifications} unread` : ""}</strong>
+              <button
+                type="button"
+                onClick={markAllNotificationsRead}
+                disabled={!unreadNotifications || markingAllNotifications}
+              >
+                {markingAllNotifications ? "Saving..." : "Sab read karo"}
+              </button>
+            </header>
+            {notificationActionError && <div className="attendance-error" role="alert">{notificationActionError}</div>}
+            {currentUserNotifications.length === 0
+              ? <div className="attendance-notification-empty">Abhi koi notification nahi</div>
+              : currentUserNotifications.slice(0, 50).map((notification) => {
+                const type = notification.type || "Info";
+                return (
+                  <button
+                    type="button"
+                    key={`${notification.collectionName}-${notification.id}`}
+                    onClick={() => markNotificationRead(notification)}
+                    className={`attendance-notification attendance-notification-popover-item ${notification.read ? "" : "is-unread"}`}
+                  >
+                    <span>
+                      <strong>{notification.title}</strong>
+                      <small>{notification.message}</small>
+                      <em className={`attendance-notification-type type-${type.toLowerCase()}`}>{type}</em>
+                    </span>
+                    <time>{new Date(timestampMillis(notification.createdAt)).toLocaleString(locale, { timeZone: "Asia/Kolkata" })}</time>
+                  </button>
+                );
+              })}
+          </section>
+        )}
 
         {drawerOpen && (
           <div className="attendance-drawer-overlay" onClick={() => setDrawerOpen(false)}>
@@ -1611,20 +1744,32 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
 
         {activeSection === "notifications" && <section style={{ ...panelStyle, marginTop: 14 }}>
           <h2 style={{ margin: "0 0 12px", fontSize: 17 }}>{t("notifications")}{unreadNotifications ? ` · ${unreadNotifications} ${t("unread")}` : ""}</h2>
-          {notifications.length === 0
-            ? <div style={{ color: "#9ba8ba", fontSize: 13 }}>{t("noRecords")}</div>
-            : notifications.map((notification) => (
+          {notificationActionError && <div className="attendance-error" role="alert">{notificationActionError}</div>}
+          {unreadNotifications > 0 && (
+            <button type="button" onClick={markAllNotificationsRead} disabled={markingAllNotifications} style={dashboardButtonStyle}>
+              {markingAllNotifications ? "Saving..." : "Sab read karo"}
+            </button>
+          )}
+          {currentUserNotifications.length === 0
+            ? <div className="attendance-notification-empty">Abhi koi notification nahi</div>
+            : currentUserNotifications.map((notification) => {
+              const type = notification.type || "Info";
+              return (
               <button
                 type="button"
-                key={notification.id}
+                key={`${notification.collectionName}-${notification.id}`}
                 onClick={() => markNotificationRead(notification)}
-                disabled={notification.userId !== staffUid}
                 className={`attendance-notification ${notification.read ? "" : "is-unread"}`}
               >
-                <span><strong>{notification.title}</strong><small>{notification.message}</small></span>
-                <time>{new Date(timestampMillis(notification.createdAt)).toLocaleDateString(locale)}</time>
+                <span>
+                  <strong>{notification.title}</strong>
+                  <small>{notification.message}</small>
+                  <em className={`attendance-notification-type type-${type.toLowerCase()}`}>{type}</em>
+                </span>
+                <time>{new Date(timestampMillis(notification.createdAt)).toLocaleString(locale, { timeZone: "Asia/Kolkata" })}</time>
               </button>
-            ))}
+              );
+            })}
         </section>}
 
         {activeSection === "settings" && <section style={{ ...panelStyle, marginTop: 14 }}>
