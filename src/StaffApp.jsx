@@ -126,18 +126,20 @@ input:focus, textarea:focus { border-color: #B8860B !important; box-shadow: 0 0 
 .ep-payment-options button { min-width: 0; height: 42px; padding: 5px 4px; font-size: 13px; }
 .ep-payment-inputs { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
 .ep-payment-inputs input { flex: 1 1 0; min-width: 0; width: 0; height: 32px; box-sizing: border-box; padding: 5px 8px; font-size: 12px; }
-@media (max-width: 899px) {
+@media (max-width: 768px) {
   .ep-billing-layout { flex: 1 1 auto; height: 100%; flex-direction: column; overflow: hidden; padding: 8px; box-sizing: border-box; }
   .ep-billing-menu-column { width: 100%; height: 100%; flex: 1 1 auto; }
   .ep-order-panel { width: 100% !important; height: 100% !important; min-height: 0; flex: 1 1 auto; }
   .ep-menu-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-  .ep-category-chips { max-width: 100%; }
+  .ep-category-chips { max-width: 100%; position: sticky; top: 0; z-index: 5; background: #0B111A; }
   .ep-order-customer { flex: 0 0 44px; height: 44px; }
   .ep-order-customer input { height: 36px; }
   .ep-order-extras { flex: 0 0 84px; }
   .ep-order-footer { flex: 0 0 auto; min-height: 56px; }
   .ep-payment-options { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .ep-payment-options button { height: 44px; }
+  .ep-payment-bar { position: sticky; bottom: 0; z-index: 4; }
+  input, textarea, select { font-size: 16px !important; }
   .ep-mobile-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); height: 48px; flex: 0 0 48px; background: #0B111A; border-bottom: 1px solid #273449; }
   .ep-mobile-tabs button { min-width: 0; min-height: 44px; border: 0; border-bottom: 3px solid transparent; background: transparent; color: #8B9BB4; font-size: 12px; font-weight: 800; }
   .ep-mobile-tabs button.is-active { border-bottom-color: #B8860B; color: #D4A72C; }
@@ -345,7 +347,7 @@ function ModalShell({ C, open, onClose, isMobile, title, icon, children, maxWidt
       <div onClick={e => e.stopPropagation()} style={{
         background: C.card, borderRadius: isMobile ? "20px 20px 0 0" : 16,
         padding: 24, width: "100%", maxWidth: isMobile ? "100%" : maxWidth,
-        maxHeight: isMobile ? "92vh" : "88vh", overflowY: "auto",
+        maxHeight: isMobile ? "92dvh" : "88dvh", overflowY: "auto",
         animation: isMobile ? "slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1)" : "scaleIn 0.18s ease-out",
         boxShadow: "0 -8px 40px rgba(0,0,0,0.25)",
       }}>
@@ -627,7 +629,7 @@ function EstimatePanel({ C, menu, orders, isMobile, items, setItems, persons, se
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.55)", backdropFilter: "blur(4px)", zIndex: 9999, display: "flex", alignItems: isMobile ? "flex-end" : "center", justifyContent: "center", padding: isMobile ? 0 : 16 }} onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} style={{ textAlign: "left", background: C.card, color: C.ink, borderRadius: isMobile ? "20px 20px 0 0" : 16, width: "100%", maxWidth: isMobile ? "100%" : 620, height: isMobile ? "94vh" : "88vh", display: "flex", flexDirection: "column", overflow: "hidden", animation: isMobile ? "slideUp .25s ease-out" : "scaleIn .18s ease-out", boxShadow: "0 -8px 40px rgba(0,0,0,.25)" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ textAlign: "left", background: C.card, color: C.ink, borderRadius: isMobile ? "20px 20px 0 0" : 16, width: "100%", maxWidth: isMobile ? "100%" : 620, height: isMobile ? "94dvh" : "88dvh", display: "flex", flexDirection: "column", overflow: "hidden", animation: isMobile ? "slideUp .25s ease-out" : "scaleIn .18s ease-out", boxShadow: "0 -8px 40px rgba(0,0,0,.25)" }}>
 
         {/* HEADER */}
         <div style={{ padding: "14px 16px 10px", borderBottom: "1px solid " + C.line, flexShrink: 0 }}>
@@ -844,10 +846,10 @@ function StaffAppInner() {
     return () => { u1(); u2(); };
   }, [passwordChangeRequired, user]);
   const [viewMode, setViewMode] = useState(() => safeStorageGet("staff_view_mode", "auto"));
-  const [autoMobile, setAutoMobile] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches);
+  const [autoMobile, setAutoMobile] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 768px)").matches);
 
   useEffect(() => {
-    const mq = window.matchMedia("(max-width: 767px)");
+    const mq = window.matchMedia("(max-width: 768px)");
     const handler = (e) => setAutoMobile(e.matches);
     if (mq.addEventListener) mq.addEventListener("change", handler);
     else mq.addListener(handler);
@@ -1274,7 +1276,7 @@ function StaffAppInner() {
       {/* SIDEBAR */}
       {sidebarOpen && (
         <div style={{ position: "fixed", inset: 0, zIndex: 200, display: "flex", animation: "fadeIn 0.15s ease-out" }} onClick={() => setSidebarOpen(false)}>
-          <div onClick={e => e.stopPropagation()} style={{ width: isMobile ? "82%" : 280, maxWidth: isMobile ? 320 : undefined, background: C.card, height: "100%", padding: 20, display: "flex", flexDirection: "column", gap: 6, boxShadow: "4px 0 24px rgba(0,0,0,0.15)", overflowY: "auto", animation: "slideInRight 0.25s cubic-bezier(0.16, 1, 0.3, 1)" }}>
+          <div onClick={e => e.stopPropagation()} style={{ width: isMobile ? "82%" : 280, maxWidth: isMobile ? 320 : undefined, background: C.card, height: isMobile ? "100dvh" : "100%", padding: 20, display: "flex", flexDirection: "column", gap: 6, boxShadow: "4px 0 24px rgba(0,0,0,0.15)", overflowY: "auto", animation: "slideInRight 0.25s cubic-bezier(0.16, 1, 0.3, 1)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <div style={{ width: 44, height: 44, background: `linear-gradient(135deg, ${C.gold} 0%, ${C.goldDark} 100%)`, borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>🍽️</div>
@@ -1491,7 +1493,7 @@ function TablesView({ C, isMobile, orders, onTableClick, onEditBill, onAddMore, 
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}><h2 style={{ margin: 0, fontSize: isMobile ? 18 : 22, fontWeight: 800, color: C.ink }}>Tables</h2><button onClick={() => onTableClick("parcel")} style={{ padding: "7px 12px", border: "none", borderRadius: 8, background: C.red, color: "#fff", fontWeight: 800, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>🛍️ Parcel</button></div>
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search table..." style={{ padding: "9px 14px", border: `1px solid ${C.line}`, borderRadius: 8, fontSize: 13, outline: "none", width: isMobile ? "100%" : 180, background: C.card, color: C.ink }} />
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(auto-fill, minmax(160px, 1fr))", gap: isMobile ? 8 : 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(160px, 1fr))", gap: isMobile ? 10 : 12 }}>
         {filteredTables.map(t => (
           <div key={t.table} style={{
             background: t.heatBg,
