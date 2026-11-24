@@ -104,9 +104,13 @@ input:focus, textarea:focus { border-color: #B8860B !important; box-shadow: 0 0 
 .ep-noscroll { scrollbar-width: none; -ms-overflow-style: none; }
 .ep-noscroll::-webkit-scrollbar { display: none; }
 /* Order entry uses independent scroll areas for the menu grid and the cart only. */
+.ep-billing-root { height: 100dvh; min-height: 0; }
 .ep-billing-layout { flex: 1 1 auto; min-height: 0; display: flex; gap: 8px; overflow: hidden; padding: 2px; box-sizing: border-box; }
 .ep-billing-menu-column { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 6px; overflow: hidden; }
 .ep-menu-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; flex: 1 1 auto; min-height: 0; overflow-y: auto; align-content: start; padding: 0 2px 2px 0; }
+.ep-category-chips { display: flex; flex-wrap: nowrap; gap: 6px; overflow-x: auto; overflow-y: hidden; white-space: nowrap; padding-bottom: 2px; flex-shrink: 0; scrollbar-width: thin; }
+.ep-category-chips button { flex: 0 0 auto; }
+.ep-mobile-tabs, .ep-mobile-cart-bar, .ep-mobile-send-kot { display: none; }
 .ep-order-panel { flex: 0 0 432px; min-width: 0; min-height: 0; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
 .ep-order-customer { flex: 0 0 38px; display: flex; align-items: center; gap: 6px; padding: 4px 8px; box-sizing: border-box; border-bottom: 1px solid #273449; }
 .ep-order-customer input { min-width: 0; flex: 1 1 0; height: 30px; box-sizing: border-box; padding: 5px 8px; font-size: 13px; }
@@ -122,11 +126,26 @@ input:focus, textarea:focus { border-color: #B8860B !important; box-shadow: 0 0 
 .ep-payment-options button { min-width: 0; height: 42px; padding: 5px 4px; font-size: 13px; }
 .ep-payment-inputs { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
 .ep-payment-inputs input { flex: 1 1 0; min-width: 0; width: 0; height: 32px; box-sizing: border-box; padding: 5px 8px; font-size: 12px; }
-@media (max-width: 700px) {
-  .ep-billing-layout { overflow: auto; padding: 8px; }
-  .ep-billing-menu-column { flex: 0 0 44vh; }
-  .ep-order-panel { flex: 0 0 auto; width: 100%; height: auto; min-height: 400px; }
-  .ep-order-items { min-height: 0; }
+@media (max-width: 899px) {
+  .ep-billing-layout { flex: 1 1 auto; height: 100%; flex-direction: column; overflow: hidden; padding: 8px; box-sizing: border-box; }
+  .ep-billing-menu-column { width: 100%; height: 100%; flex: 1 1 auto; }
+  .ep-order-panel { width: 100% !important; height: 100% !important; min-height: 0; flex: 1 1 auto; }
+  .ep-menu-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .ep-category-chips { max-width: 100%; }
+  .ep-order-customer { flex: 0 0 44px; height: 44px; }
+  .ep-order-customer input { height: 36px; }
+  .ep-order-extras { flex: 0 0 84px; }
+  .ep-order-footer { flex: 0 0 auto; min-height: 56px; }
+  .ep-payment-options { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .ep-payment-options button { height: 44px; }
+  .ep-mobile-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); height: 48px; flex: 0 0 48px; background: #0B111A; border-bottom: 1px solid #273449; }
+  .ep-mobile-tabs button { min-width: 0; min-height: 44px; border: 0; border-bottom: 3px solid transparent; background: transparent; color: #8B9BB4; font-size: 12px; font-weight: 800; }
+  .ep-mobile-tabs button.is-active { border-bottom-color: #B8860B; color: #D4A72C; }
+  .ep-mobile-cart-bar { display: flex; position: fixed; left: 0; right: 0; bottom: 0; min-height: 64px; z-index: 101; align-items: center; gap: 10px; padding: 8px 10px; box-sizing: border-box; background: #151B2B; border-top: 1px solid #273449; box-shadow: 0 -6px 18px rgba(0,0,0,0.28); }
+  .ep-mobile-cart-bar button { min-height: 44px; }
+  .ep-mobile-send-kot { display: flex; width: 100%; min-height: 44px; align-items: center; justify-content: center; border: 0; border-radius: 8px; background: #B8860B; color: #fff; font-weight: 900; }
+  .ep-payment-inputs { flex-wrap: wrap; }
+  .ep-payment-inputs input { min-width: 0; }
 }
 @media (hover: hover) { .ep-card:hover { box-shadow: 0 8px 20px rgba(184,134,11,0.22) !important; border-color: #B8860B !important; transform: translateY(-1px); } }
 button:focus-visible, select:focus-visible { outline: 2px solid #B8860B; outline-offset: 2px; }
@@ -2335,6 +2354,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 150);
   const [category, setCategory] = useState("All");
+  const [mobileBillingTab, setMobileBillingTab] = useState("menu");
   const [showFav, setShowFav] = useState(() => { try { return localStorage.getItem("staff_fav_open") === "1"; } catch (e) { return false; } });
   const [pinnedIds, setPinnedIds] = useState([]);
   useEffect(() => {
@@ -2803,7 +2823,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
   };
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: C.bg, zIndex: 100, display: "flex", flexDirection: "column", animation: "fadeIn 0.2s" }}>
+    <div className="ep-billing-root" style={{ position: "fixed", inset: 0, background: C.bg, zIndex: 100, display: "flex", flexDirection: "column", animation: "fadeIn 0.2s" }}>
       <div style={{ background: `linear-gradient(135deg, ${C.gold} 0%, ${C.goldDark} 100%)`, color: "#fff", padding: isMobile ? "10px 12px" : "4px 12px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
             <button onClick={onBack} style={{ background: "rgba(255,255,255,0.18)", border: "none", color: "#fff", padding: isMobile ? "8px 12px" : "5px 10px", borderRadius: 7, fontWeight: 700, cursor: "pointer", fontSize: isMobile ? 12 : 12, flexShrink: 0 }}>← Back</button>
             <div style={{ fontWeight: 800, fontSize: isMobile ? 13 : 14, textAlign: "center", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -2819,41 +2839,61 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
         </div>
       )}
 
+      {isMobile && (
+        <nav className="ep-mobile-tabs" aria-label="Billing sections">
+          {[["menu", "Menu"], ["order", `Order (${cartItems.length})`], ["payment", "Payment"]].map(([id, label]) => (
+            <button key={id} type="button" className={mobileBillingTab === id ? "is-active" : ""} aria-current={mobileBillingTab === id ? "page" : undefined} onClick={() => setMobileBillingTab(id)}>{label}</button>
+          ))}
+        </nav>
+      )}
+
       {/* Menu and order columns fill the space below the orange header; each column owns its own scroll area. */}
-      <div className="ep-billing-layout" style={{ flexDirection: isMobile ? "column" : "row", overflow: isMobile ? "auto" : "hidden", padding: isMobile ? 8 : 6, paddingBottom: isMobile ? 80 : 6 }}>
-        <div className="ep-billing-menu-column" style={{ height: isMobile ? "44vh" : "100%", flex: isMobile ? "0 0 44vh" : "1 1 auto" }}>
-          {favItems.length > 0 && !search.trim() && (
+      <div className="ep-billing-layout" style={{ flexDirection: isMobile ? "column" : "row", overflow: isMobile ? "hidden" : "hidden", padding: isMobile ? 8 : 6, paddingBottom: isMobile ? 72 : 6 }}>
+        <div className="ep-billing-menu-column" style={{ display: isMobile && mobileBillingTab === "order" ? "none" : "flex", height: isMobile ? "100%" : "100%", flex: isMobile ? "1 1 auto" : "1 1 auto" }}>
+          {isMobile && mobileBillingTab === "payment" && (
+            <div style={{ flex: "0 0 auto", display: "grid", gap: 10 }}>
+              <div style={{ fontSize: 16, fontWeight: 900, color: C.ink }}>Payment</div>
+              <div style={{ fontSize: 13, color: C.gray }}>Total <strong style={{ color: C.goldText, fontFamily: "monospace", marginLeft: 5 }}>{inr(totalAmount)}</strong></div>
+            </div>
+          )}
+          {isMobile && mobileBillingTab === "payment" ? null : favItems.length > 0 && !search.trim() && (
             <button onClick={() => { haptic(); setShowFav((v) => { const n = !v; try { localStorage.setItem("staff_fav_open", n ? "1" : "0"); } catch (e) {} return n; }); }} style={{ alignSelf: "flex-start", display: "flex", alignItems: "center", gap: 5, padding: "6px 10px", borderRadius: 999, border: "1px solid " + C.gold, background: showFav ? C.gold : C.card, color: showFav ? "#fff" : C.goldText, fontWeight: 800, fontSize: 11, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>⭐ Favourites ({favItems.length}) {showFav ? "▲" : "▼"}</button>
           )}
-          {showFav && favItems.length > 0 && !search.trim() && (
+          {!(isMobile && mobileBillingTab === "payment") && showFav && favItems.length > 0 && !search.trim() && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 4, padding: 6, background: C.goldLight, border: "1px solid " + C.line, borderRadius: 10, flexShrink: 0 }}>
               {favItems.map((m) => (
                 <button key={"fav" + m.id} onClick={() => setQty(m.id, (cart[m.id] || 0) + 1)} style={{ padding: "5px 8px", borderRadius: 20, border: "1px solid " + (C.gold || C.red), background: cart[m.id] ? (C.gold || C.red) : C.card, color: cart[m.id] ? "#fff" : C.ink, fontWeight: 800, fontSize: 10, cursor: "pointer", whiteSpace: "nowrap", fontFamily: "inherit", flexShrink: 0 }}>{pinnedIds.includes(m.id) ? "📌" : "⭐"} {m.name}{cart[m.id] ? " ×" + cart[m.id] : ""}</button>
               ))}
             </div>
           )}
-          <div style={{ position: "relative", flexShrink: 0 }}><input placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)} style={{ width: "100%", boxSizing: "border-box", height: 34, padding: "6px 36px 6px 10px", border: `1px solid ${C.line}`, borderRadius: 7, fontSize: 13, outline: "none", background: C.card, color: C.ink }} />{search && <button aria-label="Search clear" onClick={() => setSearch("")} style={{ position: "absolute", top: 3, right: 4, width: 28, height: 28, border: "none", borderRadius: 14, background: C.cardAlt, color: C.gray, fontSize: 13, fontWeight: 800, cursor: "pointer", padding: 0 }}>✕</button>}</div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 4, overflow: "hidden", paddingBottom: 1, flexShrink: 0 }}>
+          {isMobile && mobileBillingTab === "payment" ? null : (
+            <div style={{ position: "relative", flexShrink: 0 }}><input placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)} style={{ width: "100%", boxSizing: "border-box", height: 34, padding: "6px 36px 6px 10px", border: `1px solid ${C.line}`, borderRadius: 7, fontSize: 13, outline: "none", background: C.card, color: C.ink }} />{search && <button aria-label="Search clear" onClick={() => setSearch("")} style={{ position: "absolute", top: 3, right: 4, width: 28, height: 28, border: "none", borderRadius: 14, background: C.cardAlt, color: C.gray, fontSize: 13, fontWeight: 800, cursor: "pointer", padding: 0 }}>✕</button>}</div>
+          )}
+          {isMobile && mobileBillingTab === "payment" ? null : (
+            <div className="ep-category-chips" style={{ paddingBottom: 1 }}>
             {categories.map(c => (
               <button key={c} onClick={() => { haptic(); setCategory(c); }} style={{ padding: "5px 10px", borderRadius: 999, boxShadow: category === c ? "0 3px 10px rgba(184,134,11,0.30)" : "none", border: `1px solid ${category === c ? C.gold : C.line}`, background: category === c ? C.gold : C.card, color: category === c ? "#fff" : C.gray, fontWeight: 700, fontSize: 11, cursor: "pointer", whiteSpace: "nowrap", fontFamily: "inherit", flexShrink: 0 }}>{c}</button>
             ))}
-          </div>
-          <div className="ep-menu-grid" style={{ gridTemplateColumns: isMobile ? "1fr 1fr" : undefined }}>
+            </div>
+          )}
+          {isMobile && mobileBillingTab === "payment" ? null : (
+            <div className="ep-menu-grid" style={{ gridTemplateColumns: isMobile ? "repeat(2, minmax(0, 1fr))" : undefined }}>
             {filtered.map(m => {
               const q = cart[m.id] || 0;
               return (
                 <button key={m.id} onClick={() => setQty(m.id, q + 1)} className="ep-card" style={{ textAlign: "left", padding: 8, borderRadius: 10, border: `1.5px solid ${q > 0 ? C.green : C.line}`, background: q > 0 ? C.greenLight : C.card, boxShadow: q > 0 ? "0 2px 10px rgba(22,163,74,0.15)" : "0 1px 3px rgba(0,0,0,0.05)", cursor: "pointer", position: "relative", fontFamily: "inherit", minHeight: 64, color: C.ink, display: "flex", flexDirection: "column", justifyContent: "space-between", gap: 3 }}>
                   <div style={{ fontSize: 13, fontWeight: 700, color: C.ink, marginBottom: 2, lineHeight: 1.2, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", paddingRight: 20 }}>{m.name}</div>
-                  {isOwner && <span role="button" title="Favourite pin" onClick={(e) => { e.stopPropagation(); togglePin(m.id); }} style={{ position: "absolute", bottom: 4, right: 6, fontSize: 16, lineHeight: 1, padding: 4, cursor: "pointer", opacity: pinnedIds.includes(m.id) ? 1 : 0.35 }}>{pinnedIds.includes(m.id) ? "⭐" : "☆"}</span>}
+                  {isOwner && <span role="button" title="Favourite pin" onClick={(e) => { e.stopPropagation(); togglePin(m.id); }} style={{ position: "absolute", top: 6, right: 6, fontSize: 16, lineHeight: 1, padding: 4, cursor: "pointer", zIndex: 2, opacity: pinnedIds.includes(m.id) ? 1 : 0.35 }}>{pinnedIds.includes(m.id) ? "⭐" : "☆"}</span>}
                   <div style={{ fontSize: 13, fontWeight: 900, color: C.goldText, fontFamily: "monospace" }}>{inr(m.price)}</div>
-                  {q > 0 && <span style={{ position: "absolute", top: 6, right: 6, background: C.green, color: "#fff", borderRadius: 12, padding: "2px 9px", fontSize: 11, fontWeight: 800, boxShadow: "0 2px 6px rgba(22,163,74,0.35)", animation: "successBounce 0.3s" }}>{q}</span>}
+                  {q > 0 && <span style={{ position: "absolute", bottom: 6, right: 6, background: C.green, color: "#fff", borderRadius: 12, padding: "2px 9px", fontSize: 11, fontWeight: 800, boxShadow: "0 2px 6px rgba(22,163,74,0.35)", animation: "successBounce 0.3s" }}>{q}</span>}
                 </button>
               );
             })}
             {filtered.length === 0 && <div style={{ gridColumn: "1 / -1", textAlign: "center", padding: 40, color: C.gray }}><div style={{ fontSize: 36, marginBottom: 8 }}>🍽️</div><div style={{ fontSize: 13, fontWeight: 700 }}>{menu.length === 0 ? "Menu load ho raha hai..." : "Koi matching item nahi"}</div></div>}
-          </div>
+            </div>
+          )}
           {/* Payment controls stay fixed below the independently scrolling menu grid. */}
-          {!addMoreMode && (
+          {!addMoreMode && (!isMobile || mobileBillingTab === "payment") && (
             <>
               {payMode === "split" && (
                 <div className="ep-payment-inputs" style={{ padding: "0 8px" }}>
@@ -2890,7 +2930,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
         </div>
 
         {/* Right panel: stable header/customer/extras/footer; only its cart list scrolls. */}
-        <div className="ep-order-panel" style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 16, boxShadow: "0 12px 32px rgba(0,0,0,0.16)", width: isMobile ? "100%" : 432, minHeight: isMobile ? 400 : 0, height: isMobile ? undefined : "100%" }}>
+        <div className="ep-order-panel" style={{ display: isMobile && mobileBillingTab !== "order" ? "none" : "flex", background: C.card, border: `1px solid ${C.line}`, borderRadius: 16, boxShadow: "0 12px 32px rgba(0,0,0,0.16)", width: isMobile ? "100%" : 432, minHeight: isMobile ? 0 : 0, height: isMobile ? "100%" : "100%" }}>
           <div style={{ padding: "6px 10px", borderBottom: `1px solid ${C.line}`, background: C.cardAlt, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, minHeight: 40, boxSizing: "border-box" }}>
             <div style={{ minWidth: 0 }}>
               <div style={{ fontWeight: 900, fontSize: 13, color: C.ink, letterSpacing: 0.1 }}>{addMoreMode ? "Add items" : existingOrder ? "Checkout" : "New order"}</div>
@@ -3025,13 +3065,20 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
       </ModalShell>
 
       {/* STICKY MOBILE CART BAR */}
-      {isMobile && cartItems.length > 0 && !(existingOrder && addMoreMode) && (
-        <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: C.card, borderTop: `1px solid ${C.line}`, padding: 12, boxShadow: "0 -4px 16px rgba(0,0,0,0.1)", zIndex: 101, display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ flex: 1 }}>
+      {isMobile && mobileBillingTab === "menu" && cartItems.length > 0 && !(existingOrder && addMoreMode) && (
+        <div className="ep-mobile-cart-bar">
+          <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 10, color: C.gray, fontWeight: 800, textTransform: "uppercase" }}>{cartItems.length} items</div>
             <div style={{ fontSize: 20, fontWeight: 900, color: C.goldText, fontFamily: "monospace" }}>{inr(totalAmount)}</div>
           </div>
-          <button onClick={existingOrder ? handleSaveBill : handlePlaceOrder} disabled={placing || !!(existingOrder && existingOrder.paid)} style={{ padding: "14px 24px", border: "none", borderRadius: 10, background: `linear-gradient(135deg, ${C.gold} 0%, ${C.goldDark} 100%)`, color: "#fff", fontWeight: 900, fontSize: 14, cursor: placing ? "not-allowed" : "pointer", fontFamily: "inherit", boxShadow: `0 6px 16px ${C.gold}55`, display: "flex", alignItems: "center", gap: 8 }}>{placing ? <Spinner /> : existingOrder ? "Save Bill" : "Place Order"}</button>
+          <button type="button" onClick={() => setMobileBillingTab("order")} style={{ minWidth: 118, padding: "10px 14px", border: "none", borderRadius: 8, background: `linear-gradient(135deg, ${C.gold} 0%, ${C.goldDark} 100%)`, color: "#fff", fontWeight: 900, fontSize: 13, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>View Order</button>
+        </div>
+      )}
+      {isMobile && mobileBillingTab === "payment" && !addMoreMode && (
+        <div className="ep-mobile-cart-bar">
+          <button type="button" className="ep-mobile-send-kot" onClick={existingOrder ? handlePaidPrint : handlePlaceOrder} disabled={placing || cartItems.length === 0}>
+            {placing ? <Spinner /> : existingOrder ? `Collect ${inr(totalAmount)} & print` : "Send KOT"}
+          </button>
         </div>
       )}
     </div>
