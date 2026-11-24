@@ -63,11 +63,11 @@ function safeStorageRemove(key) {
 // COLORS
 // ===========================================================================
 const VELOX_DARK = {
-  bg: "#0B111A", card: "#161F2F", cardAlt: "#1E293B", ink: "#FFFFFF",
-  gray: "#8B9BB4", light: "#0B111A", line: "#273449",
-  red: "#EF4444", redLight: "#451A1A", green: "#10B981", greenLight: "#0A2A20",
-  amber: "#F59E0B", amberLight: "#3A2510", blue: "#3B82F6", blueLight: "#152A4A",
-  gold: "#FF5A1F", goldDark: "#E04814", goldLight: "#2A1A15", goldText: "#FF8C5A",
+  bg: "#101827", card: "#151b2b", cardAlt: "#20283a", ink: "#f5f7fb",
+  gray: "#9ba8ba", light: "#101827", line: "#30394c",
+  red: "#c83b32", redLight: "#451A1A", green: "#16845b", greenLight: "#102820",
+  amber: "#b76e00", amberLight: "#3A2510", blue: "#3b82f6", blueLight: "#152A4A",
+  gold: "#e88762", goldDark: "#dd5735", goldLight: "#3A2520", goldText: "#ef7546",
 };
 // ===========================================================================
 // GLOBAL CSS (animations, press states, shimmer)
@@ -629,7 +629,7 @@ function EstimatePanel({ C, menu, orders, isMobile, items, setItems, persons, se
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.55)", backdropFilter: "blur(4px)", zIndex: 9999, display: "flex", alignItems: isMobile ? "flex-end" : "center", justifyContent: "center", padding: isMobile ? 0 : 16 }} onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} style={{ textAlign: "left", background: C.card, color: C.ink, borderRadius: isMobile ? "20px 20px 0 0" : 16, width: "100%", maxWidth: isMobile ? "100%" : 620, height: isMobile ? "94dvh" : "88dvh", display: "flex", flexDirection: "column", overflow: "hidden", animation: isMobile ? "slideUp .25s ease-out" : "scaleIn .18s ease-out", boxShadow: "0 -8px 40px rgba(0,0,0,.25)" }}>
+      <div className="ep-modal" onClick={(e) => e.stopPropagation()} style={{ textAlign: "left", background: C.card, color: C.ink, borderRadius: isMobile ? "20px 20px 0 0" : 16, width: "100%", maxWidth: isMobile ? "100%" : 620, height: isMobile ? "94dvh" : "88dvh", display: "flex", flexDirection: "column", overflow: "hidden", animation: isMobile ? "slideUp .25s ease-out" : "scaleIn .18s ease-out", boxShadow: "0 -8px 40px rgba(0,0,0,.25)" }}>
 
         {/* HEADER */}
         <div style={{ padding: "14px 16px 10px", borderBottom: "1px solid " + C.line, flexShrink: 0 }}>
@@ -1110,10 +1110,10 @@ function StaffAppInner() {
   const todayRevenue = paidRevenue(orders.filter(o => o.createdAt >= startOfToday.getTime()));
 
   return (
-    <div style={{ minHeight: "100vh", background: C.bg, fontFamily: "system-ui, sans-serif", display: "flex", flexDirection: "row", color: C.ink }}>
+    <div className="ep-shell" style={{ minHeight: "100dvh", background: C.bg, fontFamily: "system-ui, sans-serif", display: "flex", flexDirection: "row", color: C.ink }}>
       
       {!isMobile && !legacyUI && (
-        <div style={{ width: 260, background: C.card, borderRight: `1px solid ${C.line}`, display: "flex", flexDirection: "column", flexShrink: 0 }}>
+        <div className="ep-sidebar" style={{ width: 260, background: C.card, borderRight: `1px solid ${C.line}`, display: "flex", flexDirection: "column", flexShrink: 0 }}>
           <div style={{ padding: "24px 20px", display: "flex", alignItems: "center", gap: 12 }}>
             <div style={{ width: 40, height: 40, background: C.gold, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, color: "#fff" }}>🍽️</div>
             <div><div style={{ fontWeight: 800, fontSize: 15 }}>Eat & Park Restaurant</div><div style={{ fontSize: 11, color: C.gray }}>Staff Panel</div></div>
@@ -1150,7 +1150,7 @@ function StaffAppInner() {
       <Confetti show={confetti} />
 
       {/* TOP BAR */}
-      <div style={{ display: "flex", background: `linear-gradient(135deg, ${C.gold} 0%, ${C.goldDark} 100%)`, color: "#fff", padding: isMobile ? "10px 10px" : "14px 20px", justifyContent: "space-between", alignItems: "center", boxShadow: "0 4px 16px rgba(184,134,11,0.30)", position: "sticky", top: 0, zIndex: 50, gap: 8 }}>
+      <div className="ep-topbar" style={{ display: "flex", background: `linear-gradient(135deg, ${C.gold} 0%, ${C.goldDark} 100%)`, color: "#fff", padding: isMobile ? "10px 10px" : "14px 20px", justifyContent: "space-between", alignItems: "center", boxShadow: "0 4px 16px rgba(184,134,11,0.30)", position: "sticky", top: 0, zIndex: 50, gap: 8 }}>
         <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 8 : 14, minWidth: 0, flex: 1 }}>
           <button onClick={() => { haptic(); setSidebarOpen(true); }} style={{ background: "rgba(255,255,255,0.18)", border: "none", color: "#fff", width: isMobile ? 34 : 38, height: isMobile ? 34 : 38, borderRadius: 8, fontSize: 18, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>☰</button>
           {!isMobile && <div style={{ width: 42, height: 42, background: "rgba(255,255,255,0.2)", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>🍽️</div>}
@@ -1171,7 +1171,7 @@ function StaffAppInner() {
       </div>
 
       {/* TABS */}
-      <div style={{ display: "flex", background: C.card, borderBottom: `1px solid ${C.line}`, padding: isMobile ? "0 8px" : "0 16px", gap: 4, overflowX: "auto", alignItems: "center" }}>
+      <div className="ep-tabs" style={{ display: "flex", background: C.card, borderBottom: `1px solid ${C.line}`, padding: isMobile ? "0 8px" : "0 16px", gap: 4, overflowX: "auto", alignItems: "center" }}>
         <button onClick={() => { haptic(); setShowEstimate(true); }} style={{ padding: isMobile ? "12px 12px" : "15px 20px", border: "none", background: "transparent", color: C.green, fontWeight: 900, fontSize: isMobile ? 12 : 13, cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0, borderBottom: `3px solid ${C.green}` }}>📋 Estimate{estItems.length ? ` (${estItems.length})` : ""}</button>
         {[
           { id: "tables", label: `🍽️ Tables` }, { id: "parcel", label: `🛍️ Parcel${parcelCount ? ` (${parcelCount})` : ""}` },
@@ -1186,7 +1186,7 @@ function StaffAppInner() {
         ))}
       </div>
       {/* CONTENT */}
-      <div style={{ flex: 1, overflow: "auto", padding: isMobile ? 10 : 16 }}>
+      <div className="ep-content" style={{ flex: 1, overflow: "auto", padding: isMobile ? 10 : 16 }}>
         
 {estimatePending && Object.keys(cart).length > 0 && !selectedTable && (activeTab === "tables" || activeTab === "parcel") && (
   <div style={{ background: C.greenLight, border: "2px solid " + C.green, borderRadius: 12, padding: "10px 14px", marginBottom: 12, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -1476,15 +1476,15 @@ function TablesView({ C, isMobile, orders, onTableClick, onEditBill, onAddMore, 
   return (
     <div>
       <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(auto-fit, minmax(160px, 1fr))", gap: 10, marginBottom: 16 }}>
-        <div style={{ background: `linear-gradient(135deg, ${C.green}11 0%, ${C.green}05 100%)`, border: `1px solid ${C.green}33`, borderRadius: 12, padding: isMobile ? 12 : 16 }}>
+        <div className="ep-stat-card" style={{ background: `linear-gradient(135deg, ${C.green}11 0%, ${C.green}05 100%)`, border: `1px solid ${C.green}33`, borderRadius: 12, padding: isMobile ? 12 : 16 }}>
           <div style={{ fontSize: 10, color: C.gray, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.5 }}>Revenue</div>
           <div style={{ fontSize: isMobile ? 16 : 22, fontWeight: 900, color: C.green, marginTop: 4, fontFamily: "monospace", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}><AnimatedNumber value={todayRevenue} /></div>
         </div>
-        <div style={{ background: `linear-gradient(135deg, ${C.red}11 0%, ${C.red}05 100%)`, border: `1px solid ${C.red}33`, borderRadius: 12, padding: isMobile ? 12 : 16 }}>
+        <div className="ep-stat-card" style={{ background: `linear-gradient(135deg, ${C.red}11 0%, ${C.red}05 100%)`, border: `1px solid ${C.red}33`, borderRadius: 12, padding: isMobile ? 12 : 16 }}>
           <div style={{ fontSize: 10, color: C.gray, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.5 }}>Active</div>
           <div style={{ fontSize: isMobile ? 16 : 22, fontWeight: 900, color: C.red, marginTop: 4 }}><AnimatedNumber value={activeOrders} format={false} /></div>
         </div>
-        <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: isMobile ? 12 : 16, gridColumn: isMobile ? "span 2" : undefined }}>
+        <div className="ep-stat-card" style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: isMobile ? 12 : 16, gridColumn: isMobile ? "span 2" : undefined }}>
           <div style={{ fontSize: 10, color: C.gray, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.5 }}>Occupied</div>
           <div style={{ fontSize: isMobile ? 16 : 22, fontWeight: 900, color: C.ink, marginTop: 4 }}>{tableData.filter(t => t.order).length}/{tableData.length}</div>
         </div>
@@ -1495,7 +1495,7 @@ function TablesView({ C, isMobile, orders, onTableClick, onEditBill, onAddMore, 
       </div>
       <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(160px, 1fr))", gap: isMobile ? 10 : 12 }}>
         {filteredTables.map(t => (
-          <div key={t.table} style={{
+          <div key={t.table} className="ep-table-card" style={{
             background: t.heatBg,
             border: `2px solid ${t.heatColor}`,
             borderRadius: 12, padding: isMobile ? 10 : 14,
@@ -1691,7 +1691,7 @@ function OrdersView({ C, isMobile, orders, menu, waiterName, isOwner, filter, se
         )}
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           {["all", "active", ...STATUS_FLOW, "paid", "cancelled"].map(f => (
-            <button key={f} onClick={() => { haptic(); setFilter(f); }} style={{ padding: isMobile ? "6px 10px" : "7px 14px", borderRadius: 20, border: "1px solid " + (filter === f ? C.gold : C.line), background: filter === f ? C.gold : C.card, color: filter === f ? "#fff" : C.gray, fontWeight: 700, fontSize: isMobile ? 11 : 12, cursor: "pointer", textTransform: "capitalize", fontFamily: "inherit" }}>{f}</button>
+            <button key={f} className="ep-pill" onClick={() => { haptic(); setFilter(f); }} style={{ padding: isMobile ? "6px 10px" : "7px 14px", borderRadius: 20, border: "1px solid " + (filter === f ? C.gold : C.line), background: filter === f ? C.gold : C.card, color: filter === f ? "#fff" : C.gray, fontWeight: 700, fontSize: isMobile ? 11 : 12, cursor: "pointer", textTransform: "capitalize", fontFamily: "inherit" }}>{f}</button>
           ))}
         </div>
       </div>
@@ -1713,7 +1713,7 @@ function OrdersView({ C, isMobile, orders, menu, waiterName, isOwner, filter, se
             </button>
           );
           return (
-            <div key={o.id} style={{ background: isCancelled ? C.redLight : C.card, border: "1px solid " + (isCancelled ? C.red : C.line), borderRadius: 12, padding: isMobile ? 12 : 16, boxShadow: "0 2px 8px rgba(0,0,0,0.04)", animation: "fadeIn 0.25s", opacity: isCancelled ? 0.9 : 1 }}>
+            <div key={o.id} className="ep-order-card" style={{ background: isCancelled ? C.redLight : C.card, border: "1px solid " + (isCancelled ? C.red : C.line), borderRadius: 12, padding: isMobile ? 12 : 16, boxShadow: "0 2px 8px rgba(0,0,0,0.04)", animation: "fadeIn 0.25s", opacity: isCancelled ? 0.9 : 1 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, gap: 8 }}>
                 <div style={{ fontWeight: 800, fontSize: isMobile ? 14 : 15, color: C.ink }}>{o.orderType === "parcel" ? "Parcel" : "Table " + o.table}</div>
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -1929,7 +1929,7 @@ function DashboardView({ C, isMobile, orders, dueOrders, menu, lowItems = [], on
           { label: "Active", val: activeOrders, color: C.amber, icon: "🔥", click: () => onStatusClick("active", getRangeBounds(range, customDate)), fmt: false },
           { label: "Avg", val: avgOrder, color: C.blue, icon: "📈", click: null, fmt: true },
         ].map((s, i) => (
-          <div key={i} onClick={s.click || undefined} style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: isMobile ? 12 : 20, boxShadow: "0 2px 8px rgba(0,0,0,0.04)", cursor: s.click ? "pointer" : "default", transition: "all 0.2s" }}>
+          <div key={i} onClick={s.click || undefined} className="ep-stat-card" style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: isMobile ? 12 : 20, boxShadow: "0 2px 8px rgba(0,0,0,0.04)", cursor: s.click ? "pointer" : "default", transition: "all 0.2s" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
               <div style={{ fontSize: 10, fontWeight: 800, color: C.gray, textTransform: "uppercase", letterSpacing: 0.5 }}>{s.label}</div>
               <span style={{ fontSize: isMobile ? 18 : 26 }}>{s.icon}</span>
@@ -1939,7 +1939,7 @@ function DashboardView({ C, isMobile, orders, dueOrders, menu, lowItems = [], on
           </div>
         ))}
       </div>
-      <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: isMobile ? 14 : 20, marginBottom: 24 }}>
+      <div className="ep-card" style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: isMobile ? 14 : 20, marginBottom: 24 }}>
         <div style={{ fontSize: isMobile ? 13 : 15, fontWeight: 800, color: C.ink, marginBottom: 16 }}>Order Status</div>
         <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, 1fr)", gap: isMobile ? 8 : 12 }}>
           {STATUS_FLOW.map(s => {
@@ -1972,7 +1972,7 @@ function DashboardView({ C, isMobile, orders, dueOrders, menu, lowItems = [], on
           </div>
         </div>
       )}
-      <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: isMobile ? 14 : 20, marginBottom: 24 }}>
+      <div className="ep-card" style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: isMobile ? 14 : 20, marginBottom: 24 }}>
         <div style={{ fontSize: isMobile ? 13 : 15, fontWeight: 800, color: C.ink, marginBottom: 16 }}>Orders by Hour - {rangeLabel}</div>
         <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 120 }}>
           {Array.from({ length: 24 }, (_, h) => {
@@ -1992,7 +1992,7 @@ function DashboardView({ C, isMobile, orders, dueOrders, menu, lowItems = [], on
       </div>
       <ReportsExtra C={C} isMobile={isMobile} orders={filtered} rangeLabel={rangeLabel} />
       <DueLedger C={C} isMobile={isMobile} orders={dueOrders || orders} />
-      <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: isMobile ? 14 : 20 }}>
+      <div className="ep-card" style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: isMobile ? 14 : 20 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <div style={{ fontSize: isMobile ? 13 : 15, fontWeight: 800, color: C.ink }}>Orders - {rangeLabel}</div>
           <div style={{ fontSize: 11, color: C.gray, fontWeight: 700 }}>{filtered.length} total</div>
@@ -2874,7 +2874,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
           {isMobile && mobileBillingTab === "payment" ? null : (
             <div className="ep-category-chips" style={{ paddingBottom: 1 }}>
             {categories.map(c => (
-              <button key={c} onClick={() => { haptic(); setCategory(c); }} style={{ padding: "5px 10px", borderRadius: 999, boxShadow: category === c ? "0 3px 10px rgba(184,134,11,0.30)" : "none", border: `1px solid ${category === c ? C.gold : C.line}`, background: category === c ? C.gold : C.card, color: category === c ? "#fff" : C.gray, fontWeight: 700, fontSize: 11, cursor: "pointer", whiteSpace: "nowrap", fontFamily: "inherit", flexShrink: 0 }}>{c}</button>
+              <button key={c} className="ep-pill" onClick={() => { haptic(); setCategory(c); }} style={{ padding: "5px 10px", borderRadius: 999, boxShadow: category === c ? "0 3px 10px rgba(184,134,11,0.30)" : "none", border: `1px solid ${category === c ? C.gold : C.line}`, background: category === c ? C.gold : C.card, color: category === c ? "#fff" : C.gray, fontWeight: 700, fontSize: 11, cursor: "pointer", whiteSpace: "nowrap", fontFamily: "inherit", flexShrink: 0 }}>{c}</button>
             ))}
             </div>
           )}
@@ -2932,7 +2932,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
         </div>
 
         {/* Right panel: stable header/customer/extras/footer; only its cart list scrolls. */}
-        <div className="ep-order-panel" style={{ display: isMobile && mobileBillingTab !== "order" ? "none" : "flex", background: C.card, border: `1px solid ${C.line}`, borderRadius: 16, boxShadow: "0 12px 32px rgba(0,0,0,0.16)", width: isMobile ? "100%" : 432, minHeight: isMobile ? 0 : 0, height: isMobile ? "100%" : "100%" }}>
+        <div className="ep-order-panel ep-card" style={{ display: isMobile && mobileBillingTab !== "order" ? "none" : "flex", background: C.card, border: `1px solid ${C.line}`, borderRadius: 16, boxShadow: "0 12px 32px rgba(0,0,0,0.16)", width: isMobile ? "100%" : 432, minHeight: isMobile ? 0 : 0, height: isMobile ? "100%" : "100%" }}>
           <div style={{ padding: "6px 10px", borderBottom: `1px solid ${C.line}`, background: C.cardAlt, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, minHeight: 40, boxSizing: "border-box" }}>
             <div style={{ minWidth: 0 }}>
               <div style={{ fontWeight: 900, fontSize: 13, color: C.ink, letterSpacing: 0.1 }}>{addMoreMode ? "Add items" : existingOrder ? "Checkout" : "New order"}</div>
@@ -2985,7 +2985,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
             })}
           </div>
           {/* Fixed extras replace the old accordion: no overlay and no panel scroll. */}
-          {!addMoreMode && (
+          {!addMoreMode && (!isMobile || mobileBillingTab === "payment") && (
             <div className="ep-order-extras">
               <div className="ep-order-extras-row">
                 <span className="ep-order-extras-label">DISC</span>
