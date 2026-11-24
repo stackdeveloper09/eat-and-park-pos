@@ -854,7 +854,7 @@ function StaffAppInner() {
     return () => { if (mq.removeEventListener) mq.removeEventListener("change", handler); else mq.removeListener(handler); };
   }, []);
 
-  useEffect(() => { localStorage.setItem("staff_view_mode", viewMode); }, [viewMode]);
+  useEffect(() => { try { localStorage.setItem("staff_view_mode", viewMode); } catch (_) {} }, [viewMode]);
 
   const isMobile = viewMode === "mobile" || (viewMode === "auto" && autoMobile);
   const cycleViewMode = () => { haptic(15); setViewMode(m => m === "auto" ? "mobile" : m === "mobile" ? "desktop" : "auto"); };
@@ -1158,10 +1158,10 @@ function StaffAppInner() {
           </div>
         </div>
         <div style={{ display: "flex", gap: isMobile ? 4 : 8, alignItems: "center", flexShrink: 0 }}>
-          <button onClick={() => { const n = !muted; setMuted(n); localStorage.setItem("staff_mute", n ? "1" : "0"); }} title="Sound" style={{ background: "rgba(255,255,255,0.18)", border: "none", color: "#fff", width: 38, height: 38, borderRadius: 8, fontSize: 16, cursor: "pointer" }}>{muted ? "🔇" : "🔔"}</button>
+          <button onClick={() => { const n = !muted; setMuted(n); try { localStorage.setItem("staff_mute", n ? "1" : "0"); } catch (_) {} }} title="Sound" style={{ background: "rgba(255,255,255,0.18)", border: "none", color: "#fff", width: 38, height: 38, borderRadius: 8, fontSize: 16, cursor: "pointer" }}>{muted ? "🔇" : "🔔"}</button>
           <button onClick={cycleViewMode} title={`View: ${viewMode}`} style={{ background: "rgba(255,255,255,0.18)", border: "none", color: "#fff", width: 38, height: 38, borderRadius: 8, fontSize: 16, cursor: "pointer" }}>{viewIcon}</button>
           {!isMobile && (
-            <button onClick={() => { const n = lang === "en" ? "hi" : "en"; setLang(n); localStorage.setItem("staff_lang", n); }} style={{ background: "rgba(255,255,255,0.18)", border: "none", color: "#fff", width: 44, height: 38, borderRadius: 8, fontSize: 12, cursor: "pointer", fontWeight: 800 }}>{lang === "en" ? "EN" : "हि"}</button>
+            <button onClick={() => { const n = lang === "en" ? "hi" : "en"; setLang(n); try { localStorage.setItem("staff_lang", n); } catch (_) {} }} style={{ background: "rgba(255,255,255,0.18)", border: "none", color: "#fff", width: 44, height: 38, borderRadius: 8, fontSize: 12, cursor: "pointer", fontWeight: 800 }}>{lang === "en" ? "EN" : "हि"}</button>
           )}
           <button onClick={() => setLegacyUI(false)} style={{ background: "rgba(255,255,255,0.25)", border: "none", color: "#fff", padding: isMobile ? "9px 10px" : "9px 16px", borderRadius: 8, fontWeight: 800, fontSize: 12, cursor: "pointer", marginRight: 8 }}>✨ New UI</button>
           <button onClick={handleLogout} style={{ background: "rgba(255,255,255,0.18)", border: "none", color: "#fff", padding: isMobile ? "9px 10px" : "9px 16px", borderRadius: 8, fontWeight: 700, fontSize: 12, cursor: "pointer" }}>Logout</button>
@@ -1298,7 +1298,7 @@ function StaffAppInner() {
                 <span style={{ display: "flex", alignItems: "center", gap: 14 }}><span style={{ fontSize: 18 }}>{viewIcon}</span><span>View Mode</span></span>
                 <span style={{ fontSize: 11, color: C.gray, fontWeight: 800, textTransform: "capitalize" }}>{viewMode}</span>
               </button>
-              <button onClick={() => { const n = lang === "en" ? "hi" : "en"; setLang(n); localStorage.setItem("staff_lang", n); }} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", border: "none", background: "transparent", color: C.ink, fontWeight: 700, fontSize: 14, borderRadius: 10, cursor: "pointer", width: "100%", textAlign: "left", fontFamily: "inherit" }}>
+              <button onClick={() => { const n = lang === "en" ? "hi" : "en"; setLang(n); try { localStorage.setItem("staff_lang", n); } catch (_) {} }} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", border: "none", background: "transparent", color: C.ink, fontWeight: 700, fontSize: 14, borderRadius: 10, cursor: "pointer", width: "100%", textAlign: "left", fontFamily: "inherit" }}>
                 <span style={{ display: "flex", alignItems: "center", gap: 14 }}><span style={{ fontSize: 18 }}>🌐</span><span>Language</span></span>
                 <span style={{ fontSize: 11, color: C.gray, fontWeight: 800 }}>{lang === "en" ? "English" : "हिंदी"}</span>
               </button>

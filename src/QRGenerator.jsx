@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { QRCodeCanvas } from "qrcode.react";
 
 export default function QRGenerator() {
   const [tableCount, setTableCount] = useState(20);
   const [paper, setPaper] = useState("thermal"); // "thermal" (80mm) | "a4"
   const [printOnly, setPrintOnly] = useState(null); // table number or null = all
+  const printTimerRef = useRef(null);
   const BASE_URL = "https://eatndpark.vercel.app";
 
   const tables = Array.from({ length: tableCount }, (_, i) => i + 1);
@@ -13,17 +14,22 @@ export default function QRGenerator() {
   useEffect(() => {
     const reset = () => setPrintOnly(null);
     window.addEventListener("afterprint", reset);
-    return () => window.removeEventListener("afterprint", reset);
+    return () => {
+      window.removeEventListener("afterprint", reset);
+      if (printTimerRef.current) window.clearTimeout(printTimerRef.current);
+    };
   }, []);
 
   const printAll = () => {
     setPrintOnly(null);
-    setTimeout(() => window.print(), 50);
+    if (printTimerRef.current) window.clearTimeout(printTimerRef.current);
+    printTimerRef.current = window.setTimeout(() => window.print(), 50);
   };
 
   const printOne = (num) => {
     setPrintOnly(num);
-    setTimeout(() => window.print(), 50); // wait for React to hide other cards
+    if (printTimerRef.current) window.clearTimeout(printTimerRef.current);
+    printTimerRef.current = window.setTimeout(() => window.print(), 50);
   };
 
   return (

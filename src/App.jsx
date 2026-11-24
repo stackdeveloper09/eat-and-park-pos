@@ -2545,10 +2545,10 @@ function CustomerView({ menu, orders, placeOrder, bookEvent, gallery, offersList
   const [activeModal, setActiveModal] = useState(null);
   const [myOrderIds, setMyOrderIds] = useState([]);
   const [orderType, setOrderType] = useState("dine_in");
-  const [language, setLanguage] = useState(() => localStorage.getItem("eatpark_language") || "hi");
+  const [language, setLanguage] = useState(() => { try { return localStorage.getItem("eatpark_language") || "hi"; } catch (_) { return "hi"; } });
   const [fulfillmentMode, setFulfillmentMode] = useState("dine_in");
-  const [custName, setCustName] = useState(() => localStorage.getItem("enp_cust_name") || "");
-  const [custPhone, setCustPhone] = useState(() => localStorage.getItem("enp_cust_phone") || "");
+  const [custName, setCustName] = useState(() => { try { return localStorage.getItem("enp_cust_name") || ""; } catch (_) { return ""; } });
+  const [custPhone, setCustPhone] = useState(() => { try { return localStorage.getItem("enp_cust_phone") || ""; } catch (_) { return ""; } });
   const [custAddress, setCustAddress] = useState("");
   const [custPinCode, setCustPinCode] = useState("");
   const [custExactAddress, setCustExactAddress] = useState("");
@@ -3780,7 +3780,7 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
           <div style={{ fontFamily: "'Outfit', sans-serif", fontWeight: 800, fontSize: 17, color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>Eat & Park</div>
           <div style={{ fontSize: 11, color: "#8B9BB4", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{RESTAURANT.tagline}</div>
         </div>
-        <button onClick={() => { const next = language === "hi" ? "en" : "hi"; setLanguage(next); localStorage.setItem("eatpark_language", next); }} title="Hindi / English" aria-label="Switch Hindi or English" style={{ height: 44, borderRadius: 10, border: "1px solid #273449", background: "#161F2F", color: "#fff", padding: "0 9px", fontWeight: 800, fontSize: 12, cursor: "pointer", flexShrink: 0 }}>{language === "hi" ? "EN" : "हि"}</button>
+        <button onClick={() => { const next = language === "hi" ? "en" : "hi"; setLanguage(next); try { localStorage.setItem("eatpark_language", next); } catch (_) {} }} title="Hindi / English" aria-label="Switch Hindi or English" style={{ height: 44, borderRadius: 10, border: "1px solid #273449", background: "#161F2F", color: "#fff", padding: "0 9px", fontWeight: 800, fontSize: 12, cursor: "pointer", flexShrink: 0 }}>{language === "hi" ? "EN" : "हि"}</button>
         <select value={table} onChange={(e) => setTable(Number(e.target.value))} style={{ background: "#161F2F", color: "#fff", border: "1px solid #273449", borderRadius: 10, padding: "9px 8px", fontWeight: 800, fontSize: 13, outline: "none" }}>
           {Array.from({ length: 20 }, (_, i) => i + 1).map((n) => (<option key={n} value={n} style={{ color: "#000" }}>Table {n}</option>))}
         </select>

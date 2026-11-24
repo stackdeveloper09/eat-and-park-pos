@@ -226,8 +226,12 @@ export default function DeliveryApp() {
       
       setServedOrders(served);
     }, (err) => {
-      console.error("Delivery orders listener:", err.code, err.message);
-      alert("Orders load nahi ho rahe: " + (err.code || err.message));
+      console.error("Delivery orders listener:", err?.code, err?.message);
+      setActiveOrders([]);
+      setServedOrders([]);
+      setLoginError(err?.code === "permission-denied"
+        ? "Delivery orders ka access nahi hai. Admin se permission check karwao."
+        : "Orders load nahi hue. Internet check karke dobara try karein.");
     });
     return () => unsub();
   }, [staff?.mustChangePassword, user]);
@@ -276,7 +280,11 @@ export default function DeliveryApp() {
     try {
       await updateDoc(doc(db, "orders", orderId), { status: "out_for_delivery" });
     } catch (e) {
-      alert("Error: " + (e.code || e.message));
+      alert(e?.code === "permission-denied"
+        ? "Ye action allow nahi hai. Admin se permission check karwao."
+        : e?.code === "unavailable"
+          ? "Internet issue hai. Dobara try karein."
+          : "Action fail hua. Dobara try karein.");
     } finally {
       setBusyId("");
     }
@@ -297,7 +305,11 @@ export default function DeliveryApp() {
       setSelectedOrder(null);
       alert("Order delivered successfully! 🎉");
     } catch (e) {
-      alert("Error: " + (e.code || e.message));
+      alert(e?.code === "permission-denied"
+        ? "Ye action allow nahi hai. Admin se permission check karwao."
+        : e?.code === "unavailable"
+          ? "Internet issue hai. Dobara try karein."
+          : "Action fail hua. Dobara try karein.");
     } finally {
       setBusyId("");
     }

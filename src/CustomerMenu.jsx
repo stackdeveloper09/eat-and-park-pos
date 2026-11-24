@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { db } from "./firebase";
 import { collection, onSnapshot, addDoc, doc } from "firebase/firestore";
 
@@ -13,14 +13,22 @@ export default function CustomerMenu() {
   const [customerName, setCustomerName] = useState("");
   const [activeCat, setActiveCat] = useState("All");
   const [ordered, setOrdered] = useState(false);
+  const [placing, setPlacing] = useState(false);
   const [loading, setLoading] = useState(true);
+  const placingRef = useRef(false);
 
   useEffect(() => {
     const unsub = onSnapshot(doc(db, "settings", "menu"), (snap) => {
       if (snap.exists()) {
-        const data = snap.data();
-        setMenu(data.list || data.items || []);
+        const data = snap.data() || {};
+        setMenu(Array.isArray(data.list) ? data.list : Array.isArray(data.items) ? data.items : []);
+      } else {
+        setMenu([]);
       }
+      setLoading(false);
+    }, (error) => {
+      console.error("Customer menu listener:", error);
+      setMenu([]);
       setLoading(false);
     });
     return () => unsub();
@@ -38,13 +46,16 @@ export default function CustomerMenu() {
     });
   };
 
-  const total = Object.values(cart).reduce((s, i) => s + i.price * i.qty, 0);
-  const totalItems = Object.values(cart).reduce((s, i) => s + i.qty, 0);
+  const total = Object.values(cart).reduce((s, i) => s + (Number(i?.price) || 0) * (Number(i?.qty) || 0), 0);
+  const totalItems = Object.values(cart).reduce((s, i) => s + (Number(i?.qty) || 0), 0);
 
   const placeOrder = async () => {
-    if (!customerName) return alert("Kripya apna naam daalein");
+    if (placing || placingRef.current) return;
+    if (!customerName.trim()) return alert("Kripya apna naam daalein");
     if (Object.keys(cart).length === 0) return alert("Aapne kuch order nahi kiya");
 
+    placingRef.current = true;
+    setPlacing(true);
     try {
       const orderItems = Object.values(cart).map(i => ({
         itemId: i.id, name: i.name, price: Number(i.price), qty: i.qty,
@@ -55,11 +66,21 @@ export default function CustomerMenu() {
         table: 0,
         orderType: "parcel",
         status: "new", paid: false, items: orderItems,
-        subtotal: total, finalTotal: total, createdAt: new Date().toISOString(),
+        subtotal: total, finalTotal: total, createdAt: Date.now(),
         createdBy: "customer_qr", paymentStatus: "pending"
       });
       setOrdered(true);
-    } catch (e) { alert("Order failed: " + e.message); }
+    } catch (e) {
+      const message = e?.code === "permission-denied"
+        ? "Permission issue hai. Staff se contact karein."
+        : e?.code === "unavailable"
+          ? "Internet issue hai. Dobara try karein."
+          : "Order fail hua. Dobara try karein.";
+      alert(message);
+    } finally {
+      placingRef.current = false;
+      setPlacing(false);
+    }
   };
 
   if (loading) return <div style={{ padding: 50, textAlign: "center", color: C.ink, background: C.bg, minHeight: "100vh" }}>Loading...</div>;
