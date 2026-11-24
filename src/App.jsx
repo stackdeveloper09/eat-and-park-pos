@@ -1,5 +1,4 @@
 import { tryRecover } from "./recover";
-import DeliveryApp from "./DeliveryApp";
 
 
 // === CUSTOM DARK TOAST ===
@@ -7,9 +6,12 @@ if (typeof window !== "undefined") {
   window.alert = function(message) {
     const existing = document.getElementById("custom-dark-toast");
     if (existing) existing.remove();
+    const isCustomerSurface = document.querySelector(".ep-customer-ui, .ep-customer-menu") !== null;
     const popup = document.createElement("div");
     popup.id = "custom-dark-toast";
-    popup.style.cssText = "position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:#1e293b;color:#fff;padding:16px 24px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.6);z-index:99999;font-family:system-ui;font-weight:600;font-size:14px;border-left:4px solid #f97316;max-width:90%;min-width:280px;display:flex;align-items:center;gap:12px;";
+    popup.style.cssText = isCustomerSurface
+      ? "position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:#fff;color:#1F1F1F;padding:16px 24px;border:1px solid #EEEEEE;border-radius:14px;box-shadow:0 8px 24px rgba(31,31,31,0.12);z-index:99999;font-family:Poppins,system-ui,sans-serif;font-weight:600;font-size:14px;max-width:90%;min-width:280px;display:flex;align-items:center;gap:12px;color-scheme:light;"
+      : "position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:#1e293b;color:#fff;padding:16px 24px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.6);z-index:99999;font-family:system-ui;font-weight:600;font-size:14px;border-left:4px solid #f97316;max-width:90%;min-width:280px;display:flex;align-items:center;gap:12px;";
     const icon = document.createElement("div");
     icon.style.fontSize = "20px";
     icon.textContent = "⚠️";
@@ -19,7 +21,9 @@ if (typeof window !== "undefined") {
     const close = document.createElement("button");
     close.type = "button";
     close.textContent = "×";
-    close.style.cssText = "background:none;border:none;color:#94a3b8;font-size:20px;cursor:pointer;padding:0;line-height:1;";
+    close.style.cssText = isCustomerSurface
+      ? "background:#F4F4F5;border:none;border-radius:50%;width:44px;height:44px;color:#1F1F1F;font-size:20px;cursor:pointer;padding:0;line-height:1;"
+      : "background:none;border:none;color:#94a3b8;font-size:20px;cursor:pointer;padding:0;line-height:1;";
     close.addEventListener("click", () => popup.remove());
     popup.append(icon, text, close);
     document.body.appendChild(popup);
@@ -31,8 +35,7 @@ if (typeof window !== "undefined") {
 
 /* eslint-disable react-hooks/exhaustive-deps, no-unused-vars */
 
-import React, { useState, useEffect, useRef, useCallback, useMemo, memo } from "react";
-import QRGenerator from './QRGenerator';
+import React, { lazy, Suspense, useState, useEffect, useRef, useCallback, useMemo, memo } from "react";
 import { db, auth, authReady } from "./firebase";
 import { isDeliveryOrder, nextKitchenStatus } from "./lib/orderRules";
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously, RecaptchaVerifier, linkWithPhoneNumber, PhoneAuthProvider, signInWithCredential, setPersistence, browserLocalPersistence } from "firebase/auth";
@@ -44,6 +47,9 @@ import {
 import { QRCodeSVG } from 'qrcode.react';
 import * as HX from "./hardening";
 import { ADMIN_ROLES, normalizeRole, STAFF_ROLES } from "./lib/roles";
+const DeliveryApp = lazy(() => import("./DeliveryApp"));
+const QRGenerator = lazy(() => import("./QRGenerator"));
+
 function ImageUploadButton({ currentImage, onUploaded, label }) {
   const widgetRef = useRef(null);
   const onUploadedRef = useRef(onUploaded);
@@ -558,6 +564,13 @@ const ModalHeader = memo(({ title, onClose }) => (
   </div>
 ));
 
+const CustomerModalHeader = memo(({ title, onClose }) => (
+  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18, borderBottom: "1px solid #EEEEEE", paddingBottom: 14 }}>
+    <div style={{ color: "#1F1F1F", fontSize: 18, fontWeight: 600 }}>{title}</div>
+    <button type="button" onClick={onClose} aria-label="Close dialog" style={{ width: 44, height: 44, minHeight: 44, border: 0, borderRadius: "50%", background: "#F4F4F5", color: "#1F1F1F", cursor: "pointer", fontSize: 18 }}>×</button>
+  </div>
+));
+
 const StatCard = memo(({ label, value, icon, color }) => (
   <div style={{ background: "#fff", border: `1.5px solid ${COLORS.line}`, borderRadius: 18, padding: "24px 20px", boxShadow: "0 8px 24px rgba(0,0,0,0.04)" }} className="smooth-transition hover-lift">
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}><div style={{ fontSize: 13, color: COLORS.textLight, textTransform: "uppercase", fontWeight: 800, letterSpacing: "0.05em" }}>{label}</div><span style={{ fontSize: 28 }}>{icon}</span></div>
@@ -566,7 +579,7 @@ const StatCard = memo(({ label, value, icon, color }) => (
 ));
 
 const SidebarBtn = memo(({ icon, text, onClick, highlight }) => (
-  <button onClick={onClick} style={{ display: "flex", alignItems: "center", gap: 16, padding: "14px 20px", borderRadius: 14, background: highlight ? COLORS.copperLight : COLORS.paper, border: highlight ? `1.5px solid ${COLORS.copper}` : `1px solid ${COLORS.line}`, color: highlight ? COLORS.copperDark : COLORS.ink, fontSize: 15, fontWeight: 700, cursor: "pointer", textAlign: "left", width: '100%' }}>
+  <button onClick={onClick} data-customer-highlight={highlight ? "true" : "false"} style={{ display: "flex", alignItems: "center", gap: 16, padding: "14px 20px", borderRadius: 14, background: highlight ? COLORS.copperLight : COLORS.paper, border: highlight ? `1.5px solid ${COLORS.copper}` : `1px solid ${COLORS.line}`, color: highlight ? COLORS.copperDark : COLORS.ink, fontSize: 15, fontWeight: 700, cursor: "pointer", textAlign: "left", width: '100%' }}>
     <span style={{ fontSize: 20 }}>{icon}</span><span>{text}</span>
   </button>
 ));
@@ -1067,7 +1080,7 @@ const KitchenNotificationColumn = memo(({ orders, selectedOrderId, onSelect }) =
 // 13.5 AI ORDER MODAL (VOICE & TEXT)
 // ==
 
-function AIOrderModal({ menu, onOrderParsed, onClose }) {
+function AIOrderModal({ menu, onOrderParsed, onClose, customerTheme = false }) {
   const [aiText, setAiText] = useState("");
   const [aiBusy, setAiBusy] = useState(false);
   const [aiErr, setAiErr] = useState("");
@@ -1161,29 +1174,29 @@ function AIOrderModal({ menu, onOrderParsed, onClose }) {
 
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", zIndex: 280, display: "flex", alignItems: "center", justifyContent: "center", padding: 14 }} onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 18, padding: 18, width: "100%", maxWidth: 390, display: "flex", flexDirection: "column", gap: 10 }}>
+    <div style={{ position: "fixed", inset: 0, background: customerTheme ? "rgba(0,0,0,0.4)" : "rgba(0,0,0,0.65)", zIndex: 280, display: "flex", alignItems: customerTheme ? "flex-end" : "center", justifyContent: "center", padding: customerTheme ? 0 : 14, colorScheme: customerTheme ? "light" : undefined }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", color: customerTheme ? "#1F1F1F" : undefined, border: customerTheme ? "1px solid #EEEEEE" : undefined, borderRadius: customerTheme ? "20px 20px 0 0" : 18, padding: customerTheme ? 20 : 18, width: "100%", maxWidth: 390, maxHeight: "90vh", overflowY: "auto", display: "flex", flexDirection: "column", gap: 10 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ fontWeight: 800, fontSize: 18, fontFamily: "'Outfit', sans-serif" }}>🤖 AI Order</div>
-          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 18, cursor: "pointer" }}>✕</button>
+          <div style={{ color: "#1F1F1F", fontWeight: customerTheme ? 600 : 800, fontSize: customerTheme ? 18 : 18, fontFamily: customerTheme ? "Poppins, system-ui, sans-serif" : "'Outfit', sans-serif" }}>🤖 AI Order</div>
+          <button onClick={onClose} aria-label="Close AI order" style={customerTheme ? { width: 44, height: 44, minHeight: 44, background: "#F4F4F5", border: "none", borderRadius: "50%", color: "#1F1F1F", fontSize: 18, cursor: "pointer" } : { background: "none", border: "none", fontSize: 18, cursor: "pointer" }}>✕</button>
         </div>
-        <div style={{ fontSize: 12, color: "#8A8375" }}>Bolo ya likho: "2 veg roll, 1 cold coffee"</div>
+        <div style={{ fontSize: 12, color: customerTheme ? "#6B6B6B" : "#8A8375" }}>Bolo ya likho: "2 veg roll, 1 cold coffee"</div>
         <textarea
           rows={3}
           value={aiText}
           onChange={(e) => setAiText(e.target.value)}
           placeholder="Order yahan likhein ya mic se bolein..."
-          style={{ width: "100%", padding: 10, borderRadius: 10, border: "1.5px solid #E8E6DC", boxSizing: "border-box", fontSize: 14, resize: "none" }}
+          style={{ width: "100%", minHeight: 48, padding: 12, borderRadius: customerTheme ? 14 : 10, background: customerTheme ? "#F4F4F5" : "#fff", color: "#1F1F1F", border: customerTheme ? "1px solid #EEEEEE" : "1.5px solid #E8E6DC", boxSizing: "border-box", fontSize: 14, resize: "none", overflow: "auto" }}
         />
         <div style={{ display: "flex", gap: 8 }}>
-          <button type="button" onClick={startMic} style={{ flex: 1, padding: 10, borderRadius: 10, background: listening ? "#C0392B" : "#FAFAF8", border: "1.5px solid #E8E6DC", fontWeight: 800, color: listening ? "#fff" : "#1A1A1A", cursor: "pointer" }}>
+          <button type="button" onClick={startMic} style={{ flex: 1, height: customerTheme ? 56 : undefined, padding: 10, borderRadius: customerTheme ? 14 : 10, background: listening ? "#B91C1C" : customerTheme ? "#fff" : "#FAFAF8", border: customerTheme ? "1.5px solid #C2410C" : "1.5px solid #E8E6DC", fontWeight: customerTheme ? 600 : 800, color: listening ? "#fff" : customerTheme ? "#C2410C" : "#1A1A1A", cursor: "pointer" }}>
             {listening ? "⏹️ Ruko" : "🎤 Bolo"}
           </button>
-          <button type="button" onClick={runAi} disabled={aiBusy || !aiText.trim()} style={{ flex: 1, padding: 10, borderRadius: 10, background: "#3B82F6", color: "#fff", border: "none", fontWeight: 800, cursor: "pointer", opacity: (aiBusy || !aiText.trim()) ? 0.6 : 1 }}>
+          <button type="button" onClick={runAi} disabled={aiBusy || !aiText.trim()} style={{ flex: 1, height: customerTheme ? 56 : undefined, padding: 10, borderRadius: customerTheme ? 14 : 10, background: customerTheme ? "#C2410C" : "#3B82F6", color: "#fff", border: "none", fontWeight: customerTheme ? 600 : 800, cursor: "pointer", opacity: (aiBusy || !aiText.trim()) ? 0.6 : 1 }}>
             {aiBusy ? "⏳ Soch raha..." : "✨ Samjho"}
           </button>
         </div>
-        {aiErr && <div style={{ color: "#EF4444", fontSize: 12, fontWeight: 700 }}>{aiErr}</div>}
+        {aiErr && <div style={{ color: customerTheme ? "#B91C1C" : "#EF4444", fontSize: 12, fontWeight: 700 }}>{aiErr}</div>}
       </div>
     </div>
   );
@@ -1195,7 +1208,7 @@ function AIOrderModal({ menu, onOrderParsed, onClose }) {
 
 // ==
 
-const RunningOrderModal = memo(({ order, menu, onConfirm, onClose }) => {
+const RunningOrderModal = memo(({ order, menu, onConfirm, onClose, customerTheme = false }) => {
   const [additions, setAdditions] = useState({});
   const [search, setSearch] = useState("");
   const filtered = menu.filter(m => m.available && (!search.trim() || m.name.toLowerCase().includes(search.toLowerCase())));
@@ -1205,24 +1218,24 @@ const RunningOrderModal = memo(({ order, menu, onConfirm, onClose }) => {
   const handleSetQty = (id, q) => { setAdditions(prev => { const next = { ...prev, [id]: q }; if (q <= 0) delete next[id]; return next; }); };
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)", zIndex: 85, display: "flex", alignItems: "flex-end" }} onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} className="slide-up" style={{ background: "#fff", width: "100%", maxWidth: 480, margin: "0 auto", borderRadius: "24px 24px 0 0", padding: "20px", maxHeight: "85vh", overflowY: "auto" }}>
+    <div style={{ position: "fixed", inset: 0, background: customerTheme ? "rgba(0,0,0,0.4)" : "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)", zIndex: 85, display: "flex", alignItems: "flex-end", colorScheme: customerTheme ? "light" : undefined }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} className="slide-up" style={{ background: "#fff", color: customerTheme ? "#1F1F1F" : undefined, border: customerTheme ? "1px solid #EEEEEE" : undefined, width: "100%", maxWidth: 480, margin: "0 auto", borderRadius: customerTheme ? "20px 20px 0 0" : "24px 24px 0 0", padding: "20px", maxHeight: "85vh", overflowY: "auto", colorScheme: customerTheme ? "light" : undefined }}>
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
           <div>
-            <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 22, fontWeight: 800 }}>➕ Add Running Items</div>
-            <div style={{ fontSize: 12, color: COLORS.textLight, marginTop: 2 }}>Order #{(order && order.id || "").slice(1, 5).toUpperCase()} · New KOT #{Math.max(1, ...(order.kots || [{ kotNumber: 1 }]).map(k => k.kotNumber || 1)) + 1}</div>
+            <div style={{ fontFamily: customerTheme ? "Poppins, system-ui, sans-serif" : "'Outfit', sans-serif", fontSize: customerTheme ? 18 : 22, fontWeight: customerTheme ? 600 : 800, color: "#1F1F1F" }}>➕ Add Running Items</div>
+            <div style={{ fontSize: 12, color: customerTheme ? "#6B6B6B" : COLORS.textLight, marginTop: 2 }}>Order #{(order && order.id || "").slice(1, 5).toUpperCase()} · New KOT #{Math.max(1, ...(order.kots || [{ kotNumber: 1 }]).map(k => k.kotNumber || 1)) + 1}</div>
           </div>
-          <button onClick={onClose} style={{ background: "rgba(0,0,0,0.05)", border: "none", borderRadius: "50%", width: 36, height: 36, fontSize: 18, cursor: "pointer" }}>✕</button>
+          <button onClick={onClose} aria-label="Close add items" style={customerTheme ? { background: "#F4F4F5", border: "none", borderRadius: "50%", width: 44, height: 44, minHeight: 44, color: "#1F1F1F", fontSize: 18, cursor: "pointer" } : { background: "rgba(0,0,0,0.05)", border: "none", borderRadius: "50%", width: 36, height: 36, fontSize: 18, cursor: "pointer" }}>✕</button>
         </div>
         <SearchBar value={search} onChange={setSearch} placeholder="Search menu..." />
-        <div style={{ marginTop: 16, maxHeight: "45vh", overflowY: "auto" }}>
+        <div style={{ marginTop: 16, maxHeight: "45vh", overflowY: "auto", colorScheme: customerTheme ? "light" : undefined }}>
           {filtered.map(item => {
             const qty = additions[item.id] || 0;
             return (
-              <div key={item.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: `1px solid ${COLORS.line}` }}>
+              <div key={item.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid #EEEEEE", color: "#1F1F1F" }}>
                 <div style={{ flex: 1 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}><VegDot veg={item.veg} /><strong style={{ fontSize: 14 }}>{item.name}</strong></div>
-                  <div style={{ fontSize: 13, color: COLORS.copper, fontWeight: 700, marginTop: 2 }}>{inr(item.price)}</div>
+                  <div style={{ fontSize: 13, color: "#C2410C", fontWeight: 600, marginTop: 2 }}>{inr(item.price)}</div>
                 </div>
                 <AddBtnStepper qty={qty} onChange={q => handleSetQty(item.id, q)} available={item.available} />
               </div>
@@ -1230,8 +1243,8 @@ const RunningOrderModal = memo(({ order, menu, onConfirm, onClose }) => {
           })}
         </div>
         <div style={{ borderTop: `2px solid ${COLORS.line}`, paddingTop: 16, marginTop: 16 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 800, fontSize: 17, marginBottom: 12 }}>
-            <span>Additional Total</span><span style={{ color: COLORS.copper, fontFamily: "'JetBrains Mono', monospace" }}>{inr(addTotal)}</span>
+          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: customerTheme ? 600 : 800, fontSize: 16, marginBottom: 12, color: "#1F1F1F" }}>
+            <span>Additional Total</span><span style={{ color: "#C2410C", fontFamily: "'JetBrains Mono', monospace" }}>{inr(addTotal)}</span>
           </div>
           <button disabled={itemsToAdd.length === 0}
             onClick={() => {
@@ -1239,7 +1252,7 @@ const RunningOrderModal = memo(({ order, menu, onConfirm, onClose }) => {
               const newItems = itemsToAdd.map(([id, qty]) => { const m = menu.find(x => x.id === id); return { itemId: id, name: m.name, portion: m.portion || "", price: m.price, qty }; });
               onConfirm(newItems);
             }}
-            style={{ width: "100%", padding: "16px", border: "none", borderRadius: 14, background: itemsToAdd.length ? COLORS.info : COLORS.paper2, color: itemsToAdd.length ? "#fff" : COLORS.textLight, fontWeight: 800, fontSize: 16, cursor: itemsToAdd.length ? "pointer" : "not-allowed" }}>
+            style={{ width: "100%", height: 56, padding: "0 16px", border: "none", borderRadius: 14, background: itemsToAdd.length ? (customerTheme ? "#C2410C" : COLORS.info) : "#EEEEEE", color: itemsToAdd.length ? "#fff" : "#6B6B6B", fontWeight: customerTheme ? 600 : 800, fontSize: 16, cursor: itemsToAdd.length ? "pointer" : "not-allowed" }}>
             🍳 Send KOT to Kitchen
           </button>
         </div>
@@ -2537,12 +2550,30 @@ function CustomerView({ menu, orders, placeOrder, bookEvent, gallery, offersList
   const lastStatusRef = useRef({});
   const payIdRef = useRef(null);
   const pendingOrderIdRef = useRef(null);
+  const lastPlacedOrderRef = useRef(null);
   const aiTimerRef = useRef(null);
   const waiterLock = usePinLockout();  const [cart, setCart] = useState({});
   const [showAiModal, setShowAiModal] = useState(false);
   const [cartOpen, setCartOpen] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
+  const [customerTab, setCustomerTab] = useState("home");
   const [activeModal, setActiveModal] = useState(null);
+  useEffect(() => {
+    if (showSidebar) {
+      setCustomerTab("more");
+      return;
+    }
+    if (cartOpen) return;
+    if (activeModal === "orderHistory") {
+      setCustomerTab("orders");
+      return;
+    }
+    if (activeModal) {
+      setCustomerTab("more");
+      return;
+    }
+    setCustomerTab((current) => current === "more" ? "home" : current);
+  }, [showSidebar, cartOpen, activeModal]);
   const [myOrderIds, setMyOrderIds] = useState([]);
   const [orderType, setOrderType] = useState("dine_in");
   const [language, setLanguage] = useState(() => { try { return localStorage.getItem("eatpark_language") || "hi"; } catch (_) { return "hi"; } });
@@ -3468,7 +3499,8 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
       sendPushNotification("🛎️ New Order", `Order #${orderId.slice(1, 5)} - ₹${finalTotal}`);
       setMyOrderIds(prev => [...prev, orderId]);
       setCart({});
-      setNotes(""); setClaimedReward(null); setCartOpen(false); setActiveModal('track');
+      lastPlacedOrderRef.current = order;
+      setNotes(""); setClaimedReward(null); setCartOpen(false); setActiveModal('orderSuccess');
       setFulfillmentMode("dine_in");
       setOrderType("dine_in");
       if (table === 0) setTable(1);
@@ -3631,9 +3663,44 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
 }, [showToast]);
 
   const inputStyle = { padding: "12px 16px", border: `1.5px solid ${COLORS.line}`, borderRadius: 12, fontSize: 16, width: "100%", boxSizing: "border-box" };
+  const cartFieldStyle = { ...inputStyle, minHeight: 48, padding: "12px 14px", border: "1px solid #EEEEEE", borderRadius: 14, background: "#F4F4F5", color: "#1F1F1F", colorScheme: "light" };
 
   return (
-    <div className="ep-customer-menu" style={{ width: "100%", maxWidth: 1100, minWidth: 0, margin: "0 auto", padding: "0 12px", paddingBottom: cartCount ? 120 : 60, background: "var(--ep-bg)", color: "var(--text)", minHeight: "100vh", position: "relative", overflowX: "hidden" }}>
+    <div className="ep-customer-ui ep-customer-menu" style={{ width: "100%", maxWidth: 430, minWidth: 0, margin: "0 auto", padding: "0 12px", paddingBottom: cartCount ? 196 : 92, background: "#fff", color: "#1F1F1F", colorScheme: "light", minHeight: "100dvh", position: "relative", overflowX: "hidden", fontFamily: "Poppins, system-ui, sans-serif" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');
+        .ep-customer-ui { --customer-accent: #C2410C; --customer-accent-hover: #9A3412; --customer-text: #1F1F1F; --customer-muted: #6B6B6B; --customer-border: #EEEEEE; --customer-input: #F4F4F5; --customer-success: #15803D; --customer-orange-soft: #FFF3EA; }
+        .ep-customer-ui button, .ep-customer-ui input, .ep-customer-ui textarea, .ep-customer-ui select { font-family: Poppins, system-ui, sans-serif; }
+        .ep-customer-ui button { min-height: 44px; }
+        .ep-customer-ui input, .ep-customer-ui textarea, .ep-customer-ui select { font-size: 16px; }
+        .ep-customer-ui input:not([type="checkbox"]):not([type="radio"]), .ep-customer-ui textarea, .ep-customer-ui select { min-height: 48px; background: #F4F4F5 !important; color: #1F1F1F !important; border: 1px solid #EEEEEE !important; border-radius: 14px !important; color-scheme: light; }
+        .ep-customer-ui input::placeholder, .ep-customer-ui textarea::placeholder { color: #6B6B6B !important; opacity: 1; }
+        .ep-customer-ui input[type="checkbox"] { accent-color: #C2410C; }
+        .ep-customer-ui { color-scheme: light; }
+        .ep-customer-ui textarea { min-height: 48px; overflow: auto; resize: none; }
+        .ep-customer-ui input:focus, .ep-customer-ui textarea:focus, .ep-customer-ui select:focus { outline: 2px solid #C2410C !important; outline-offset: 0; border-color: #C2410C !important; }
+        .ep-customer-ui .toast-anim { background: #fff !important; color: #1F1F1F !important; border: 1px solid #EEEEEE !important; border-radius: 14px !important; box-shadow: 0 8px 24px rgba(31,31,31,0.12) !important; }
+        .ep-customer-ui .toast-anim > span { color: #1F1F1F !important; }
+        .ep-customer-ui .enp-hs { color-scheme: light; scrollbar-width: none; }
+        .ep-customer-ui .enp-hs::-webkit-scrollbar { display: none; }
+        .ep-customer-sidebar-menu > button { height: 52px !important; min-height: 52px !important; padding: 0 16px !important; border: 1px solid #EEEEEE !important; border-radius: 14px !important; background: #fff !important; color: #1F1F1F !important; font-size: 14px !important; font-weight: 600 !important; }
+        .ep-customer-sidebar-menu > button[data-customer-highlight="true"] { background: #FFF3EA !important; border-color: #FED7AA !important; color: #C2410C !important; }
+        .ep-customer-sidebar-panel button { min-height: 44px; }
+        .ep-customer-ui .ep-slide-drawer:not(.ep-customer-order-success) > div:first-child { margin-bottom: 18px !important; border-bottom: 1px solid #EEEEEE !important; padding-bottom: 14px !important; }
+        .ep-customer-ui .ep-slide-drawer:not(.ep-customer-order-success) > div:first-child > div:first-child { color: #1F1F1F !important; font-family: Poppins, system-ui, sans-serif !important; font-size: 18px !important; font-weight: 600 !important; }
+        .ep-customer-ui .ep-slide-drawer:not(.ep-customer-order-success) > div:first-child > button { width: 44px !important; height: 44px !important; min-height: 44px !important; border: 0 !important; border-radius: 50% !important; background: #F4F4F5 !important; color: #1F1F1F !important; }
+        .ep-customer-ui .ep-slide-drawer input[placeholder="Guests"] + button, .ep-customer-ui .ep-slide-drawer h3 + button { height: 56px !important; min-height: 56px !important; background: #C2410C !important; border: 0 !important; border-radius: 14px !important; color: #fff !important; font-weight: 600 !important; }
+        .ep-customer-chat > div { background: #fff !important; border: 1px solid #EEEEEE !important; border-radius: 16px !important; padding: 12px !important; }
+        .ep-customer-chat > div > div:first-child { color-scheme: light; }
+        .ep-customer-chat input { height: 48px !important; padding: 0 14px !important; }
+        .ep-customer-chat button { height: 56px !important; min-height: 56px !important; background: #C2410C !important; color: #fff !important; border: 0 !important; border-radius: 14px !important; padding: 0 16px !important; }
+        .ep-customer-tabs { position: fixed; left: 50%; bottom: 0; z-index: 60; transform: translateX(-50%); width: min(430px, 100%); height: 76px; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); align-items: center; background: #fff; border-top: 1px solid #EEEEEE; box-shadow: 0 -8px 24px rgba(31,31,31,0.06); padding-bottom: env(safe-area-inset-bottom); }
+        .ep-customer-tab { min-height: 76px; border: 0; background: transparent; color: #6B6B6B; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: 11px; font-weight: 500; cursor: pointer; }
+        .ep-customer-tab.is-active { color: #C2410C; font-weight: 700; }
+        .ep-customer-tab:disabled { opacity: 0.42; cursor: not-allowed; }
+        .ep-customer-tab-icon { font-size: 18px; line-height: 1; }
+        @media (min-width: 431px) { .ep-customer-ui { box-shadow: 0 0 40px rgba(0,0,0,0.12); } }
+      `}</style>
       {toast && <Toast message={toast} type={toastType} />}
 
       
@@ -3641,52 +3708,52 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
 
       {/* ENP-DARK-LOGIN */}
       {!isLoggedIn && !waiterUnlocked && !guestMode && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 150, background: "#0B111A", overflowY: "auto", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-          <div style={{ width: "100%", maxWidth: 400, background: "#161F2F", borderRadius: 24, padding: 32, border: "1px solid #273449", boxShadow: "0 24px 70px rgba(0,0,0,0.55)" }}>
+        <div style={{ position: "fixed", inset: 0, zIndex: 150, background: "rgba(0,0,0,0.4)", overflowY: "auto", colorScheme: "light", display: "flex", alignItems: "flex-end", justifyContent: "center", padding: 16 }}>
+          <div style={{ width: "100%", maxWidth: 400, maxHeight: "90vh", overflowY: "auto", background: "#fff", color: "#1F1F1F", borderRadius: 20, padding: 24, border: "1px solid #EEEEEE", boxShadow: "0 16px 40px rgba(31,31,31,0.16)" }}>
             <div style={{ textAlign: "center", marginBottom: 28 }}>
-              <div style={{ width: 70, height: 70, background: "#FF5A1F", borderRadius: 18, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 34, margin: "0 auto 14px", boxShadow: "0 12px 30px rgba(255,90,31,0.35)" }}>🍽️</div>
-              <div style={{ fontSize: 24, fontWeight: 800, color: "#fff" }}>Eat & Park Restaurant</div>
-              <div style={{ fontSize: 13, color: "#8B9BB4", marginTop: 4 }}>Customer Login</div>
+              <div style={{ width: 56, height: 56, background: "#FFF3EA", borderRadius: 16, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, margin: "0 auto 12px" }}>🍽️</div>
+              <div style={{ fontSize: 18, fontWeight: 600, color: "#1F1F1F" }}>Eat & Park Restaurant</div>
+              <div style={{ fontSize: 13, color: "#6B6B6B", marginTop: 4 }}>Customer Login</div>
             </div>
             <div id="otp-recaptcha"></div>
             {otpStep === "phone" ? (
               <div>
                 <div style={{ marginBottom: 16 }}>
-                  <label style={{ display: "block", fontSize: 11, fontWeight: 800, color: "#8B9BB4", textTransform: "uppercase", marginBottom: 8, letterSpacing: 0.5 }}>Your Name</label>
-                  <input type="text" placeholder="Apna naam likho" value={custName} onChange={(e) => setCustName(e.target.value)} style={{ width: "100%", boxSizing: "border-box", padding: "14px 16px", background: "#0B111A", border: "1px solid #273449", borderRadius: 12, color: "#fff", fontSize: 15, outline: "none" }} />
+                  <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#6B6B6B", marginBottom: 8 }}>Your Name</label>
+                  <input type="text" placeholder="Apna naam likho" value={custName} onChange={(e) => setCustName(e.target.value)} style={{ width: "100%", height: 48, boxSizing: "border-box", padding: "0 14px", background: "#F4F4F5", border: "1px solid #EEEEEE", borderRadius: 14, color: "#1F1F1F", fontSize: 16 }} />
                 </div>
                 <div style={{ marginBottom: 22 }}>
-                  <label style={{ display: "block", fontSize: 11, fontWeight: 800, color: "#8B9BB4", textTransform: "uppercase", marginBottom: 8, letterSpacing: 0.5 }}>Phone Number</label>
-                  <input type="tel" inputMode="numeric" maxLength={10} placeholder="10-digit number" value={custPhone} onChange={(e) => setCustPhone(e.target.value.replace(/\D/g, "").slice(0, 10))} style={{ width: "100%", boxSizing: "border-box", padding: "14px 16px", background: "#0B111A", border: "1px solid #273449", borderRadius: 12, color: "#fff", outline: "none", fontSize: 20, letterSpacing: 2, fontWeight: 700, textAlign: "center" }} />
+                  <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#6B6B6B", marginBottom: 8 }}>Phone Number</label>
+                  <input type="tel" inputMode="numeric" maxLength={10} placeholder="10-digit number" value={custPhone} onChange={(e) => setCustPhone(e.target.value.replace(/\D/g, "").slice(0, 10))} style={{ width: "100%", height: 48, boxSizing: "border-box", padding: "0 14px", background: "#F4F4F5", border: "1px solid #EEEEEE", borderRadius: 14, color: "#1F1F1F", fontSize: 16, letterSpacing: 1, fontWeight: 600, textAlign: "center" }} />
                 </div>
                 <button disabled={otpSending || resendIn > 0} onClick={() => { if (!custName.trim()) { showToast("⚠️ Pehle naam daalo", "error"); return; } handleSendOtp(); }}
-                  style={{ width: "100%", padding: 16, background: "#FF5A1F", border: "none", borderRadius: 14, color: "#fff", fontSize: 16, fontWeight: 800, cursor: "pointer", boxShadow: "0 8px 20px rgba(255,90,31,0.3)", opacity: (otpSending || resendIn > 0) ? 0.6 : 1 }}>
+                  style={{ width: "100%", height: 56, padding: "0 16px", background: "#C2410C", border: "none", borderRadius: 14, color: "#fff", fontSize: 16, fontWeight: 600, cursor: "pointer", opacity: (otpSending || resendIn > 0) ? 0.6 : 1 }}>
                   {otpSending ? "⏳ Bhej raha hai..." : resendIn > 0 ? "Dobara bhejo (" + resendIn + "s)" : "Send OTP"}
                 </button>
               </div>
             ) : (
               <div>
-                <label style={{ display: "block", fontSize: 11, fontWeight: 800, color: "#8B9BB4", textTransform: "uppercase", marginBottom: 8, letterSpacing: 0.5, textAlign: "center" }}>OTP {custPhone} par bheja gaya</label>
-                <input type="text" inputMode="numeric" maxLength={6} placeholder="••••••" value={otpCode} onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ""))} style={{ width: "100%", boxSizing: "border-box", padding: "14px 16px", background: "#0B111A", border: "1px solid #273449", borderRadius: 12, color: "#fff", outline: "none", fontSize: 28, letterSpacing: 10, fontWeight: 800, textAlign: "center", marginBottom: 20 }} />
-                <button onClick={handleVerifyOtp} style={{ width: "100%", padding: 16, background: "#10B981", border: "none", borderRadius: 14, color: "#fff", fontSize: 16, fontWeight: 800, cursor: "pointer", marginBottom: 10, boxShadow: "0 8px 20px rgba(16,185,129,0.3)" }}>Verify & Start</button>
-                <button disabled={otpSending || resendIn > 0} onClick={handleSendOtp} style={{ width: "100%", padding: 10, background: "none", border: "none", color: "#FF8C5A", fontWeight: 800, cursor: "pointer", opacity: resendIn > 0 ? 0.5 : 1 }}>{resendIn > 0 ? "Resend OTP (" + resendIn + "s)" : "🔁 Resend OTP"}</button>
-                <button onClick={() => { setOtpStep("phone"); setOtpCode(""); }} style={{ width: "100%", padding: 10, background: "none", border: "none", color: "#8B9BB4", fontWeight: 700, cursor: "pointer" }}>← Change Number</button>
+                <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#6B6B6B", marginBottom: 8, textAlign: "center" }}>OTP {custPhone} par bheja gaya</label>
+                <input type="text" inputMode="numeric" maxLength={6} placeholder="••••••" value={otpCode} onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ""))} style={{ width: "100%", height: 48, boxSizing: "border-box", padding: "0 14px", background: "#F4F4F5", border: "1px solid #EEEEEE", borderRadius: 14, color: "#1F1F1F", fontSize: 20, letterSpacing: 6, fontWeight: 600, textAlign: "center", marginBottom: 16 }} />
+                <button onClick={handleVerifyOtp} style={{ width: "100%", height: 56, padding: "0 16px", background: "#C2410C", border: "none", borderRadius: 14, color: "#fff", fontSize: 16, fontWeight: 600, cursor: "pointer", marginBottom: 10 }}>Verify & Start</button>
+                <button disabled={otpSending || resendIn > 0} onClick={handleSendOtp} style={{ width: "100%", minHeight: 44, padding: 10, background: "#fff", border: "1.5px solid #C2410C", borderRadius: 14, color: "#C2410C", fontWeight: 600, cursor: "pointer", opacity: resendIn > 0 ? 0.5 : 1 }}>{resendIn > 0 ? "Resend OTP (" + resendIn + "s)" : "🔁 Resend OTP"}</button>
+                <button onClick={() => { setOtpStep("phone"); setOtpCode(""); }} style={{ width: "100%", minHeight: 44, padding: 10, background: "transparent", border: "none", color: "#6B6B6B", fontWeight: 600, cursor: "pointer" }}>← Change Number</button>
               </div>
             )}
             
-            <div style={{ textAlign: "center", color: "#8B9BB4", fontSize: 12, fontWeight: 700, margin: "20px 0 12px 0" }}>─── OR ───</div>
+            <div style={{ textAlign: "center", color: "#6B6B6B", fontSize: 12, fontWeight: 600, margin: "20px 0 12px 0" }}>─── OR ───</div>
             
             <button
               onClick={() => setShowGuestChoice(true)}
-              style={{ width: "100%", padding: 14, background: "transparent", border: "2px solid #FF5A1F", borderRadius: 12, color: "#FF5A1F", fontSize: 15, fontWeight: 800, cursor: "pointer", marginBottom: 8 }}
+              style={{ width: "100%", height: 48, padding: "0 14px", background: "#fff", border: "1.5px solid #C2410C", borderRadius: 14, color: "#C2410C", fontSize: 15, fontWeight: 600, cursor: "pointer", marginBottom: 8 }}
             >
               👤 Continue as Guest
             </button>
 
-            <div style={{ display: "flex", gap: 8, marginTop: 26 }}>
-              <button onClick={() => requestPinPrompt("staff")} style={{ flex: 1, padding: "10px 0", background: "transparent", border: "1px solid #273449", borderRadius: 12, color: "#8B9BB4", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>Staff</button>
-              <button onClick={() => setShowWaiterPinModal(true)} style={{ flex: 1, padding: "10px 0", background: "transparent", border: "1px solid #273449", borderRadius: 12, color: "#8B9BB4", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>Waiter</button>
-              <button onClick={() => requestPinPrompt("admin")} style={{ flex: 1, padding: "10px 0", background: "transparent", border: "1px solid #273449", borderRadius: 12, color: "#8B9BB4", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>Admin</button>
+            <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
+              <button onClick={() => requestPinPrompt("staff")} style={{ flex: 1, minHeight: 44, padding: "10px 0", background: "#fff", border: "1px solid #EEEEEE", borderRadius: 12, color: "#6B6B6B", fontWeight: 600, fontSize: 12, cursor: "pointer" }}>Staff</button>
+              <button onClick={() => setShowWaiterPinModal(true)} style={{ flex: 1, minHeight: 44, padding: "10px 0", background: "#fff", border: "1px solid #EEEEEE", borderRadius: 12, color: "#6B6B6B", fontWeight: 600, fontSize: 12, cursor: "pointer" }}>Waiter</button>
+              <button onClick={() => requestPinPrompt("admin")} style={{ flex: 1, minHeight: 44, padding: "10px 0", background: "#fff", border: "1px solid #EEEEEE", borderRadius: 12, color: "#6B6B6B", fontWeight: 600, fontSize: 12, cursor: "pointer" }}>Admin</button>
             </div>
           </div>
         </div>
@@ -3694,23 +3761,23 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
 
       {/* === GUEST CHOICE MODAL === */}
       {showGuestChoice && !isLoggedIn && !guestMode && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 160, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-          <div style={{ width: "100%", maxWidth: 400, background: "#161F2F", borderRadius: 24, padding: 28, border: "1px solid #273449" }}>
+        <div style={{ position: "fixed", inset: 0, zIndex: 160, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "flex-end", justifyContent: "center", padding: 16, colorScheme: "light" }}>
+          <div style={{ width: "100%", maxWidth: 400, maxHeight: "90vh", overflowY: "auto", background: "#fff", color: "#1F1F1F", borderRadius: 20, padding: 24, border: "1px solid #EEEEEE" }}>
             <div style={{ textAlign: "center", marginBottom: 20 }}>
-              <div style={{ fontSize: 22, fontWeight: 800, color: "#fff", marginBottom: 6 }}>How would you like to order?</div>
-              <div style={{ fontSize: 13, color: "#8B9BB4" }}>Apna order mode choose karein</div>
+              <div style={{ fontSize: 18, fontWeight: 600, color: "#1F1F1F", marginBottom: 6 }}>How would you like to order?</div>
+              <div style={{ fontSize: 13, color: "#6B6B6B" }}>Apna order mode choose karein</div>
             </div>
 
             <div style={{ marginBottom: 14 }}>
-              <label style={{ display: "block", fontSize: 11, fontWeight: 800, color: "#8B9BB4", textTransform: "uppercase", marginBottom: 6 }}>Table number</label>
-              <select value={table} onChange={(e) => setTable(Number(e.target.value))} style={{ width: "100%", padding: 12, background: "#0B111A", color: "#fff", border: "1px solid #273449", borderRadius: 12, fontSize: 15, fontWeight: 700 }}>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#6B6B6B", marginBottom: 6 }}>Table number</label>
+              <select value={table} onChange={(e) => setTable(Number(e.target.value))} style={{ width: "100%", height: 48, padding: "0 14px", background: "#F4F4F5", color: "#1F1F1F", border: "1px solid #EEEEEE", borderRadius: 14, fontSize: 15, fontWeight: 600, colorScheme: "light" }}>
                 {Array.from({ length: 20 }, (_, i) => i + 1).map((n) => (<option key={n} value={n}>Table {n}</option>))}
               </select>
             </div>
 
             <button
               onClick={() => { setFulfillmentMode("dine_in"); setOrderType("dine_in"); setGuestMode(true); setShowGuestChoice(false); setCustAddress(""); setCustExactAddress(""); setCustPinCode(""); }}
-              style={{ width: "100%", padding: 16, marginBottom: 12, background: "#FF5A1F", border: "none", borderRadius: 14, color: "#fff", fontSize: 16, fontWeight: 800, cursor: "pointer" }}
+              style={{ width: "100%", height: 56, padding: "0 16px", marginBottom: 12, background: "#C2410C", border: "none", borderRadius: 14, color: "#fff", fontSize: 16, fontWeight: 600, cursor: "pointer" }}
             >
               🍽️ Dine-in (Table {table})
             </button>
@@ -3725,7 +3792,7 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
                 setCustExactAddress("");
                 setCustPinCode("");
               }}
-              style={{ width: "100%", padding: 16, marginBottom: 12, background: "#10B981", border: "none", borderRadius: 14, color: "#fff", fontSize: 16, fontWeight: 800, cursor: "pointer" }}
+              style={{ width: "100%", height: 56, padding: "0 16px", marginBottom: 12, background: "#C2410C", border: "none", borderRadius: 14, color: "#fff", fontSize: 16, fontWeight: 600, cursor: "pointer" }}
             >
               🛍️ Table Takeaway
             </button>
@@ -3736,14 +3803,14 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
                 setGuestMode(true);
                 setShowGuestChoice(false);
               }}
-              style={{ width: "100%", padding: 16, marginBottom: 12, background: "#2563EB", border: "none", borderRadius: 14, color: "#fff", fontSize: 16, fontWeight: 800, cursor: "pointer" }}
+              style={{ width: "100%", height: 56, padding: "0 16px", marginBottom: 12, background: "#C2410C", border: "none", borderRadius: 14, color: "#fff", fontSize: 16, fontWeight: 600, cursor: "pointer" }}
             >
               🛵 Home Delivery
             </button>
 
             <button
               onClick={() => setShowGuestChoice(false)}
-              style={{ width: "100%", padding: 12, background: "transparent", border: "none", color: "#8B9BB4", fontWeight: 700, cursor: "pointer" }}
+              style={{ width: "100%", minHeight: 44, padding: 12, background: "#fff", border: "1.5px solid #C2410C", borderRadius: 14, color: "#C2410C", fontWeight: 600, cursor: "pointer" }}
             >
               ← Cancel
             </button>
@@ -3755,64 +3822,68 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
 
       {/* 🎂 DOB POPUP */}
       {showDobModal && isLoggedIn && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 160, background: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-          <div style={{ width: "100%", maxWidth: 380, background: "#161F2F", borderRadius: 24, padding: 28, border: "1px solid #273449", boxShadow: "0 24px 70px rgba(0,0,0,0.55)", textAlign: "center" }}>
+        <div style={{ position: "fixed", inset: 0, zIndex: 160, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "flex-end", justifyContent: "center", padding: 16, colorScheme: "light" }}>
+          <div style={{ width: "100%", maxWidth: 380, maxHeight: "90vh", overflowY: "auto", background: "#fff", color: "#1F1F1F", borderRadius: 20, padding: 24, border: "1px solid #EEEEEE", textAlign: "center" }}>
             <div style={{ fontSize: 54, marginBottom: 8 }}>🎂</div>
-            <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 22, fontWeight: 800, color: "#fff", lineHeight: 1.3 }}>Give your date of birth and get offer on birthday</div>
-            <div style={{ fontSize: 13, color: "#8B9BB4", marginTop: 8, marginBottom: 18 }}>Apna birthday batao, us din aapko special offer milega 🎁</div>
+            <div style={{ fontSize: 18, fontWeight: 600, color: "#1F1F1F", lineHeight: 1.3 }}>Give your date of birth and get offer on birthday</div>
+            <div style={{ fontSize: 13, color: "#6B6B6B", marginTop: 8, marginBottom: 18 }}>Apna birthday batao, us din aapko special offer milega 🎁</div>
             <input type="date" value={dobInput} min="1940-01-01" max={new Date().toISOString().split("T")[0]} onChange={(e) => { setDobInput(e.target.value); setDobErr(""); }}
-              style={{ width: "100%", boxSizing: "border-box", padding: "14px 16px", background: "#0B111A", border: "1px solid #273449", borderRadius: 12, color: "#fff", fontSize: 18, fontWeight: 700, textAlign: "center", outline: "none", colorScheme: "dark" }} />
-            {dobErr && <div style={{ color: "#EF4444", fontSize: 12, fontWeight: 700, marginTop: 8 }}>{dobErr}</div>}
-            <button onClick={saveDob} disabled={dobSaving} style={{ width: "100%", padding: 15, marginTop: 16, background: "#FF5A1F", border: "none", borderRadius: 14, color: "#fff", fontSize: 16, fontWeight: 800, cursor: dobSaving ? "wait" : "pointer", opacity: dobSaving ? 0.6 : 1, boxShadow: "0 8px 20px rgba(255,90,31,0.3)" }}>
+              style={{ width: "100%", height: 48, boxSizing: "border-box", padding: "0 14px", background: "#F4F4F5", border: "1px solid #EEEEEE", borderRadius: 14, color: "#1F1F1F", fontSize: 16, fontWeight: 600, textAlign: "center", colorScheme: "light" }} />
+            {dobErr && <div style={{ color: "#B91C1C", fontSize: 12, fontWeight: 600, marginTop: 8 }}>{dobErr}</div>}
+            <button onClick={saveDob} disabled={dobSaving} style={{ width: "100%", height: 56, padding: "0 15px", marginTop: 16, background: "#C2410C", border: "none", borderRadius: 14, color: "#fff", fontSize: 16, fontWeight: 600, cursor: dobSaving ? "wait" : "pointer", opacity: dobSaving ? 0.6 : 1 }}>
               {dobSaving ? "⏳ Saving..." : "🎁 Save & Get Offer"}
             </button>
-            <button onClick={skipDob} style={{ width: "100%", padding: 10, marginTop: 6, background: "none", border: "none", color: "#8B9BB4", fontWeight: 700, cursor: "pointer" }}>Baad me</button>
+            <button onClick={skipDob} style={{ width: "100%", minHeight: 44, padding: 10, marginTop: 6, background: "#fff", border: "1.5px solid #C2410C", borderRadius: 14, color: "#C2410C", fontWeight: 600, cursor: "pointer" }}>Baad me</button>
           </div>
         </div>
       )}
 
       {/* ENP-CUSTOMER-UI */}
-      <style>{"body{background:#0B111A} .slide-up { color: #111827 !important; } .slide-up div, .slide-up span { color: inherit; }.enp-hs::-webkit-scrollbar{display:none}.enp-hs{scrollbar-width:none}"}</style>
+      <style>{".ep-customer-ui { background: #fff; }"}</style>
 
-      <div style={{ position: "sticky", top: 0, zIndex: 60, background: "rgba(11,17,26,0.94)", backdropFilter: "blur(10px)", borderBottom: "1px solid #273449", padding: "10px 14px", display: "flex", alignItems: "center", gap: 8 }}>
-        <button onClick={() => setShowSidebar(true)} aria-label="Menu" style={{ width: 40, height: 40, borderRadius: 12, border: "1px solid #273449", background: "#161F2F", color: "#fff", fontSize: 18, cursor: "pointer", flexShrink: 0 }}>☰</button>
+      <div style={{ position: "sticky", top: 0, zIndex: 60, background: "#fff", borderBottom: "1px solid #EEEEEE", padding: "12px 14px", display: "flex", alignItems: "center", gap: 10 }}>
+        <button onClick={() => setShowSidebar(true)} aria-label="Menu" style={{ width: 44, height: 44, borderRadius: "50%", border: "1px solid #EEEEEE", background: "#F4F4F5", color: "#1F1F1F", fontSize: 18, cursor: "pointer", flexShrink: 0 }}>☰</button>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontFamily: "'Outfit', sans-serif", fontWeight: 800, fontSize: 17, color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>Eat & Park</div>
-          <div style={{ fontSize: 11, color: "#8B9BB4", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{RESTAURANT.tagline}</div>
+          <div style={{ fontFamily: "Poppins, system-ui, sans-serif", fontSize: 11, lineHeight: 1.2, color: "#6B6B6B", fontWeight: 500 }}>Dining at</div>
+          <div style={{ marginTop: 3, fontFamily: "Poppins, system-ui, sans-serif", fontSize: 16, lineHeight: 1.25, color: "#1F1F1F", fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{fulfillmentMode === "takeaway" ? "Takeaway" : fulfillmentMode === "delivery" ? "Home Delivery" : `Table ${table} · Dine-in`}</div>
         </div>
-        <button onClick={() => { const next = language === "hi" ? "en" : "hi"; setLanguage(next); try { localStorage.setItem("eatpark_language", next); } catch (_) {} }} title="Hindi / English" aria-label="Switch Hindi or English" style={{ height: 44, borderRadius: 10, border: "1px solid #273449", background: "#161F2F", color: "#fff", padding: "0 9px", fontWeight: 800, fontSize: 12, cursor: "pointer", flexShrink: 0 }}>{language === "hi" ? "EN" : "हि"}</button>
-        <select value={table} onChange={(e) => setTable(Number(e.target.value))} style={{ background: "#161F2F", color: "#fff", border: "1px solid #273449", borderRadius: 10, padding: "9px 8px", fontWeight: 800, fontSize: 13, outline: "none" }}>
-          {Array.from({ length: 20 }, (_, i) => i + 1).map((n) => (<option key={n} value={n} style={{ color: "#000" }}>Table {n}</option>))}
-        </select>
-        <button onClick={() => { requestWaiter(table); showToast("🔔 Waiter notified!", 'success'); }} title="Waiter Call" style={{ width: 40, height: 40, borderRadius: 12, border: "none", background: "#EF4444", color: "#fff", fontSize: 17, cursor: "pointer", flexShrink: 0 }}>🔔</button>
-        <button onClick={() => { if (waiterUnlocked) setShowWaiterMode(true); else setShowWaiterPinModal(true); }} title="Waiter Mode" style={{ width: 40, height: 40, borderRadius: 12, border: "1px solid #273449", background: waiterUnlocked ? "#3B82F6" : "#161F2F", color: "#fff", fontSize: 17, cursor: "pointer", flexShrink: 0 }}>{waiterUnlocked ? "🧑‍🍳" : "🔒"}</button>
+        <button onClick={() => setCartOpen(true)} aria-label={`Open cart with ${cartCount} items`} disabled={cartCount === 0} style={{ width: 44, height: 44, borderRadius: "50%", border: "1.5px solid #C2410C", background: "#fff", color: "#C2410C", position: "relative", fontSize: 18, cursor: cartCount === 0 ? "default" : "pointer", flexShrink: 0, opacity: cartCount === 0 ? 0.55 : 1 }}>🛒{cartCount > 0 && <span style={{ position: "absolute", top: -5, right: -5, minWidth: 18, height: 18, borderRadius: 9, display: "grid", placeItems: "center", background: "#C2410C", color: "#fff", fontSize: 10, fontWeight: 700 }}>{cartCount}</span>}</button>
       </div>
 
-      <div style={{ margin: "14px 14px 0", position: "relative", height: 150, borderRadius: 20, overflow: "hidden", border: "1px solid #273449" }}>
+      <div style={{ padding: "14px 14px 12px", display: "flex", gap: 8 }}>
+        <div style={{ position: "relative", flex: 1 }}>
+          <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search biryani, paneer, chai" className="keep-color" style={{ width: "100%", height: 48, boxSizing: "border-box", padding: "13px 40px 13px 42px", background: "#F4F4F5", border: "1px solid #EEEEEE", borderRadius: 14, color: "#1F1F1F", fontSize: 16, outline: "none" }} />
+          <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", fontSize: 16 }}>🔍</span>
+          {searchQuery && <button onClick={() => setSearchQuery("")} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "#6B6B6B", fontSize: 16, cursor: "pointer", padding: 6 }}>✕</button>}
+        </div>
+        <button onClick={() => setVegOnly(!vegOnly)} style={{ minWidth: 64, height: 48, borderRadius: 14, border: "1.5px solid " + (vegOnly ? "#15803D" : "#EEEEEE"), background: vegOnly ? "#E8F5E9" : "#fff", color: vegOnly ? "#15803D" : "#6B6B6B", fontWeight: 700, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, cursor: "pointer", whiteSpace: "nowrap" }}><VegDot veg={true} />{vegOnly ? "Veg" : "All"}</button>
+      </div>
+
+      <div style={{ margin: "14px 14px 0", position: "relative", height: 150, borderRadius: 20, overflow: "hidden", border: "1px solid #EEEEEE", display: "none" }}>
         <div className="keep-color" style={{ position: "absolute", inset: 0, backgroundImage: "url('" + (settings?.heroImage || "https://images.unsplash.com/photo-1514933651103-005eec06c04b?auto=format&fit=crop&w=800&q=80") + "')", backgroundSize: "cover", backgroundPosition: "center" }} />
-        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(11,17,26,0.96) 0%, rgba(11,17,26,0.4) 65%, rgba(11,17,26,0.15) 100%)" }} />
+        <div style={{ position: "absolute", inset: 0, background: "rgba(255,255,255,0.78)" }} />
         <div style={{ position: "absolute", left: 16, right: 16, bottom: 14 }}>
-          <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 24, fontWeight: 800, color: "#fff", marginBottom: 8 }}>{RESTAURANT.name}</div>
+          <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 24, fontWeight: 800, color: "#1F1F1F", marginBottom: 8 }}>{RESTAURANT.name}</div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <a href={"tel:" + RESTAURANT.phones[0]} style={{ background: "rgba(255,255,255,0.14)", color: "#fff", padding: "5px 12px", borderRadius: 20, fontSize: 12, fontWeight: 700, textDecoration: "none" }}>📞 Call</a>
-            <a href={GOOGLE_REVIEW_URL} target="_blank" rel="noopener noreferrer" style={{ background: "rgba(255,255,255,0.14)", color: "#fff", padding: "5px 12px", borderRadius: 20, fontSize: 12, fontWeight: 700, textDecoration: "none" }}>⭐ Rate us</a>
+            <a href={"tel:" + RESTAURANT.phones[0]} style={{ background: "#FFF3EA", color: "#C2410C", padding: "8px 12px", borderRadius: 14, fontSize: 12, fontWeight: 600, textDecoration: "none" }}>📞 Call</a>
+            <a href={GOOGLE_REVIEW_URL} target="_blank" rel="noopener noreferrer" style={{ background: "#FFF3EA", color: "#C2410C", padding: "8px 12px", borderRadius: 14, fontSize: 12, fontWeight: 600, textDecoration: "none" }}>⭐ Rate us</a>
           </div>
         </div>
       </div>
 
       {myActiveOrders.length > 0 && (
         <div style={{ padding: "12px 14px 0", display: "flex", gap: 8 }}>
-          <button onClick={() => setActiveModal('track')} style={{ flex: 1, background: "#0A2A20", border: "1.5px solid #10B981", color: "#10B981", borderRadius: 14, padding: 12, fontWeight: 800, display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", fontSize: 14 }}>
-            <span>📦 {myActiveOrders.length} Active Order{myActiveOrders.length > 1 ? 's' : ''}</span><span>Track ➔</span>
+          <button onClick={() => setActiveModal('track')} style={{ flex: 1, height: 56, minHeight: 56, background: "#FFF3EA", border: "1px solid #FED7AA", color: "#1F1F1F", borderRadius: 14, padding: "0 14px", fontWeight: 600, display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", fontSize: 14 }}>
+            <span>{myActiveOrders.length} Active Order{myActiveOrders.length > 1 ? 's' : ''}</span><span style={{ color: "#C2410C", fontWeight: 600 }}>Track →</span>
           </button>
-          <button onClick={() => setRunningOrderId(myActiveOrders[0].id)} style={{ background: "#3B82F6", color: "#fff", border: "none", borderRadius: 14, padding: "0 16px", fontWeight: 800, cursor: "pointer", fontSize: 18 }}>➕</button>
+          <button onClick={() => setRunningOrderId(myActiveOrders[0].id)} aria-label="Add items to active order" style={{ width: 44, height: 44, minHeight: 44, alignSelf: "center", background: "#fff", color: "#C2410C", border: "1.5px solid #C2410C", borderRadius: "50%", padding: 0, fontWeight: 600, cursor: "pointer", fontSize: 20 }}>+</button>
         </div>
       )}
 
       {/* FEATURE-REORDER-PROMINENT */}
       {isLoggedIn && myOrders.length > 0 && (
-        <div style={{ padding: "12px 14px 0" }}>
-          <div style={{ fontSize: 13, fontWeight: 800, color: "#fff", marginBottom: 8, fontFamily: "'Outfit', sans-serif" }}>🔄 Order Again</div>
+        <div style={{ padding: "16px 14px 0" }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: "#1F1F1F", marginBottom: 10, fontFamily: "Poppins, system-ui, sans-serif" }}>Order Again</div>
           <div className="enp-hs" style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 }}>
             {[...myOrders].reverse().slice(0, 5).map(o => (
               <button
@@ -3820,21 +3891,21 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
                 onClick={() => reorderOrder(o)}
                 style={{
                   flexShrink: 0,
-                  minWidth: 160,
-                  background: "#161F2F",
-                  border: "1px solid #273449",
-                  borderRadius: 12,
-                  padding: 10,
+                  minWidth: 176,
+                  background: "#fff",
+                  border: "1px solid #EEEEEE",
+                  borderRadius: 16,
+                  padding: 12,
                   textAlign: "left",
                   cursor: "pointer",
                   fontFamily: "inherit",
                 }}
               >
-                <div style={{ fontSize: 12, fontWeight: 800, color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "#1F1F1F", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                   {(o.items || []).slice(0, 2).map(i => i.name).join(", ")}
                   {(o.items || []).length > 2 ? " +" + ((o.items || []).length - 2) : ""}
                 </div>
-                <div style={{ fontSize: 10, color: "#8B9BB4", marginTop: 4, display: "flex", justifyContent: "space-between" }}>
+                <div style={{ fontSize: 10, color: "#6B6B6B", marginTop: 6, display: "flex", justifyContent: "space-between" }}>
                   <span>#{o.id.slice(1, 5).toUpperCase()}</span>
                   <span>{inr(o.finalTotal || 0)}</span>
                 </div>
@@ -3846,19 +3917,19 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
 
       {!searchQuery.trim() && comboOffers && comboOffers.filter((c) => c.active).length > 0 && (
         <div style={{ paddingTop: 18 }}>
-          <div style={{ padding: "0 14px 10px", fontFamily: "'Outfit', sans-serif", fontSize: 17, fontWeight: 800, color: "#fff" }}>🎯 Combo Offers</div>
+          <div style={{ padding: "0 14px 10px", fontFamily: "Poppins, system-ui, sans-serif", fontSize: 17, fontWeight: 600, color: "#1F1F1F" }}>🎯 Combo Offers</div>
           <div className="enp-hs" style={{ display: "flex", gap: 12, overflowX: "auto", padding: "0 14px 4px" }}>
             {comboOffers.filter((c) => c.active).map((combo) => (
-              <div key={combo.id} style={{ minWidth: 260, maxWidth: 260, flexShrink: 0, background: "linear-gradient(135deg, #1E293B 0%, #161F2F 100%)", border: "1px solid rgba(255,90,31,0.4)", borderRadius: 16, padding: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+              <div key={combo.id} style={{ minWidth: 260, maxWidth: 260, flexShrink: 0, background: "#fff", color: "#1F1F1F", border: "1px solid #EEEEEE", borderRadius: 16, padding: 14, display: "flex", flexDirection: "column", gap: 8 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <span style={{ fontSize: 30 }}>{combo.image}</span>
-                  <div style={{ flex: 1, minWidth: 0, fontWeight: 800, fontSize: 15, color: "#fff" }}>{combo.name}</div>
-                  <span style={{ background: "#FF5A1F", color: "#fff", padding: "3px 9px", borderRadius: 20, fontSize: 11, fontWeight: 800 }}>{combo.discount}% OFF</span>
+                  <div style={{ flex: 1, minWidth: 0, fontWeight: 600, fontSize: 14, color: "#1F1F1F" }}>{combo.name}</div>
+                  <span style={{ background: "#FFF3EA", color: "#C2410C", padding: "4px 9px", borderRadius: 20, fontSize: 11, fontWeight: 600 }}>{combo.discount}% OFF</span>
                 </div>
-                <div style={{ fontSize: 12, color: "#8B9BB4", lineHeight: 1.5 }}>{(combo.items || []).map((i) => i.quantity + "× " + i.name).join(" · ")}</div>
+                <div style={{ fontSize: 12, color: "#6B6B6B", lineHeight: 1.5 }}>{(combo.items || []).map((i) => i.quantity + "× " + i.name).join(" · ")}</div>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "auto" }}>
-                  <div><span style={{ fontSize: 18, fontWeight: 800, color: "#FF8C5A" }}>₹{combo.finalPrice}</span> <span style={{ fontSize: 12, color: "#8B9BB4", textDecoration: "line-through" }}>₹{combo.totalPrice}</span></div>
-                  <button onClick={() => addComboToCart(combo)} style={{ background: "#FF5A1F", color: "#fff", border: "none", borderRadius: 10, padding: "8px 16px", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>Add</button>
+                  <div><span style={{ fontSize: 16, fontWeight: 700, color: "#C2410C" }}>₹{combo.finalPrice}</span> <span style={{ fontSize: 12, color: "#6B6B6B", textDecoration: "line-through" }}>₹{combo.totalPrice}</span></div>
+                  <button onClick={() => addComboToCart(combo)} style={{ height: 44, background: "#C2410C", color: "#fff", border: "none", borderRadius: 14, padding: "0 16px", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>Add</button>
                 </div>
               </div>
             ))}
@@ -3868,61 +3939,94 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
 
       {!searchQuery.trim() && flashSaleItems && flashSaleItems.filter((f) => f.active && (f.stock == null || f.stock > 0)).length > 0 && (
         <div style={{ paddingTop: 18 }}>
-          <div style={{ padding: "0 14px 10px", fontFamily: "'Outfit', sans-serif", fontSize: 17, fontWeight: 800, color: "#EF4444" }}>⚡ Flash Sale</div>
+          <div style={{ padding: "0 14px 10px", fontFamily: "Poppins, system-ui, sans-serif", fontSize: 17, fontWeight: 600, color: "#C2410C" }}>⚡ Flash Sale</div>
           <div className="enp-hs" style={{ display: "flex", gap: 12, overflowX: "auto", padding: "0 14px 4px" }}>
             {flashSaleItems.filter((f) => f.active && (f.stock == null || f.stock > 0)).map((item) => (
-              <div key={item.id} style={{ minWidth: 170, flexShrink: 0, background: "#161F2F", border: "1px solid rgba(239,68,68,0.5)", borderRadius: 16, padding: 12 }}>
-                <div style={{ fontWeight: 800, fontSize: 14, color: "#fff", marginBottom: 6 }}>🔥 {item.name}</div>
-                <div style={{ marginBottom: 6 }}><span style={{ fontSize: 18, fontWeight: 800, color: "#EF4444" }}>₹{item.discountPrice}</span> <span style={{ fontSize: 12, color: "#8B9BB4", textDecoration: "line-through" }}>₹{item.price}</span></div>
-                {item.stock != null && item.stock <= 5 && <div style={{ fontSize: 11, color: "#F59E0B", fontWeight: 700, marginBottom: 6 }}>Sirf {item.stock} bache!</div>}
-                <button onClick={() => addFlashSaleToCart(item)} style={{ width: "100%", background: "#EF4444", color: "#fff", border: "none", borderRadius: 10, padding: 8, fontWeight: 800, cursor: "pointer" }}>Add</button>
+              <div key={item.id} style={{ minWidth: 170, flexShrink: 0, background: "#fff", color: "#1F1F1F", border: "1px solid #EEEEEE", borderRadius: 16, padding: 12 }}>
+                <div style={{ fontWeight: 600, fontSize: 14, color: "#1F1F1F", marginBottom: 6 }}>🔥 {item.name}</div>
+                <div style={{ marginBottom: 6 }}><span style={{ fontSize: 16, fontWeight: 700, color: "#C2410C" }}>₹{item.discountPrice}</span> <span style={{ fontSize: 12, color: "#6B6B6B", textDecoration: "line-through" }}>₹{item.price}</span></div>
+                {item.stock != null && item.stock <= 5 && <div style={{ fontSize: 11, color: "#C2410C", fontWeight: 600, marginBottom: 6 }}>Sirf {item.stock} bache!</div>}
+                <button onClick={() => addFlashSaleToCart(item)} style={{ width: "100%", height: 44, background: "#C2410C", color: "#fff", border: "none", borderRadius: 14, padding: 8, fontWeight: 600, cursor: "pointer" }}>Add</button>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      <div style={{ padding: "18px 14px 12px", display: "flex", gap: 8 }}>
-        <div style={{ position: "relative", flex: 1 }}>
-          <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Dish search karo..." className="keep-color" style={{ width: "100%", boxSizing: "border-box", padding: "13px 40px 13px 42px", background: "#161F2F", border: "1px solid #273449", borderRadius: 14, color: "#fff", fontSize: 15, outline: "none" }} />
-          <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", fontSize: 16 }}>🔍</span>
-          {searchQuery && <button onClick={() => setSearchQuery("")} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "#8B9BB4", fontSize: 16, cursor: "pointer", padding: 6 }}>✕</button>}
-        </div>
-        <button onClick={() => setVegOnly(!vegOnly)} style={{ padding: "0 14px", borderRadius: 14, border: "1px solid " + (vegOnly ? "#10B981" : "#273449"), background: vegOnly ? "#0A2A20" : "#161F2F", color: vegOnly ? "#10B981" : "#8B9BB4", fontWeight: 800, fontSize: 13, display: "flex", alignItems: "center", gap: 6, cursor: "pointer", whiteSpace: "nowrap" }}>
-          <VegDot veg={true} />{vegOnly ? "Veg" : "All"}
-        </button>
-      </div>
-
       {!searchQuery.trim() && !catPickerOpen && (
-        <div style={{ position: "sticky", top: 60, zIndex: 50, display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", background: "#0B111A", borderBottom: "1px solid #273449" }}>
-          <button onClick={() => setCatPickerOpen(true)} style={{ flexShrink: 0, padding: "8px 14px", borderRadius: 999, border: "1px solid #273449", background: "#161F2F", color: "#FF8C5A", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>← Categories</button>
+        <div style={{ position: "sticky", top: 60, zIndex: 50, display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", background: "#fff", borderBottom: "1px solid #EEEEEE" }}>
+          <button onClick={() => setCatPickerOpen(true)} style={{ flexShrink: 0, minHeight: 44, padding: "0 14px", borderRadius: 14, border: "1.5px solid #C2410C", background: "#fff", color: "#C2410C", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>← Categories</button>
           <div className="enp-hs" style={{ display: "flex", gap: 8, overflowX: "auto", flex: 1 }}>
             {visibleCategories.map((c) => {
               const on = category === c;
               return (
-                <button key={c} onClick={() => setCategory(c)} className="ep-chip" aria-pressed={on} style={{ background: on ? "#E25938" : "#161F2F", color: on ? "#fff" : "#B8C2BE", borderColor: on ? "#E25938" : "#273449", boxShadow: on ? "0 6px 16px rgba(226,89,56,0.28)" : "none" }}>{c}</button>
+                <button key={c} onClick={() => setCategory(c)} className="ep-chip" aria-pressed={on} style={{ minHeight: 44, background: on ? "#FFF3EA" : "#F4F4F5", color: on ? "#C2410C" : "#1F1F1F", borderColor: on ? "#C2410C" : "#EEEEEE", boxShadow: "none", fontWeight: 600 }}>{c}</button>
               );
             })}
           </div>
         </div>
       )}
 
+      {!searchQuery.trim() && (() => {
+        const specialItems = (menu || []).filter((m) => m.available !== false && (m.isBestseller === true || m.featured === true || m.special === true || (flashSaleItems || []).some((f) => f.active && f.id === m.id))).slice(0, 8);
+        if (specialItems.length === 0) return null;
+        return (
+          <div style={{ padding: "18px 14px 0" }}>
+            <div style={{ fontFamily: "Poppins, system-ui, sans-serif", fontSize: 17, fontWeight: 700, color: "#1F1F1F", marginBottom: 12 }}>Today's Special</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
+              {specialItems.slice(0, 6).map((item) => {
+                const qty = getCartQty(cart[item.id]);
+                const subtitle = [item.veg === true ? "Veg" : item.veg === false ? "Non-veg" : null, item.portion].filter(Boolean).join(" · ");
+                return (
+                  <article key={item.id} style={{ minWidth: 0, border: "1px solid #EEEEEE", borderRadius: 16, background: "#fff", padding: 10, boxSizing: "border-box", boxShadow: "0 4px 14px rgba(31,31,31,0.04)" }}>
+                    <div style={{ position: "relative", width: "100%", height: 116, borderRadius: 14, background: "#F4F4F5", overflow: "hidden", display: "grid", placeItems: "center" }}>
+                      {item.image ? (
+                        <img src={item.image} alt={item.name} loading="lazy" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                      ) : (
+                        <span style={{ fontSize: 34 }}>🍽️</span>
+                      )}
+                      {item.veg !== undefined && <span title={item.veg ? "Veg" : "Non-veg"} style={{ position: "absolute", top: 8, left: 8, width: 10, height: 10, borderRadius: "50%", background: item.veg ? "#15803D" : "#DC2626", border: "2px solid #fff", boxSizing: "border-box" }} />}
+                    </div>
+                    <div style={{ marginTop: 8, minWidth: 0 }}>
+                      <div style={{ fontFamily: "Poppins, system-ui, sans-serif", fontSize: 14, fontWeight: 600, color: "#1F1F1F", lineHeight: 1.25, minHeight: 35, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{item.name}</div>
+                      {subtitle && <div style={{ marginTop: 3, fontSize: 11, color: "#6B6B6B", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{subtitle}</div>}
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8, gap: 6 }}>
+                        <div style={{ fontFamily: "Poppins, system-ui, sans-serif", fontSize: 14, fontWeight: 700, color: "#C2410C" }}>{inr(item.price)}</div>
+                        {qty === 0 ? (
+                          <button type="button" aria-label={`Add ${item.name}`} onClick={() => handleSetQty(item.id, 1)} style={{ width: 44, height: 44, borderRadius: "50%", border: "1.5px solid #C2410C", background: "#fff", color: "#C2410C", fontSize: 24, lineHeight: 1, cursor: "pointer", flexShrink: 0 }}>+</button>
+                        ) : (
+                          <div style={{ width: 132, height: 44, borderRadius: 22, background: "#C2410C", display: "flex", alignItems: "center", justifyContent: "space-between", color: "#fff", flexShrink: 0 }}>
+                            <button type="button" aria-label={`Remove ${item.name}`} onClick={() => handleSetQty(item.id, qty - 1)} style={{ width: 44, height: 44, border: 0, background: "transparent", color: "#fff", fontSize: 20, cursor: "pointer" }}>−</button>
+                            <strong style={{ fontSize: 13 }}>{qty}</strong>
+                            <button type="button" aria-label={`Add ${item.name}`} onClick={() => handleSetQty(item.id, qty + 1)} style={{ width: 44, height: 44, border: 0, background: "transparent", color: "#fff", fontSize: 20, cursor: "pointer" }}>+</button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
       {!searchQuery.trim() && catPickerOpen && (
         <div style={{ padding: "18px 14px 0" }}>
-          <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 22, fontWeight: 800, color: "#fff", marginBottom: 4 }}>Kya khana hai? 🍽️</div>
-          <div style={{ fontSize: 13, color: "#8B9BB4", marginBottom: 16 }}>Category chuno, phir items dekho</div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <div style={{ fontFamily: "Poppins, system-ui, sans-serif", fontSize: 17, fontWeight: 700, color: "#1F1F1F" }}>Explore Categories</div>
+            <button type="button" onClick={() => setCatPickerOpen(false)} style={{ border: 0, background: "transparent", color: "#C2410C", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>View all</button>
+          </div>
+          <div className="enp-hs" style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 4 }}>
             {visibleCategories.map((c) => {
               const catItems = menu.filter(m => m.category === c || (m.alsoIn || []).includes(c));
               const img = (catItems.find(x => x.image) || {}).image;
               return (
-                <button key={c} onClick={() => { setCategory(c); setCatPickerOpen(false); }} style={{ position: "relative", height: 130, borderRadius: 16, border: "1px solid #273449", overflow: "hidden", cursor: "pointer", padding: 0, background: "#161F2F" }}>
-                  {img && <img src={img} alt={c} loading="lazy" className="keep-color" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", filter: "brightness(0.55)" }} onError={(e) => { e.target.style.display = "none"; }} />}
-                  <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(11,17,26,0.95) 10%, rgba(11,17,26,0.2) 100%)" }} />
-                  <div style={{ position: "absolute", left: 12, right: 12, bottom: 10, textAlign: "left" }}>
-                    <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 15, fontWeight: 800, color: "#fff", lineHeight: 1.2 }}>{c}</div>
-                    <div style={{ fontSize: 11, color: "#FF8C5A", fontWeight: 700, marginTop: 2 }}>{catItems.length} items →</div>
+                <button key={c} onClick={() => { setCategory(c); setCatPickerOpen(false); }} style={{ position: "relative", height: 112, width: 82, maxWidth: "25%", borderRadius: 16, border: "1px solid #EEEEEE", overflow: "hidden", cursor: "pointer", padding: 8, background: ["#E8F5E9", "#FFEDE0", "#EFE9FB", "#FFF6D6"][visibleCategories.indexOf(c) % 4], flexShrink: 0 }}>
+                  <div style={{ width: 56, height: 56, borderRadius: "50%", background: "#fff", margin: "0 auto 8px", display: "grid", placeItems: "center", overflow: "hidden", border: "1px solid #EEEEEE" }}>
+                    {img ? <img src={img} alt="" loading="lazy" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={(e) => { e.currentTarget.style.display = "none"; }} /> : <span style={{ fontSize: 24 }}>🍽️</span>}
                   </div>
+                  <div style={{ fontFamily: "Poppins, system-ui, sans-serif", fontSize: 12, fontWeight: 600, color: "#1F1F1F", lineHeight: 1.2, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", textAlign: "center" }}>{c}</div>
                 </button>
               );
             })}
@@ -3930,99 +4034,94 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
         </div>
       )}
 
-      <div style={{ padding: "14px 14px 0", display: (catPickerOpen && !searchQuery.trim()) ? "none" : "block" }}>
+      <div style={{ padding: "14px 14px 0", display: (catPickerOpen && !searchQuery.trim()) ? "block" : "block" }}>
         {!searchQuery.trim() && filteredItems.length > 0 && (
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 12 }}>
-            <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 21, fontWeight: 800, color: "#fff" }}>{category}</div>
-            <div style={{ fontSize: 12, color: "#8B9BB4", fontWeight: 700 }}>{filteredItems.length} items</div>
+            <div style={{ fontFamily: "Poppins, system-ui, sans-serif", fontSize: 18, fontWeight: 600, color: "#1F1F1F" }}>{category}</div>
+            <div style={{ fontSize: 12, color: "#6B6B6B", fontWeight: 500 }}>{filteredItems.length} items</div>
           </div>
         )}
         {filteredItems.length === 0 && (
-          <div style={{ textAlign: "center", padding: "50px 20px", color: "#8B9BB4" }}>
-            <div style={{ fontSize: 44, marginBottom: 12, opacity: 0.6 }}>{EMPTY_STATES[emptyReason].icon}</div>
-            <div style={{ fontWeight: 800, fontSize: 17, color: "#fff", marginBottom: 6 }}>{EMPTY_STATES[emptyReason].title}</div>
-            <div style={{ fontSize: 13, lineHeight: 1.5 }}>{EMPTY_STATES[emptyReason].subtitle}</div>
+          <div style={{ textAlign: "center", padding: "36px 20px", color: "#6B6B6B", background: "#fff", border: "1px solid #EEEEEE", borderRadius: 16 }}>
+            <div style={{ fontSize: 40, marginBottom: 10 }}>{EMPTY_STATES[emptyReason].icon}</div>
+            <div style={{ fontWeight: 600, fontSize: 16, color: "#1F1F1F", marginBottom: 6 }}>{EMPTY_STATES[emptyReason].title}</div>
+            <div style={{ fontSize: 13, lineHeight: 1.5, color: "#6B6B6B" }}>{EMPTY_STATES[emptyReason].subtitle}</div>
           </div>
         )}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 340px), 1fr))", alignItems: "stretch", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", alignItems: "stretch", gap: 12 }}>
           {filteredItems.map((item) => {
             const qty = getCartQty(cart[item.id]);
             const fav = favorites.includes(item.id);
             return (
-              <div key={item.id} className="ep-card" style={{ display: "flex", width: "100%", height: "100%", minWidth: 0, gap: 12, padding: 14, background: "var(--card-bg)", border: `1px solid ${qty > 0 ? "var(--ep-primary)" : "var(--border)"}`, borderRadius: 16, opacity: item.available ? 1 : 0.5, alignItems: "stretch", color: "var(--text)", textAlign: "left" }}>
-                <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap", minHeight: 20 }}>
-                    <VegDot veg={item.veg} />
-                    {item.isBestseller && <span style={{ fontSize: 10, color: "var(--ep-primary)", fontWeight: 800, letterSpacing: "0.04em", textTransform: "uppercase" }}>★ Bestseller</span>}
-                  </div>
-                  <div style={{ fontFamily: "var(--ep-font)", fontSize: 16, fontWeight: 800, color: "var(--text)", lineHeight: 1.3, marginBottom: 5, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{item.name}</div>
-                  {item.portion && <div style={{ display: "inline-flex", alignItems: "center", minHeight: 24, padding: "2px 9px", borderRadius: 999, background: "var(--ep-surface-alt)", color: "var(--text-muted)", border: "1px solid var(--border)", fontSize: 11, fontWeight: 700, marginBottom: 6 }}>{item.portion}</div>}
-                  {item.desc && <div style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{item.desc}</div>}
-                  <div style={{ fontFamily: "var(--ep-font)", fontSize: 16, fontWeight: 800, color: "var(--ep-primary)", marginTop: "auto", paddingTop: 8 }}>{inr(item.price)}</div>
+              <article key={item.id} className="ep-card" style={{ position: "relative", display: "flex", width: "100%", minWidth: 0, gap: 12, padding: 12, background: "#fff", border: "1px solid #EEEEEE", borderRadius: 16, opacity: item.available ? 1 : 0.62, alignItems: "center", color: "#1F1F1F", textAlign: "left", boxSizing: "border-box" }}>
+                <div style={{ position: "relative", width: 96, height: 96, flex: "0 0 96px", borderRadius: 14, overflow: "hidden", background: "#F4F4F5", display: "grid", placeItems: "center", fontSize: 32 }}>
+                  {item.image ? <img src={item.image} alt={item.name} loading="lazy" className="keep-color" style={{ position: "absolute", inset: 0, width: 96, height: 96, objectFit: "cover", borderRadius: 14, filter: item.available ? "none" : "grayscale(1)" }} onError={(e) => { e.currentTarget.style.display = "none"; }} /> : <span>🍽️</span>}
+                  {item.veg !== undefined && <div style={{ position: "absolute", top: 5, left: 5, padding: 4, borderRadius: 7, background: "#fff", display: "grid", placeItems: "center" }}><VegDot veg={item.veg} /></div>}
                 </div>
-                <div style={{ width: 110, flex: "0 0 110px", display: "flex", flexDirection: "column", alignItems: "center", paddingBottom: 16 }}>
-                  <div style={{ position: "relative", width: 110, height: 110, flexShrink: 0 }}>
-                    <div style={{ position: "absolute", inset: 0, borderRadius: 14, background: "var(--ep-surface-alt)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 34 }}>🍽️</div>
-                    {item.image ? <img src={item.image} alt={item.name} loading="lazy" className="keep-color" style={{ position: "absolute", inset: 0, width: 110, height: 110, objectFit: "cover", borderRadius: 14, filter: item.available ? "none" : "grayscale(1)" }} onError={(e) => { e.target.style.display = "none"; }} /> : null}
-                    <button onClick={() => toggleFavorite(item.id)} aria-label={`Favorite ${item.name}`} style={{ position: "absolute", top: 4, right: 4, width: 40, height: 40, minHeight: 40, borderRadius: "50%", border: "none", background: "rgba(11,17,26,0.7)", color: fav ? "#FFB800" : "#fff", fontSize: 15, cursor: "pointer" }}>{fav ? "★" : "☆"}</button>
-                  </div>
-                  <div style={{ marginTop: -22, position: "relative", zIndex: 1 }}>
+                <div style={{ flex: 1, minWidth: 0, minHeight: 96, display: "flex", flexDirection: "column", justifyContent: "center", paddingRight: 28 }}>
+                  <div style={{ fontFamily: "Poppins, system-ui, sans-serif", fontSize: 14, fontWeight: 600, color: "#1F1F1F", lineHeight: 1.3, marginBottom: 4, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{item.name}</div>
+                  {item.isBestseller && <div style={{ fontSize: 10, color: "#C2410C", fontWeight: 700, marginBottom: 3 }}>★ Bestseller</div>}
+                  {item.portion && <div style={{ alignSelf: "flex-start", display: "inline-flex", alignItems: "center", minHeight: 24, padding: "2px 9px", borderRadius: 999, background: "#F4F4F5", color: "#1F1F1F", fontSize: 11, fontWeight: 600, marginBottom: 4 }}>{item.portion}</div>}
+                  {item.desc && <div style={{ fontSize: 12, color: "#6B6B6B", lineHeight: 1.4, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{item.desc}</div>}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: "auto", paddingTop: 6 }}>
+                    <div style={{ fontFamily: "Poppins, system-ui, sans-serif", fontSize: 14, fontWeight: 600, color: "#C2410C" }}>{inr(item.price)}</div>
                     {!item.available ? (
-                      <div style={{ background: "#451A1A", color: "#EF4444", borderRadius: 10, fontWeight: 800, fontSize: 11, padding: "9px 12px", whiteSpace: "nowrap" }}>Out of stock</div>
+                      <span style={{ minHeight: 28, display: "inline-flex", alignItems: "center", padding: "0 10px", background: "#F4F4F5", color: "#6B6B6B", borderRadius: 10, fontSize: 11, fontWeight: 600 }}>Out of stock</span>
                     ) : qty === 0 ? (
-                      <button onClick={() => handleSetQty(item.id, 1)} aria-label={`Add ${item.name} to cart`} className="ep-primary-button" style={{ width: 88, height: 44, background: "var(--ep-primary-soft)", border: "1.5px solid #E25938", color: "#E25938", borderRadius: 10, fontWeight: 800, fontSize: 14, cursor: "pointer", boxShadow: "0 6px 14px rgba(0,0,0,0.12)" }}>ADD</button>
+                      <button type="button" onClick={() => handleSetQty(item.id, 1)} aria-label={`Add ${item.name} to cart`} style={{ width: 44, height: 44, minHeight: 44, flex: "0 0 44px", border: "1.5px solid #C2410C", borderRadius: "50%", background: "#fff", color: "#C2410C", fontSize: 22, cursor: "pointer" }}>+</button>
                     ) : (
-                      <div role="group" aria-label={`${item.name} quantity`} style={{ width: 132, height: 44, background: "#E25938", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "space-between", boxShadow: "0 6px 14px rgba(226,89,56,0.35)" }}>
-                        <button onClick={() => handleSetQty(item.id, qty - 1)} aria-label={`Remove one ${item.name}`} style={{ width: 44, height: 44, border: "none", background: "transparent", color: "#fff", fontSize: 20, fontWeight: 800, cursor: "pointer" }}>−</button>
-                        <span style={{ color: "#fff", fontWeight: 800, fontSize: 15 }}>{qty}</span>
-                        <button onClick={() => handleSetQty(item.id, qty + 1)} aria-label={`Add one ${item.name}`} style={{ width: 44, height: 44, border: "none", background: "transparent", color: "#fff", fontSize: 20, fontWeight: 800, cursor: "pointer" }}>+</button>
+                      <div role="group" aria-label={`${item.name} quantity`} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                        <button type="button" onClick={() => handleSetQty(item.id, qty - 1)} aria-label={`Remove one ${item.name}`} style={{ width: 36, height: 36, minHeight: 36, border: "1.5px solid #C2410C", borderRadius: "50%", background: "#fff", color: "#C2410C", fontSize: 18, cursor: "pointer" }}>−</button>
+                        <span style={{ width: 20, textAlign: "center", color: "#1F1F1F", fontWeight: 600, fontSize: 13 }}>{qty}</span>
+                        <button type="button" onClick={() => handleSetQty(item.id, qty + 1)} aria-label={`Add one ${item.name}`} style={{ width: 44, height: 44, minHeight: 44, border: "1.5px solid #C2410C", borderRadius: "50%", background: "#fff", color: "#C2410C", fontSize: 20, cursor: "pointer" }}>+</button>
                       </div>
                     )}
                   </div>
                 </div>
-              </div>
+                <button type="button" onClick={() => toggleFavorite(item.id)} aria-label={`Favorite ${item.name}`} style={{ position: "absolute", top: 8, right: 8, width: 30, height: 30, minHeight: 30, borderRadius: "50%", border: "1px solid #E5E5E5", background: "#fff", color: fav ? "#C2410C" : "#6B6B6B", fontSize: 15, lineHeight: 1, cursor: "pointer", padding: 0 }}>{fav ? "★" : "☆"}</button>
+              </article>
             );
           })}
         </div>
       </div>
 
-      <div style={{ textAlign: "center", padding: "30px 20px 70px", fontSize: 12, color: "#8B9BB4", lineHeight: 1.7 }}>
+      <div style={{ textAlign: "center", padding: "30px 20px 70px", fontSize: 12, color: "#6B6B6B", lineHeight: 1.7 }}>
         📍 {RESTAURANT.address}<br />📞 {RESTAURANT.phones.join(" · ")}
         <div style={{ display: "flex", justifyContent: "center", gap: 10, marginTop: 14 }}>
-          <button onClick={() => requestPinPrompt("staff")} style={{ background: "none", border: "1px solid #273449", color: "#8B9BB4", borderRadius: 10, padding: "8px 14px", fontSize: 12, cursor: "pointer", fontWeight: 700 }}>🔒 Staff Login</button>
-          <button onClick={() => requestPinPrompt("admin")} style={{ background: "none", border: "1px solid #273449", color: "#8B9BB4", borderRadius: 10, padding: "8px 14px", fontSize: 12, cursor: "pointer", fontWeight: 700 }}>⚙️ Admin Login</button>
+          <button onClick={() => requestPinPrompt("staff")} style={{ minHeight: 44, background: "#fff", border: "1.5px solid #C2410C", color: "#C2410C", borderRadius: 14, padding: "0 14px", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>🔒 Staff Login</button>
+          <button onClick={() => requestPinPrompt("admin")} style={{ minHeight: 44, background: "#fff", border: "1.5px solid #C2410C", color: "#C2410C", borderRadius: 14, padding: "0 14px", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>⚙️ Admin Login</button>
         </div>
       </div>
 
       {aiSuggestion && !cartOpen && !activeModal && (
-        <div className="smooth-slide-up" style={{ position: 'fixed', bottom: cartCount > 0 ? 100 : 20, left: 16, right: 16, background: 'linear-gradient(135deg, #f6d365 0%, #fda085 100%)', padding: 14, borderRadius: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 4 }}>
+        <div className="smooth-slide-up" style={{ position: 'fixed', bottom: cartCount > 0 ? 100 : 20, left: 16, right: 16, background: "#fff", color: "#1F1F1F", border: "1px solid #EEEEEE", padding: 14, borderRadius: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 4, boxShadow: "0 8px 24px rgba(31,31,31,0.12)" }}>
           <div>
-            <div style={{ fontSize: 12, fontWeight: 800, color: '#d35400' }}>🤖 AI Suggests:</div>
-            <div style={{ fontSize: 16, fontWeight: 800 }}>{aiSuggestion.name}</div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: "#C2410C" }}>🤖 AI Suggests:</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: "#1F1F1F" }}>{aiSuggestion.name}</div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <button onClick={() => { handleSetQty(aiSuggestion.id, 1); setAiSuggestion(null); }} style={{ background: COLORS.ink, color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 10, fontWeight: 800, cursor: 'pointer' }}>+ Add</button>
-            <button onClick={() => setAiSuggestion(null)} style={{ background: 'transparent', border: 'none', fontSize: 20, cursor: 'pointer' }}>&times;</button>
+            <button onClick={() => { handleSetQty(aiSuggestion.id, 1); setAiSuggestion(null); }} style={{ height: 44, minHeight: 44, background: "#C2410C", color: '#fff', border: 'none', padding: '0 16px', borderRadius: 14, fontWeight: 600, cursor: 'pointer' }}>+ Add</button>
+            <button onClick={() => setAiSuggestion(null)} aria-label="Dismiss suggestion" style={{ width: 44, height: 44, minHeight: 44, background: '#F4F4F5', color: "#1F1F1F", border: 'none', borderRadius: "50%", fontSize: 20, cursor: 'pointer' }}>&times;</button>
           </div>
         </div>
       )}
 
       {cartCount > 0 && !cartOpen && !activeModal && (
-        <button onClick={() => setCartOpen(true)} className="ep-bottom-cart" aria-label={`Open cart with ${cartCount} items and total ${inr(finalTotal)}`}>
+        <button onClick={() => setCartOpen(true)} className="ep-bottom-cart" style={{ bottom: "max(88px, calc(76px + env(safe-area-inset-bottom)))" }} aria-label={`Open cart with ${cartCount} items and total ${inr(finalTotal)}`}>
           <span>🛒 {cartCount} item{cartCount > 1 ? "s" : ""}</span><span>{inr(finalTotal)} ➔</span>
         </button>
       )}
 
       {showSidebar && (
         <div style={{ position: "fixed", inset: 0, zIndex: 80, display: "flex" }}>
-          <div style={{ width: "80%", maxWidth: 300, background: "#fff", height: "100%", padding: "24px", display: "flex", flexDirection: "column", overflowY: "auto" }} className="slide-right">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 30 }}>
-              <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 24, fontWeight: 800, color: COLORS.copper }}>Eat & Park</div>
-              <button onClick={() => setShowSidebar(false)} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer" }}>✕</button>
+          <div style={{ width: "80%", maxWidth: 300, background: "#fff", color: "#1F1F1F", colorScheme: "light", height: "100%", padding: 16, display: "flex", flexDirection: "column", overflowY: "auto", borderRadius: "0 20px 20px 0" }} className="slide-right ep-customer-sidebar-panel">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <div style={{ fontFamily: "Poppins, system-ui, sans-serif", fontSize: 18, fontWeight: 600, color: "#1F1F1F" }}>Eat & Park</div>
+              <button onClick={() => setShowSidebar(false)} aria-label="Close menu" style={{ width: 44, height: 44, minHeight: 44, background: "#F4F4F5", border: "none", borderRadius: "50%", color: "#1F1F1F", fontSize: 18, cursor: "pointer" }}>✕</button>
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 12, flex: 1 }}>
+            <div className="ep-customer-sidebar-menu" style={{ display: "flex", flexDirection: "column", gap: 8, flex: 1 }}>
 
-              <SidebarBtn icon={viewMode === "desktop" ? "📱" : "🖥️"} text={viewMode === "desktop" ? "App Mode" : "Desktop Mode"} onClick={() => { setViewMode(viewMode === "desktop" ? "app" : "desktop"); setShowSidebar(false); }} highlight />
+              <SidebarBtn icon={viewMode === "desktop" ? "📱" : "🖥️"} text={viewMode === "desktop" ? "App Mode" : "Desktop Mode"} onClick={() => { setViewMode(viewMode === "desktop" ? "app" : "desktop"); setShowSidebar(false); }} highlight={viewMode === "desktop"} />
               <SidebarBtn icon="🖼️" text="Photo Gallery" onClick={() => { setShowSidebar(false); setActiveModal('gallery'); }} />
               <SidebarBtn icon="📜" text="Order History" onClick={() => { setShowSidebar(false); setActiveModal('orderHistory'); }} />
               <SidebarBtn icon="🪙" text="Coin History" onClick={() => { setShowSidebar(false); setActiveModal('coinHistory'); }} />
@@ -4030,15 +4129,15 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
               <SidebarBtn icon="🍽️" text="Table Booking" onClick={() => { setShowSidebar(false); setBookType("table"); setActiveModal('booking'); }} />
               <SidebarBtn icon="🎉" text="Party Booking" onClick={() => { setShowSidebar(false); setBookType("party"); setActiveModal('booking'); }} />
               <SidebarBtn icon="👑" text="VIP Loyalty" onClick={() => { setShowSidebar(false); setActiveModal('loyalty'); }} />
-              <SidebarBtn icon="⭐" text="Rate on Google" onClick={() => { setShowSidebar(false); window.open(GOOGLE_REVIEW_URL, '_blank'); }} highlight />
+              <SidebarBtn icon="⭐" text="Rate on Google" onClick={() => { setShowSidebar(false); window.open(GOOGLE_REVIEW_URL, '_blank'); }} />
               {isLoggedIn && (
-                <div style={{ marginTop: 8, padding: 12, background: COLORS.paper, borderRadius: 12, textAlign: "center", fontSize: 12, color: COLORS.textLight, fontWeight: 600 }}>
+                <div style={{ marginTop: 8, padding: 12, background: "#fff", border: "1px solid #EEEEEE", borderRadius: 16, textAlign: "center", fontSize: 12, color: "#6B6B6B", fontWeight: 600 }}>
                   👤 {custName || "Guest"} · {custPhone}
                 </div>
               )}
               <SidebarBtn icon="🚪" text="Logout" onClick={handleLogout} />
               {/* SIDEBAR-DEDUP-FIXED */}
-              <div style={{ marginTop: 16, padding: 12, background: COLORS.paper, borderRadius: 12, textAlign: 'center' }}>
+              <div style={{ marginTop: 12, padding: 12, background: "#fff", border: "1px solid #EEEEEE", borderRadius: 16, textAlign: 'center' }}>
                 <QRCodeSVG value={window.location.href} size={100} />
                 <p style={{ fontSize: 11, color: COLORS.textLight, marginTop: 6 }}>📲 Scan to order</p>
               </div>
@@ -4046,67 +4145,107 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
  setActiveModal('chat'); }} />
             </div>
           </div>
-          <div style={{ flex: 1, background: "rgba(0,0,0,0.6)" }} onClick={() => setShowSidebar(false)} />
+          <div style={{ flex: 1, background: "rgba(0,0,0,0.4)" }} onClick={() => { setShowSidebar(false); setCustomerTab("home"); }} />
         </div>
       )}
 
+      <nav className="ep-customer-tabs" aria-label="Customer sections">
+        <button type="button" className={`ep-customer-tab ${customerTab === "home" ? "is-active" : ""}`} onClick={() => { setCustomerTab("home"); setCatPickerOpen(true); setCartOpen(false); setActiveModal(null); }}>
+          <span className="ep-customer-tab-icon">⌂</span><span>Home</span>
+        </button>
+        <button type="button" className={`ep-customer-tab ${customerTab === "menu" ? "is-active" : ""}`} onClick={() => { setCustomerTab("menu"); setCatPickerOpen(false); setCartOpen(false); setActiveModal(null); }}>
+          <span className="ep-customer-tab-icon">☷</span><span>Menu</span>
+        </button>
+        <button type="button" className={`ep-customer-tab ${activeModal === "offers" ? "is-active" : ""}`} onClick={() => { setCartOpen(false); setActiveModal("offers"); }}>
+          <span className="ep-customer-tab-icon">%</span><span>Offers</span>
+        </button>
+        <button type="button" className={`ep-customer-tab ${customerTab === "orders" ? "is-active" : ""}`} onClick={() => { setCustomerTab("orders"); setCartOpen(false); setActiveModal("orderHistory"); }}>
+          <span className="ep-customer-tab-icon">♧</span><span>Orders</span>
+        </button>
+        <button type="button" className={`ep-customer-tab ${customerTab === "more" ? "is-active" : ""}`} onClick={() => { setCustomerTab("more"); setCartOpen(false); setActiveModal(null); setShowSidebar(true); }}>
+          <span className="ep-customer-tab-icon">•••</span><span>More</span>
+        </button>
+      </nav>
+
       {(cartOpen || activeModal) && (
-        <div className={cartOpen ? "ep-checkout-overlay" : undefined} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: cartOpen ? undefined : "flex-end", padding: cartOpen ? undefined : 0, zIndex: 70 }} onClick={() => { setCartOpen(false); setActiveModal(null); setConfirmedBooking(null); }}>
-          <div onClick={(e) => e.stopPropagation()} className={cartOpen ? "ep-slide-drawer ep-checkout-drawer" : "ep-slide-drawer"} style={{ background: "var(--ep-surface)", width: cartOpen ? undefined : "100%", maxWidth: cartOpen ? undefined : 480, margin: "0 auto", borderRadius: cartOpen ? undefined : "24px 24px 0 0", padding: cartOpen ? undefined : "24px 20px 30px", maxHeight: cartOpen ? undefined : "85vh", overflowY: "auto", boxShadow: "var(--ep-shadow-lg)" }}>
+        <div className={cartOpen ? "ep-checkout-overlay" : undefined} style={{ position: "fixed", inset: cartOpen ? "0 0 76px" : 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: cartOpen ? "flex-end" : "flex-end", padding: cartOpen ? undefined : 0, zIndex: 70 }} onClick={() => { setCartOpen(false); setActiveModal(null); setConfirmedBooking(null); setCustomerTab((current) => current === "orders" ? "orders" : current === "menu" ? "menu" : "home"); }}>
+          <div onClick={(e) => e.stopPropagation()} className={cartOpen ? "ep-slide-drawer ep-checkout-drawer" : `ep-slide-drawer${activeModal === "orderSuccess" ? " ep-customer-order-success" : ""}`} style={{ background: cartOpen || activeModal ? "#fff" : "var(--ep-surface)", color: cartOpen || activeModal ? "#1F1F1F" : undefined, colorScheme: "light", width: cartOpen ? "min(430px, 100%)" : "100%", maxWidth: cartOpen ? 430 : 480, height: cartOpen ? "min(85dvh, calc(100dvh - 76px))" : undefined, margin: "0 auto", borderRadius: cartOpen ? "24px 24px 0 0" : 20, padding: cartOpen ? 0 : activeModal === "orderSuccess" ? 0 : 20, maxHeight: cartOpen ? "min(85dvh, calc(100dvh - 76px))" : "85vh", display: cartOpen ? "flex" : undefined, flexDirection: cartOpen ? "column" : undefined, overflow: cartOpen ? "hidden" : "auto", boxSizing: "border-box", boxShadow: "var(--ep-shadow-lg)" }}>
 
             {cartOpen && (
               <>
-                <ModalHeader title="Checkout" onClose={() => setCartOpen(false)} />
-                {cartItems.map(([id, entry]) => {
-  const item = menu.find((m) => m.id === id);
-  const qty = getCartQty(entry);
-  const hasOverride = entry.priceOverride != null && entry.priceOverride !== item.price;
-  return (
-    <div key={id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 12, padding: "14px 16px", background: "#20283A", border: "1px solid #30394C", borderRadius: 14 }}>
-      <div>
-        <div style={{ fontSize: 15, fontWeight: 700, color: "#F5F7FB" }}>{item.name}</div>
-        {hasOverride && (
-          <div style={{ fontSize: 11, color: "#FF8A80", fontWeight: 700, marginTop: 4 }}>
-            ⚡ Deal: ₹{entry.priceOverride} <span style={{ textDecoration: 'line-through', color: "#AAB4C3" }}>₹{item.price}</span>
-          </div>
-        )}
-      </div>
-      <Stepper qty={qty} onChange={(nq) => handleSetQty(id, nq)} />
-    </div>
-  );
-})}
+                <div style={{ flexShrink: 0, background: "#fff", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "12px 14px", borderBottom: "1px solid #EEEEEE" }}>
+                  <div>
+                    <div style={{ fontFamily: "Poppins, system-ui, sans-serif", fontSize: 18, fontWeight: 700, color: "#1F1F1F" }}>My Order</div>
+                    <div style={{ marginTop: 2, fontSize: 11, color: "#6B6B6B" }}>{fulfillmentMode === "takeaway" ? "Takeaway" : fulfillmentMode === "delivery" ? "Home Delivery" : `Table ${table} · Dine-in`}</div>
+                  </div>
+                  <button type="button" onClick={() => setCartOpen(false)} aria-label="Close cart" style={{ width: 44, height: 44, borderRadius: "50%", border: "1px solid #EEEEEE", background: "#F4F4F5", color: "#1F1F1F", fontSize: 18, cursor: "pointer" }}>×</button>
+                </div>
+                <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", colorScheme: "light", padding: "0 14px 12px" }}>
+                {cartItems.length === 0 ? (
+                  <div style={{ textAlign: "center", padding: "58px 16px", color: "#6B6B6B" }}>
+                    <div style={{ fontSize: 42, marginBottom: 10 }}>🛒</div>
+                    <div style={{ fontFamily: "Poppins, system-ui, sans-serif", fontSize: 16, fontWeight: 700, color: "#1F1F1F", marginBottom: 6 }}>Your cart is empty</div>
+                    <button type="button" onClick={() => { setCartOpen(false); setCatPickerOpen(true); setCustomerTab("menu"); }} style={{ height: 44, marginTop: 10, border: "1.5px solid #C2410C", borderRadius: 14, background: "#fff", color: "#C2410C", padding: "0 18px", fontWeight: 700, cursor: "pointer" }}>Browse Menu</button>
+                  </div>
+                ) : cartItems.map(([id, entry]) => {
+                  const item = menu.find((m) => m.id === id);
+                  if (!item) return null;
+                  const qty = getCartQty(entry);
+                  const hasOverride = entry.priceOverride != null && entry.priceOverride !== item.price;
+                  const subtitle = [item.veg === true ? "Veg" : item.veg === false ? "Non-veg" : null, item.portion].filter(Boolean).join(" · ");
+                  return (
+                    <div key={id} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, padding: 12, background: "#fff", border: "1px solid #EEEEEE", borderRadius: 16, boxSizing: "border-box" }}>
+                      <div style={{ width: 56, height: 56, borderRadius: 14, background: "#F4F4F5", overflow: "hidden", flex: "0 0 56px", display: "grid", placeItems: "center" }}>
+                        {item.image ? <img src={item.image} alt={item.name} loading="lazy" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={(e) => { e.currentTarget.style.display = "none"; }} /> : <span style={{ fontSize: 22 }}>🍽️</span>}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                          {item.veg !== undefined && <span style={{ width: 8, height: 8, borderRadius: "50%", background: item.veg ? "#15803D" : "#DC2626", flexShrink: 0 }} />}
+                          <div style={{ minWidth: 0, fontFamily: "Poppins, system-ui, sans-serif", fontSize: 14, fontWeight: 600, color: "#1F1F1F", display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2, overflow: "hidden", lineHeight: 1.35 }}>{item.name}</div>
+                        </div>
+                        {subtitle && <div style={{ marginTop: 3, fontSize: 11, color: "#6B6B6B", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{subtitle}</div>}
+                        <div style={{ marginTop: 5, fontFamily: "Poppins, system-ui, sans-serif", fontSize: 14, fontWeight: 700, color: "#C2410C" }}>{hasOverride ? `₹${entry.priceOverride}` : inr(item.price)}</div>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+                        <button type="button" onClick={() => handleSetQty(id, qty - 1)} aria-label={`Remove ${item.name}`} style={{ width: 40, height: 40, minHeight: 40, flex: "0 0 40px", border: "1.5px solid #C2410C", borderRadius: "50%", background: "#fff", color: "#C2410C", fontSize: 20, cursor: "pointer" }}>−</button>
+                        <strong style={{ width: 20, textAlign: "center", color: "#1F1F1F", fontSize: 14, fontWeight: 600 }}>{qty}</strong>
+                        <button type="button" onClick={() => handleSetQty(id, qty + 1)} aria-label={`Add ${item.name}`} style={{ width: 40, height: 40, minHeight: 40, flex: "0 0 40px", border: "1.5px solid #C2410C", borderRadius: "50%", background: "#fff", color: "#C2410C", fontSize: 20, cursor: "pointer" }}>+</button>
+                      </div>
+                    </div>
+                  );
+                })}
 
-                <div style={{ display: "flex", gap: 12, marginTop: 20, marginBottom: 16 }}>
-                  {!guestMode && <button onClick={() => { setFulfillmentMode("dine_in"); setOrderType("dine_in"); setCustAddress(""); setCustExactAddress(""); setCustPinCode(""); }} style={{ flex: 1, padding: "12px", border: `2px solid ${fulfillmentMode === "dine_in" ? COLORS.copper : "#30394C"}`, background: fulfillmentMode === "dine_in" ? COLORS.copper : "#161F2F", color: "#F5F7FB", borderRadius: 12, fontWeight: 800, cursor: "pointer" }}>🍽️ Dine-in</button>}
-                  {!guestMode && <button onClick={() => { if (!parcelOpenNow()) { showToast(PARCEL_MSG, 'warning'); return; } setFulfillmentMode("takeaway"); setOrderType("parcel"); setCustAddress(""); setCustExactAddress(""); setCustPinCode(""); }} style={{ flex: 1, padding: "12px", border: `2px solid ${fulfillmentMode === "takeaway" ? COLORS.copper : "#30394C"}`, background: fulfillmentMode === "takeaway" ? COLORS.copper : "#161F2F", color: "#F5F7FB", borderRadius: 12, fontWeight: 800, cursor: "pointer" }}>🛍️ Takeaway</button>}
-                  {!guestMode && <button onClick={() => { if (!parcelOpenNow()) { showToast(PARCEL_MSG, 'warning'); return; } setFulfillmentMode("delivery"); setOrderType("parcel"); }} style={{ flex: 1, padding: "12px", border: `2px solid ${fulfillmentMode === "delivery" ? COLORS.copper : "#30394C"}`, background: fulfillmentMode === "delivery" ? COLORS.copper : "#161F2F", color: "#F5F7FB", borderRadius: 12, fontWeight: 800, cursor: "pointer" }}>🛵 Delivery</button>}
+                <div style={{ display: "flex", gap: 12, marginTop: 16, marginBottom: 16 }}>
+                  {!guestMode && <button onClick={() => { setFulfillmentMode("dine_in"); setOrderType("dine_in"); setCustAddress(""); setCustExactAddress(""); setCustPinCode(""); }} style={{ flex: 1, padding: "12px", border: `1.5px solid ${fulfillmentMode === "dine_in" ? "#C2410C" : "#EEEEEE"}`, background: fulfillmentMode === "dine_in" ? "#FFF3EA" : "#F4F4F5", color: "#1F1F1F", borderRadius: 14, fontWeight: 700, cursor: "pointer" }}>🍽️ Dine-in</button>}
+                  {!guestMode && <button onClick={() => { if (!parcelOpenNow()) { showToast(PARCEL_MSG, 'warning'); return; } setFulfillmentMode("takeaway"); setOrderType("parcel"); setCustAddress(""); setCustExactAddress(""); setCustPinCode(""); }} style={{ flex: 1, padding: "12px", border: `1.5px solid ${fulfillmentMode === "takeaway" ? "#C2410C" : "#EEEEEE"}`, background: fulfillmentMode === "takeaway" ? "#FFF3EA" : "#F4F4F5", color: "#1F1F1F", borderRadius: 14, fontWeight: 700, cursor: "pointer" }}>🛍️ Takeaway</button>}
+                  {!guestMode && <button onClick={() => { if (!parcelOpenNow()) { showToast(PARCEL_MSG, 'warning'); return; } setFulfillmentMode("delivery"); setOrderType("parcel"); }} style={{ flex: 1, padding: "12px", border: `1.5px solid ${fulfillmentMode === "delivery" ? "#C2410C" : "#EEEEEE"}`, background: fulfillmentMode === "delivery" ? "#FFF3EA" : "#F4F4F5", color: "#1F1F1F", borderRadius: 14, fontWeight: 700, cursor: "pointer" }}>🛵 Delivery</button>}
                 </div>
 
-                <div style={{ marginBottom: 16 }}>
+                <div style={{ marginBottom: 16, padding: 12, background: "#fff", border: "1px solid #EEEEEE", borderRadius: 16 }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
-                    <input type="checkbox" checked={isScheduled} onChange={(e) => setIsScheduled(e.target.checked)} />
+                    <input type="checkbox" checked={isScheduled} onChange={(e) => setIsScheduled(e.target.checked)} style={{ accentColor: "#C2410C" }} />
                     <span style={{ fontWeight: 700, fontSize: 14 }}>📅 Schedule Order</span>
                   </label>
                   {isScheduled && (<div style={{ display: 'flex', gap: 12, marginTop: 10 }}>
-                    <input type="date" value={scheduleDate} onChange={(e) => setScheduleDate(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
-                    <input type="time" value={scheduleTime} onChange={(e) => setScheduleTime(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
+                    <input type="date" value={scheduleDate} onChange={(e) => setScheduleDate(e.target.value)} style={{ ...cartFieldStyle, height: 48, flex: 1 }} />
+                    <input type="time" value={scheduleTime} onChange={(e) => setScheduleTime(e.target.value)} style={{ ...cartFieldStyle, height: 48, flex: 1 }} />
                   </div>)}
                 </div>
 
-                <div style={{ display: guestMode ? "none" : "block", background: "#161F2F", border: "1px solid #273449", padding: 16, borderRadius: 16, marginBottom: 16 }}>
-                  <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 10 }}>🔐 Quick OTP</div>
+                <div style={{ display: guestMode ? "none" : "block", background: "#F4F4F5", border: "1px solid #EEEEEE", color: "#1F1F1F", padding: 16, borderRadius: 16, marginBottom: 16 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 10 }}>🔐 Quick OTP</div>
                   <div id="otp-recaptcha"></div>
                   {!isLoggedIn ? (
                     <div>
                       {otpStep === "phone" ? (
                         <div style={{ display: "flex", gap: 8 }}>
-                          <input type="tel" placeholder="10-digit Phone" value={custPhone} onChange={(e) => { setCustPhone(e.target.value); checkExistingCustomer(e.target.value); }} style={{ ...inputStyle, flex: 1 }} />
-                          <button onClick={handleSendOtp} disabled={otpSending || resendIn > 0} style={{ background: COLORS.ink, color: "#fff", border: "none", borderRadius: 12, padding: "0 16px", fontWeight: 800, cursor: "pointer", opacity: (otpSending || resendIn > 0) ? 0.6 : 1 }}>{otpSending ? "⏳" : resendIn > 0 ? resendIn + "s" : "Send"}</button>
+                          <input type="tel" placeholder="10-digit Phone" value={custPhone} onChange={(e) => { setCustPhone(e.target.value); checkExistingCustomer(e.target.value); }} style={{ ...cartFieldStyle, flex: 1 }} />
+                          <button onClick={handleSendOtp} disabled={otpSending || resendIn > 0} style={{ background: "#C2410C", color: "#fff", border: "none", borderRadius: 14, padding: "0 16px", fontWeight: 700, cursor: "pointer", opacity: (otpSending || resendIn > 0) ? 0.6 : 1 }}>{otpSending ? "⏳" : resendIn > 0 ? resendIn + "s" : "Send"}</button>
                         </div>
                       ) : (
                         <div style={{ display: "flex", gap: 8 }}>
-                          <input type="text" placeholder="Enter OTP" value={otpCode} onChange={(e) => setOtpCode(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
-                          <button onClick={handleVerifyOtp} style={{ background: COLORS.success, color: "#fff", border: "none", borderRadius: 12, padding: "0 16px", fontWeight: 800, cursor: "pointer" }}>Verify</button>
+                          <input type="text" placeholder="Enter OTP" value={otpCode} onChange={(e) => setOtpCode(e.target.value)} style={{ ...cartFieldStyle, flex: 1 }} />
+                          <button onClick={handleVerifyOtp} style={{ background: "#15803D", color: "#fff", border: "none", borderRadius: 14, padding: "0 16px", fontWeight: 700, cursor: "pointer" }}>Verify</button>
                         </div>
                       )}
                     </div>
@@ -4114,8 +4253,8 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
                 </div>
 
                 <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16, borderBottom: `1px solid ${COLORS.line}`, paddingBottom: 20 }}>
-                  <input type="text" placeholder="Your Name *" value={custName} onChange={(e) => setCustName(e.target.value)} style={inputStyle} />
-                  <input type="tel" placeholder={guestMode ? "Phone (optional)" : "Phone *"} value={custPhone} onChange={(e) => setCustPhone(e.target.value.replace(/\D/g, "").slice(0, 10))} style={inputStyle} />
+                  <input type="text" placeholder="Your Name *" value={custName} onChange={(e) => setCustName(e.target.value)} style={cartFieldStyle} />
+                  <input type="tel" placeholder={guestMode ? "Phone (optional)" : "Phone *"} value={custPhone} onChange={(e) => setCustPhone(e.target.value.replace(/\D/g, "").slice(0, 10))} style={cartFieldStyle} />
                   {fulfillmentMode === "delivery" && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                       {/* Auto GPS Box */}
@@ -4125,11 +4264,11 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
                           placeholder="📍 Click button to fetch GPS Location" 
                           value={custAddress} 
                           readOnly
-                          style={{ ...inputStyle, flex: 1, background: COLORS.paper2 }} 
+                          style={{ ...cartFieldStyle, flex: 1 }}
                         />
                         <button 
                           onClick={handleGetLocation} 
-                          style={{ background: COLORS.sage, color: "#fff", border: "none", borderRadius: 12, padding: "0 16px", fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap" }}
+                          style={{ background: "#15803D", color: "#fff", border: "none", borderRadius: 14, padding: "0 16px", fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}
                         >
                           📍 Get Location
                         </button>
@@ -4140,7 +4279,7 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
                         placeholder="Exact Address (House No, Building, Landmark, Area) *" 
                         value={custExactAddress} 
                         onChange={(e) => setCustExactAddress(e.target.value)} 
-                        style={{ ...inputStyle, resize: "none" }} 
+                        style={{ ...cartFieldStyle, resize: "none" }}
                         rows={2} 
                       />
                       
@@ -4151,19 +4290,19 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
                         maxLength={6}
                         value={custPinCode || ""} 
                         onChange={(e) => setCustPinCode && setCustPinCode(e.target.value.replace(/\D/g, ""))} 
-                        style={{ ...inputStyle }} 
+                        style={{ ...cartFieldStyle }}
                       />
                     </div>
                   )}
                 </div>
 
                 <div style={{ display: (coupons || []).some((c) => c.active) ? "flex" : "none", gap: 8, marginBottom: 16 }}>
-                  <input type="text" placeholder="Coupon code" value={couponCode} onChange={(e) => setCouponCode(e.target.value)} style={inputStyle} />
-                  <button onClick={handleApplyCoupon} style={{ background: COLORS.gold, color: COLORS.ink, border: "none", borderRadius: 12, padding: "0 16px", fontWeight: 800, cursor: "pointer" }}>Apply</button>
+                  <input type="text" placeholder="Coupon code" value={couponCode} onChange={(e) => setCouponCode(e.target.value)} style={{ ...cartFieldStyle, flex: 1, minWidth: 0, height: 48 }} />
+                  <button onClick={handleApplyCoupon} style={{ height: 48, background: "#C2410C", color: "#fff", border: "none", borderRadius: 14, padding: "0 16px", fontWeight: 700, cursor: "pointer" }}>Apply</button>
                 </div>
 
                 {custPhone.length >= 10 && (
-                  <div style={{ background: 'linear-gradient(135deg, #fdfbfb, #ebedee)', borderRadius: 16, padding: 16, marginBottom: 20, border: `1.5px solid ${COLORS.gold}` }}>
+                  <div style={{ background: "#FFF3EA", borderRadius: 16, padding: 16, marginBottom: 20, border: "1px solid #EEEEEE", color: "#1F1F1F" }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
                       <div style={{ fontWeight: 800, fontSize: 16 }}>🪙 EatCoins</div>
                       <div><div style={{ fontSize: 14, fontWeight: 800, color: COLORS.sageDark }}>Bal: {currentCoins}</div><div style={{ fontSize: 11, color: COLORS.gold, fontWeight: 700 }}>{loyaltyTier.name}</div></div>
@@ -4176,7 +4315,7 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
                         <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fff', padding: 12, borderRadius: 10, marginTop: 8, border: `1px solid ${isClaimed ? COLORS.success : COLORS.line}` }}>
                           <div><div style={{ fontWeight: 700, fontSize: 14 }}>{r.item}</div><div style={{ fontSize: 12, color: COLORS.gold, fontWeight: 800 }}>{r.cost} Coins</div></div>
                           <button onClick={() => { setClaimedReward(isClaimed ? null : r); if (!isClaimed) showToast(`🎁 ${r.item} claimed!`, 'reward'); }} disabled={!canAfford && !isClaimed}
-                            style={{ padding: '6px 16px', borderRadius: 8, border: 'none', background: isClaimed ? COLORS.success : (canAfford ? COLORS.ink : COLORS.paper2), color: isClaimed || canAfford ? '#fff' : COLORS.textLight, fontWeight: 800, cursor: canAfford ? 'pointer' : 'not-allowed', fontSize: 13 }}>
+                            style={{ padding: '6px 16px', borderRadius: 8, border: 'none', background: isClaimed ? "#15803D" : (canAfford ? "#C2410C" : "#EEEEEE"), color: isClaimed || canAfford ? '#fff' : "#6B6B6B", fontWeight: 700, cursor: canAfford ? 'pointer' : 'not-allowed', fontSize: 13 }}>
                             {isClaimed ? "✓ Claimed" : (canAfford ? "Claim 🎁" : `${r.cost - currentCoins} more`)}
                           </button>
                         </div>
@@ -4186,37 +4325,44 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
                   </div>
                 )}
 
-                <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Special instructions?" style={{ ...inputStyle, marginBottom: 20, resize: "none" }} rows={2} />
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ display: "block", marginBottom: 8, fontFamily: "Poppins, system-ui, sans-serif", fontSize: 13, fontWeight: 700, color: "#1F1F1F" }}>Special instructions</label>
+                  <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="less spicy, no onion..." style={{ width: "100%", minHeight: 48, height: 48, boxSizing: "border-box", padding: "12px 14px", border: "1px solid #EEEEEE", borderRadius: 14, background: "#F4F4F5", color: "#1F1F1F", fontFamily: "Poppins, system-ui, sans-serif", fontSize: 16, resize: "none", outline: "none" }} rows={1} />
+                </div>
 
                 <div style={{ marginBottom: 20 }}>
                   <div style={{ fontSize: 13, fontWeight: 800, color: COLORS.textLight, textTransform: 'uppercase', marginBottom: 10 }}>Payment</div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
-                    <button onClick={() => setPaymentMethod('cash')} style={{ padding: '10px', borderRadius: 10, border: `2px solid ${paymentMethod === 'cash' ? COLORS.copper : COLORS.line}`, background: paymentMethod === 'cash' ? COLORS.copperLight : 'transparent', fontWeight: 700, cursor: 'pointer' }}>💵 Cash</button>
-                    <button onClick={() => setPaymentMethod('upi')} style={{ padding: '10px', borderRadius: 10, border: '2px solid ' + (paymentMethod === 'upi' ? COLORS.copper : COLORS.line), background: paymentMethod === 'upi' ? COLORS.copperLight : 'transparent', fontWeight: 700, cursor: 'pointer' }}>📱 UPI (PhonePe / GPay)</button>
+                    <button onClick={() => setPaymentMethod('cash')} style={{ height: 48, minHeight: 48, padding: "0 10px", borderRadius: 14, border: `1.5px solid ${paymentMethod === "cash" ? "#C2410C" : "#E5E5E5"}`, background: paymentMethod === "cash" ? "#FFF3EA" : "#fff", color: paymentMethod === "cash" ? "#C2410C" : "#1F1F1F", fontWeight: 600, cursor: "pointer" }}>💵 Cash</button>
+                    <button onClick={() => setPaymentMethod('upi')} style={{ height: 48, minHeight: 48, padding: "0 10px", borderRadius: 14, border: `1.5px solid ${paymentMethod === "upi" ? "#C2410C" : "#E5E5E5"}`, background: paymentMethod === "upi" ? "#FFF3EA" : "#fff", color: paymentMethod === "upi" ? "#C2410C" : "#1F1F1F", fontWeight: 600, cursor: "pointer" }}>📱 UPI (PhonePe / GPay)</button>
                   </div>
                 </div>
 
-                <div style={{ marginBottom: 20 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, color: COLORS.textLight }}><span>Subtotal</span><span>{inr(subtotal)}</span></div>
-                  {appliedDiscount > 0 && (<div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, color: COLORS.success }}><span>Coupon ({appliedDiscount}%)</span><span>-{inr(discountAmount)}</span></div>)}
-                  {loyaltyDiscount > 0 && (<div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, color: COLORS.gold }}><span>Loyalty</span><span>-{inr(loyaltyDiscount)}</span></div>)}
-                  {vipDiscount > 0 && (<div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, color: COLORS.gold }}><span>👑 VIP Elite (20%)</span><span>-{inr(vipDiscount)}</span></div>)}
-                  {orderType === "parcel" && (!table || table === 0) && (<div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, color: COLORS.copper }}><span>Delivery</span><span>+{inr(deliveryFee)}</span></div>)}
-                  <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 800, fontSize: 18, borderTop: `1px solid ${COLORS.line}`, paddingTop: 8, marginTop: 4 }}>
-                    <span>Total</span><span style={{ color: COLORS.copper, fontFamily: "'JetBrains Mono', monospace" }}>{inr(finalTotal)}</span>
+                <div style={{ marginBottom: 12, borderTop: "1px dashed #D4D4D8", paddingTop: 12 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, color: "#6B6B6B", padding: "4px 0" }}><span>Subtotal</span><strong style={{ color: "#1F1F1F", fontFamily: "Poppins, system-ui, sans-serif" }}>{inr(subtotal)}</strong></div>
+                  {appliedDiscount > 0 && (<div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, color: "#15803D", padding: "4px 0" }}><span>Coupon ({appliedDiscount}%)</span><strong>-{inr(discountAmount)}</strong></div>)}
+                  {loyaltyDiscount > 0 && (<div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, color: "#C2410C", padding: "4px 0" }}><span>Loyalty</span><strong>-{inr(loyaltyDiscount)}</strong></div>)}
+                  {vipDiscount > 0 && (<div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, color: "#C2410C", padding: "4px 0" }}><span>VIP Elite (20%)</span><strong>-{inr(vipDiscount)}</strong></div>)}
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, color: "#6B6B6B", padding: "4px 0" }}><span>GST</span><strong style={{ color: "#1F1F1F", fontFamily: "Poppins, system-ui, sans-serif" }}>₹0</strong></div>
+                  {orderType === "parcel" && (!table || table === 0) && (<div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, color: "#C2410C", padding: "4px 0" }}><span>Delivery</span><strong>+{inr(deliveryFee)}</strong></div>)}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontWeight: 700, fontSize: 16, borderTop: "1px solid #EEEEEE", paddingTop: 10, marginTop: 6 }}>
+                    <span style={{ color: "#1F1F1F" }}>Total</span><strong style={{ color: "#C2410C", fontFamily: "Poppins, system-ui, sans-serif", fontSize: 16 }}>{inr(finalTotal)}</strong>
                   </div>
                 </div>
 
-                <button onClick={handlePlaceOrder} disabled={isProcessingPayment} style={{ background: COLORS.ink, color: "#fff", border: "none", borderRadius: 14, padding: "16px", fontWeight: 800, fontSize: 16, cursor: isProcessingPayment ? 'not-allowed' : 'pointer', width: "100%", opacity: isProcessingPayment ? 0.6 : 1 }}>
-                  {isProcessingPayment ? '⏳ Processing...' : '🎉 Place Order'}
-                </button>
+                </div>
+                <div style={{ flexShrink: 0, padding: "12px 16px calc(12px + env(safe-area-inset-bottom))", background: "#fff", borderTop: "1px solid #EEEEEE" }}>
+                  <button onClick={handlePlaceOrder} disabled={isProcessingPayment} style={{ height: 56, background: "#C2410C", color: "#fff", border: "none", borderRadius: 14, fontWeight: 700, fontSize: 16, cursor: isProcessingPayment ? "not-allowed" : "pointer", width: "100%", opacity: isProcessingPayment ? 0.6 : 1 }}>
+                    {isProcessingPayment ? "Processing..." : `Place Order · ${inr(finalTotal)}`}
+                  </button>
+                </div>
               </>
             )}
 
-            {activeModal === 'gallery' && (<><ModalHeader title="🖼️ Photo Gallery" onClose={() => setActiveModal(null)} /><div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>{gallery.map((imgUrl, idx) => (<img key={idx} src={imgUrl} alt="" style={{ width: "100%", height: 140, objectFit: "cover", borderRadius: 12 }} onError={(e) => { e.target.onerror = null; e.target.src = "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80"; }} />))}</div></>)}
+            {activeModal === 'gallery' && (<><CustomerModalHeader title="🖼️ Photo Gallery" onClose={() => setActiveModal(null)} /><div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>{gallery.map((imgUrl, idx) => (<img key={idx} src={imgUrl} alt="" style={{ width: "100%", height: 140, objectFit: "cover", borderRadius: 14 }} onError={(e) => { e.target.onerror = null; e.target.src = "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80"; }} />))}</div></>)}
 
             {activeModal === 'orderHistory' && (
-              <><ModalHeader title="📜 Order History" onClose={() => setActiveModal(null)} />
+              <><CustomerModalHeader title="📜 Order History" onClose={() => setActiveModal(null)} />
                 {myOrders.length === 0 ? (<div style={{ textAlign: 'center', padding: "40px 0", color: COLORS.textLight }}>No orders yet</div>) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                     {[...myOrders].reverse().map(o => {
@@ -4224,20 +4370,20 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
                       const isCancelled = o.status === "cancelled";
                       const isCompleted = o.status === "served";
                       return (
-                        <div key={o.id} style={{ background: COLORS.paper, border: `1px solid ${COLORS.line}`, padding: 16, borderRadius: 14 }}>
+                        <div key={o.id} style={{ background: "#fff", border: "1px solid #EEEEEE", color: "#1F1F1F", padding: 12, borderRadius: 16 }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontWeight: 800 }}>
                             <span>#{o.id.slice(1, 5).toUpperCase()}</span>
-                            <span style={{ fontSize: 11, color: isCancelled ? COLORS.error : isCompleted ? COLORS.sage : COLORS.copper }}>{isCancelled ? "❌ Cancelled" : isCompleted ? "✅ Done" : o.status}</span>
+                            <span style={{ fontSize: 11, color: isCancelled ? "#B91C1C" : isCompleted ? "#15803D" : "#C2410C" }}>{isCancelled ? "❌ Cancelled" : isCompleted ? "✅ Done" : o.status}</span>
                           </div>
                           <div style={{ fontSize: 12, color: COLORS.textLight, marginBottom: 8 }}>{new Date(o.createdAt).toLocaleString('en-IN')}</div>
                           <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>{o.items.map(i => `${i.qty}× ${i.name}`).join(", ")}</div>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: `1px solid ${COLORS.line}`, paddingTop: 10, flexWrap: 'wrap', gap: 8 }}>
                             <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 800, color: COLORS.copper }}>💰 {inr(orderTotal)}</div>
                             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                              {!isCancelled && (<button onClick={() => reorderOrder(o)} style={{ padding: '4px 12px', borderRadius: 8, border: `1px solid ${COLORS.sage}`, background: 'transparent', color: COLORS.sage, fontWeight: 700, fontSize: 11, cursor: 'pointer' }}>🔄 Reorder</button>)}
+                              {!isCancelled && (<button onClick={() => reorderOrder(o)} style={{ minHeight: 44, padding: '0 12px', borderRadius: 14, border: "1.5px solid #C2410C", background: "#fff", color: "#C2410C", fontWeight: 600, fontSize: 12, cursor: 'pointer' }}>🔄 Reorder</button>)}
                               <GoogleReviewButton variant="primary" size="sm" />
                               {o.status === "new" && (
-                                <button onClick={() => cancelOrder(o.id)} style={{ padding: '4px 12px', borderRadius: 8, border: `1px solid ${COLORS.error}`, background: 'transparent', color: COLORS.error, fontWeight: 700, fontSize: 11, cursor: 'pointer' }}>❌ Cancel</button>
+                                <button onClick={() => cancelOrder(o.id)} style={{ minHeight: 44, padding: '0 12px', borderRadius: 14, border: "1.5px solid #B91C1C", background: "#fff", color: "#B91C1C", fontWeight: 600, fontSize: 12, cursor: 'pointer' }}>❌ Cancel</button>
                               )}
                             </div>
                           </div>
@@ -4249,17 +4395,45 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
               </>
             )}
 
-            {activeModal === 'coinHistory' && (<><ModalHeader title="🪙 Coin History" onClose={() => setActiveModal(null)} />{myCoinLogs.length === 0 ? <div style={{ textAlign: 'center', padding: 40, color: COLORS.textLight }}>No transactions</div> : <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{[...myCoinLogs].reverse().map((log, idx) => (<div key={idx} style={{ background: COLORS.paper, padding: 14, borderRadius: 12, display: 'flex', justifyContent: 'space-between' }}><div><div style={{ fontWeight: 700, fontSize: 14 }}>{log.reason}</div><div style={{ fontSize: 11, color: COLORS.textLight }}>{new Date(log.timestamp).toLocaleString('en-IN')}</div></div><div style={{ fontWeight: 800, color: log.coins > 0 ? COLORS.success : COLORS.error }}>{log.coins > 0 ? `+${log.coins}` : log.coins} 🪙</div></div>))}</div>}</>)}
+            {activeModal === 'coinHistory' && (<><CustomerModalHeader title="🪙 Coin History" onClose={() => setActiveModal(null)} />{myCoinLogs.length === 0 ? <div style={{ textAlign: 'center', padding: 40, color: "#6B6B6B" }}>No transactions</div> : <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{[...myCoinLogs].reverse().map((log, idx) => (<div key={idx} style={{ background: "#fff", border: "1px solid #EEEEEE", color: "#1F1F1F", padding: 12, borderRadius: 16, display: 'flex', justifyContent: 'space-between' }}><div><div style={{ fontWeight: 600, fontSize: 14 }}>{log.reason}</div><div style={{ fontSize: 11, color: "#6B6B6B" }}>{new Date(log.timestamp).toLocaleString('en-IN')}</div></div><div style={{ fontWeight: 600, color: log.coins > 0 ? "#15803D" : "#B91C1C" }}>{log.coins > 0 ? `+${log.coins}` : log.coins} 🪙</div></div>))}</div>}</>)}
 
-            {activeModal === 'offers' && (<><ModalHeader title="🎁 Offers" onClose={() => setActiveModal(null)} />{offersList.length === 0 ? <div style={{ textAlign: 'center', padding: 40, color: COLORS.textLight }}>No offers</div> : <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>{offersList.map(offer => (<div key={offer.id} onClick={() => { setSearchQuery(offer.title); setActiveModal(null); }} style={{ background: 'linear-gradient(135deg, #FF9A9E 0%, #FECFEF 100%)', padding: 20, borderRadius: 16, cursor: 'pointer' }}><div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 22, fontWeight: 800, marginBottom: 8 }}>{offer.title}</div><div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.5 }}>{offer.desc}</div></div>))}</div>}</>)}
+            {activeModal === 'offers' && (<><CustomerModalHeader title="🎁 Offers" onClose={() => setActiveModal(null)} />{offersList.length === 0 ? <div style={{ textAlign: 'center', padding: 40, color: "#6B6B6B" }}>No offers</div> : <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>{offersList.map(offer => (<div key={offer.id} onClick={() => { setSearchQuery(offer.title); setActiveModal(null); }} style={{ background: "#FFF3EA", border: "1px solid #FED7AA", color: "#1F1F1F", padding: 16, borderRadius: 16, cursor: 'pointer' }}><div style={{ fontSize: 16, fontWeight: 600, color: "#1F1F1F", marginBottom: 6 }}>{offer.title}</div><div style={{ fontSize: 13, color: "#6B6B6B", lineHeight: 1.5 }}>{offer.desc}</div></div>))}</div>}</>)}
 
-            {activeModal === 'loyalty' && (<><ModalHeader title="VIP Loyalty 👑" onClose={() => setActiveModal(null)} /><div style={{ background: "linear-gradient(135deg, #1A1A1A 0%, #3C3C3C 100%)", borderRadius: 20, padding: 28, color: "#fff", textAlign: "center" }}><div style={{ fontSize: 48, marginBottom: 12 }}>💎</div><div style={{ fontFamily: "'Outfit', sans-serif", fontSize: 26, fontWeight: 800, marginBottom: 10, color: COLORS.gold }}>Eat & Park Elite</div><div style={{ fontSize: 15, marginBottom: 24 }}>Become premium for <strong style={{ fontSize: 20, color: COLORS.gold }}>₹999/month</strong>. Get 20% off!</div><div style={{ background: "#fff", padding: 20, borderRadius: 16 }}><div style={{ color: COLORS.ink, fontWeight: 800, marginBottom: 10 }}>Scan to Join</div><img src={loyaltyQrSrc} alt="" style={{ width: 160, height: 160 }} /></div></div></>)}
+            {activeModal === 'loyalty' && (<><CustomerModalHeader title="VIP Loyalty 👑" onClose={() => setActiveModal(null)} /><div style={{ background: "#FFF3EA", border: "1px solid #EEEEEE", borderRadius: 16, padding: 18, color: "#1F1F1F", textAlign: "center" }}><div style={{ fontSize: 40, marginBottom: 10 }}>💎</div><div style={{ fontSize: 18, fontWeight: 600, marginBottom: 8, color: "#1F1F1F" }}>Eat & Park Elite</div><div style={{ fontSize: 14, color: "#6B6B6B", marginBottom: 18 }}>Become premium for <strong style={{ fontSize: 18, color: "#C2410C" }}>₹999/month</strong>. Get 20% off!</div><div style={{ background: "#fff", border: "1px solid #EEEEEE", padding: 16, borderRadius: 16 }}><div style={{ color: "#1F1F1F", fontWeight: 600, marginBottom: 10 }}>Scan to Join</div><img src={loyaltyQrSrc} alt="" style={{ width: 160, height: 160 }} /></div></div></>)}
 
             {activeModal === 'booking' && (<><ModalHeader title={bookType === "party" ? "Party Booking 🎉" : "Table Booking 🍽️"} onClose={() => { setActiveModal(null); setConfirmedBooking(null); }} />{confirmedBooking ? (<div style={{ textAlign: "center", padding: "30px 0" }}><div style={{ fontSize: 56, marginBottom: 16 }}>✅</div><h3 style={{ fontSize: 28, fontWeight: 800, marginBottom: 10 }}>Request Sent!</h3><button onClick={() => { setActiveModal(null); setConfirmedBooking(null); }} style={{ background: COLORS.paper2, border: 'none', padding: '12px', borderRadius: 12, width: '100%', fontWeight: 800, cursor: 'pointer' }}>Close</button></div>) : (<div style={{ display: "flex", flexDirection: "column", gap: 14 }}><input type="text" placeholder="Name" value={bookData.name} onChange={(e) => setBookData({ ...bookData, name: e.target.value })} style={inputStyle} /><input type="tel" placeholder="Phone" value={bookData.phone} onChange={(e) => setBookData({ ...bookData, phone: e.target.value })} style={inputStyle} /><div style={{ display: "flex", gap: 14 }}><input type="date" value={bookData.date} onChange={(e) => setBookData({ ...bookData, date: e.target.value })} style={inputStyle} /><input type="time" value={bookData.time} onChange={(e) => setBookData({ ...bookData, time: e.target.value })} style={inputStyle} /></div>{bookType === "table" && <select value={bookData.table} onChange={(e) => setBookData({ ...bookData, table: e.target.value })} style={inputStyle}><option value="">Table select karo</option>{Array.from({ length: 20 }, (_, i) => i + 1).map((n) => <option key={n} value={n}>Table {n}</option>)}</select>}<input type="number" placeholder="Guests" value={bookData.guests} onChange={(e) => setBookData({ ...bookData, guests: e.target.value })} style={inputStyle} /><button onClick={handleBooking} style={{ background: COLORS.copper, color: '#fff', border: 'none', borderRadius: 14, padding: '13px 20px', fontWeight: 800, cursor: 'pointer' }}>Send Request</button></div>)}</>)}
 
+            {activeModal === "orderSuccess" && lastPlacedOrderRef.current && (
+              <div style={{ padding: "24px 20px 12px", background: "#fff", color: "#1F1F1F", textAlign: "center" }}>
+                <div style={{ width: 72, height: 72, margin: "0 auto 14px", borderRadius: "50%", background: "#15803D", display: "grid", placeItems: "center", flexShrink: 0 }}>
+                  <svg aria-hidden="true" viewBox="0 0 24 24" width="40" height="40" fill="none">
+                    <path d="m5 12.5 4.5 4.5L19 7" stroke="#fff" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </div>
+                <div style={{ color: "#15803D", fontSize: 18, fontWeight: 600 }}>Order Placed!</div>
+                <div style={{ marginTop: 8, color: "#1F1F1F", fontSize: 32, fontWeight: 700, lineHeight: 1.15 }}>{inr(lastPlacedOrderRef.current.finalTotal)}</div>
+                <div style={{ marginTop: 8, marginBottom: 20, color: "#6B6B6B", fontSize: 12 }}>Your kitchen order (KOT) is on its way to the chef</div>
+
+                <div style={{ padding: 18, marginBottom: 18, borderRadius: 16, background: "#FFF3EA", textAlign: "left" }}>
+                  {lastPlacedOrderRef.current.id && <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "6px 0", fontSize: 13 }}><span style={{ color: "#6B6B6B" }}>Order ID</span><strong style={{ color: "#1F1F1F", overflowWrap: "anywhere" }}>{lastPlacedOrderRef.current.orderNumber ? `#${String(lastPlacedOrderRef.current.orderNumber).replace(/^#/, "")}` : `#${String(lastPlacedOrderRef.current.id).slice(-6).toUpperCase()}`}</strong></div>}
+                  {Number(lastPlacedOrderRef.current.table) > 0 && <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "6px 0", fontSize: 13 }}><span style={{ color: "#6B6B6B" }}>Table</span><strong style={{ color: "#1F1F1F" }}>{lastPlacedOrderRef.current.table}</strong></div>}
+                  {lastPlacedOrderRef.current.payment && <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "6px 0", fontSize: 13 }}><span style={{ color: "#6B6B6B" }}>Payment</span><strong style={{ color: "#1F1F1F", textTransform: "capitalize" }}>{lastPlacedOrderRef.current.payment}</strong></div>}
+                  {lastPlacedOrderRef.current.estimatedTime != null && <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "6px 0", fontSize: 13 }}><span style={{ color: "#6B6B6B" }}>Est. time</span><strong style={{ color: "#1F1F1F" }}>{lastPlacedOrderRef.current.estimatedTime}</strong></div>}
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 10, width: "100%" }}>
+                  <button type="button" onClick={() => setActiveModal("track")} style={{ display: "flex", alignItems: "center", justifyContent: "center", boxSizing: "border-box", flex: "0 0 56px", width: "100%", height: 56, minHeight: 56, border: 0, borderRadius: 14, background: "#C2410C", color: "#fff", fontSize: 16, fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer" }}>Track Order</button>
+                  <button type="button" onClick={() => { setActiveModal(null); setCustomerTab("menu"); setCatPickerOpen(false); }} style={{ display: "flex", alignItems: "center", justifyContent: "center", boxSizing: "border-box", flex: "0 0 44px", width: "100%", height: 44, minHeight: 44, border: "none", borderRadius: 14, background: "transparent", color: "#6B6B6B", fontSize: 14, fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer" }}>Back to Menu</button>
+                </div>
+              </div>
+            )}
+
             {activeModal === 'track' && (
   <>
-    <ModalHeader title="Track Active Orders" onClose={() => setActiveModal(null)} />
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18, paddingBottom: 14, borderBottom: "1px solid #EEEEEE" }}>
+      <div style={{ color: "#1F1F1F", fontSize: 18, fontWeight: 600 }}>Track Active Orders</div>
+      <button type="button" onClick={() => setActiveModal(null)} aria-label="Close tracking" style={{ width: 40, height: 40, minHeight: 40, border: 0, borderRadius: "50%", background: "#F4F4F5", color: "#1F1F1F", fontSize: 18, cursor: "pointer" }}>×</button>
+    </div>
     {myActiveOrders.length === 0 ? (
       <div style={{ textAlign: 'center', padding: "50px 20px", color: COLORS.textLight }}>
         <div style={{ fontSize: 40, marginBottom: 10 }}>😴</div>
@@ -4280,25 +4454,22 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
         const activeIndex = currentIndex === -1 ? 0 : currentIndex;
 
         return (
-          <div key={o.id} style={{ background: '#fff', border: `1px solid ${COLORS.line}`, borderRadius: 16, padding: 20, marginBottom: 20 }}>
+          <div key={o.id} style={{ background: "#fff", border: "1px solid #EEEEEE", borderRadius: 16, padding: 16, marginBottom: 16, color: "#1F1F1F" }}>
             
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
               <div>
-                <div style={{ fontSize: 18, fontWeight: 800, color: COLORS.ink }}>Order #{o.id.slice(1, 5).toUpperCase()}</div>
-    <div style={{ fontSize: 13, color: '#64748b', fontWeight: 600, marginTop: 4 }}>
-      {(o && o.orderType) === 'parcel' ? '🛍️ Takeaway' : `🍽️ Dine-in • Table ${(o && o.table) || '?'}`}
-    </div>
-    <div style={{ fontSize: 13, color: '#64748b', fontWeight: 600, marginTop: 4 }}>
-      {(o && o.orderType) === 'parcel' ? '🛍️ Takeaway' : `🍽️ Dine-in • Table ${(o && o.table) || '?'}`}
-    </div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: "#1F1F1F" }}>Order #{o.id.slice(1, 5).toUpperCase()}</div>
+                <div style={{ fontSize: 13, color: "#6B6B6B", fontWeight: 600, marginTop: 4 }}>
+                  {(o && o.orderType) === 'parcel' ? '🛍️ Takeaway' : `🍽️ Dine-in • Table ${(o && o.table) || '?'}`}
+                </div>
                 <div style={{ fontSize: 12, color: COLORS.textLight, marginTop: 2 }}>{new Date(o.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</div>
               </div>
-              <div style={{ background: COLORS.paper, padding: "6px 12px", borderRadius: 10, fontSize: 12, fontWeight: 700, color: COLORS.copper }}>
+              <div style={{ background: "#FFF3EA", padding: "6px 12px", borderRadius: 10, fontSize: 12, fontWeight: 700, color: "#C2410C" }}>
                 {inr(getOrderTotal(o))}
               </div>
             </div>
 
-            <div className="ep-status-progress" role="progressbar" aria-label="Order status" aria-valuemin={1} aria-valuemax={4} aria-valuenow={Math.max(1, Math.min(4, (["new","preparing","ready","served"].includes(o.status) ? ["new","preparing","ready","served"].indexOf(o.status) + 1 : o.status === "out_for_delivery" ? 3 : 1)))}>
+            <div className="ep-status-progress" style={{ "--ep-primary": "#C2410C", "--ep-success": "#15803D", "--ep-border": "#D4D4D8", "--ep-surface": "#fff", "--ep-text-muted": "#6B6B6B" }} role="progressbar" aria-label="Order status" aria-valuemin={1} aria-valuemax={4} aria-valuenow={Math.max(1, Math.min(4, (["new","preparing","ready","served"].includes(o.status) ? ["new","preparing","ready","served"].indexOf(o.status) + 1 : o.status === "out_for_delivery" ? 3 : 1)))}>
               {["Placed", "Preparing", "Ready", "Served"].map((label, idx) => {
                 const statusIndex = ["new","preparing","ready","served"].includes(o.status) ? ["new","preparing","ready","served"].indexOf(o.status) : o.status === "out_for_delivery" ? 2 : 0;
                 const state = idx < statusIndex ? "done" : idx === statusIndex ? "current" : "pending";
@@ -4313,41 +4484,39 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
                 const isCurrent = idx === activeIndex;
                 const isPending = idx > activeIndex;
                 
-                let dotColor = "#E8E6DC";
+                let dotColor = "#D4D4D8";
                 let dotIcon = step.icon;
-                let textColor = "#8A8375";
+                let textColor = "#1F1F1F";
 
                 if (isDone) {
-                  dotColor = COLORS.sage;
-                  textColor = COLORS.ink;
+                  dotColor = "#15803D";
                 } else if (isCurrent) {
-                  dotColor = COLORS.copper;
-                  textColor = COLORS.copper;
+                  dotColor = "#C2410C";
                 }
 
                 return (
                   <div key={step.id} style={{ display: "flex", gap: 15, position: "relative", paddingBottom: 25 }}>
                     {/* Connecting Line */}
                     {idx !== steps.length - 1 && (
-                      <div style={{ position: "absolute", left: 14, top: 30, bottom: 0, width: 2, background: isDone ? COLORS.sage : "#E8E6DC", zIndex: 0 }} />
+                      <div style={{ position: "absolute", left: 14, top: 30, bottom: 0, width: 2, background: isDone ? "#15803D" : "#D4D4D8", zIndex: 0 }} />
                     )}
                     
                     {/* Dot */}
                     <div style={{ 
                       width: 30, height: 30, borderRadius: 15, 
-                      background: isDone ? COLORS.sageLight : isCurrent ? COLORS.copperLight : "#fff",
+                      background: isDone ? "#15803D" : isCurrent ? "#FFF3EA" : "#fff",
                       border: `2px solid ${dotColor}`,
                       display: "flex", alignItems: "center", justifyContent: "center",
                       zIndex: 1, fontSize: 14,
                       animation: isCurrent ? "pulse 2s infinite" : "none"
                     }}>
-                      {isDone ? "✓" : step.icon}
+                      {isDone ? <span style={{ color: "#fff" }}>✓</span> : step.icon}
                     </div>
 
                     {/* Text */}
                     <div style={{ paddingTop: 2 }}>
-                      <div style={{ fontSize: 14, fontWeight: 800, color: textColor, lineHeight: 1.2 }}>{step.label}</div>
-                      {isCurrent && <div style={{ fontSize: 12, color: COLORS.textLight, marginTop: 4, lineHeight: 1.3 }}>{step.desc}</div>}
+                      <div style={{ fontSize: 14, fontWeight: 700, color: "#1F1F1F", lineHeight: 1.2 }}>{step.label}</div>
+                      {isCurrent && <div style={{ fontSize: 12, color: "#6B6B6B", marginTop: 4, lineHeight: 1.3 }}>{step.desc}</div>}
                     </div>
                   </div>
                 );
@@ -4355,23 +4524,23 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
             </div>
 
             {o.status === "served" && ratingOrderId !== o.id && (
-              <div style={{ background: COLORS.paper, borderRadius: 12, padding: 12, marginBottom: 12 }}>
-                <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 8, color: COLORS.ink }}>Order ki rating dein</div>
+              <div style={{ background: "#fff", border: "1px solid #EEEEEE", borderRadius: 16, padding: 12, marginBottom: 12 }}>
+                <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8, color: "#1F1F1F" }}>Order ki rating dein</div>
                 <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
                   {[1,2,3,4,5].map((n) => (
-                    <button key={n} onClick={() => setOrderRating(n)} style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 24, filter: orderRating >= n ? "none" : "grayscale(1) opacity(.35)" }}>⭐</button>
+                    <button key={n} onClick={() => setOrderRating(n)} aria-label={`${n} stars`} style={{ width: 44, height: 44, minHeight: 44, border: "none", background: "transparent", cursor: "pointer", fontSize: 24, filter: orderRating >= n ? "none" : "grayscale(1) opacity(.35)" }}>⭐</button>
                   ))}
                 </div>
-                <input value={orderComment} onChange={(e) => setOrderComment(e.target.value)} placeholder="Dish / service ke baare me comment" style={{ ...inputStyle, marginBottom: 8 }} />
-                <button onClick={() => submitOrderRating(o)} style={{ width: "100%", border: "none", borderRadius: 10, background: COLORS.copper, color: "#fff", padding: 10, fontWeight: 800, cursor: "pointer" }}>Submit Rating</button>
+                <input value={orderComment} onChange={(e) => setOrderComment(e.target.value)} placeholder="Dish / service ke baare me comment" style={{ ...cartFieldStyle, marginBottom: 8 }} />
+                <button onClick={() => submitOrderRating(o)} style={{ width: "100%", height: 56, border: "none", borderRadius: 14, background: "#C2410C", color: "#fff", padding: "0 12px", fontWeight: 600, cursor: "pointer" }}>Submit Rating</button>
               </div>
             )}
-            {ratingOrderId === o.id && <div style={{ textAlign: "center", color: COLORS.sage, fontWeight: 800, fontSize: 12, marginBottom: 12 }}>⭐ Rating submitted - thank you!</div>}
+            {ratingOrderId === o.id && <div style={{ textAlign: "center", color: "#15803D", fontWeight: 600, fontSize: 12, marginBottom: 12 }}>⭐ Rating submitted - thank you!</div>}
 
             <div style={{ borderTop: `1px dashed ${COLORS.line}`, paddingTop: 15, display: 'flex', gap: 10 }}>
-              <button onClick={() => setActiveModal(null)} style={{ flex: 1, background: "transparent", color: COLORS.copper, border: `2px solid ${COLORS.copper}`, borderRadius: 12, padding: "10px", fontWeight: 800, cursor: 'pointer', fontSize: 13 }}>Close</button>
+              <button onClick={() => setActiveModal(null)} style={{ flex: 1, minHeight: 44, background: "#fff", color: "#C2410C", border: "1.5px solid #C2410C", borderRadius: 14, padding: "0 10px", fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>Close</button>
               {o.status === "new" && (
-                <button onClick={() => cancelOrder(o.id)} style={{ flex: 1, background: 'transparent', color: COLORS.error, border: `2px solid ${COLORS.error}`, borderRadius: 12, padding: "10px", fontWeight: 800, cursor: 'pointer', fontSize: 13 }}>Cancel Order</button>
+                <button onClick={() => cancelOrder(o.id)} style={{ flex: 1, minHeight: 44, background: "#fff", color: "#B91C1C", border: "1.5px solid #B91C1C", borderRadius: 14, padding: "0 10px", fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>Cancel Order</button>
               )}
             </div>
           </div>
@@ -4381,7 +4550,7 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
   </>
 )}
 
-{activeModal === 'chat' && (<><ModalHeader title="💬 Chat" onClose={() => setActiveModal(null)} /><ChatBox orderId={activeOrderIdForChat || 'general'} customerId={custPhone || 'customer'} /></>)}
+{activeModal === 'chat' && (<><CustomerModalHeader title="💬 Chat" onClose={() => setActiveModal(null)} /><div className="ep-customer-chat"><ChatBox orderId={activeOrderIdForChat || 'general'} customerId={custPhone || 'customer'} /></div></>)}
           </div>
         </div>
       )}
@@ -4419,11 +4588,12 @@ notes: isTakeawayFromTable ? `[TAKEAWAY] ${notes || ""}` : notes,
         </div>
       )}
             {runningOrderId && orders.find(o => o.id === runningOrderId) && (
-        <RunningOrderModal order={orders.find(o => o.id === runningOrderId)} menu={menu} onConfirm={(items) => addRunningItems(runningOrderId, items)} onClose={() => setRunningOrderId(null)} />
+              <RunningOrderModal order={orders.find(o => o.id === runningOrderId)} menu={menu} onConfirm={(items) => addRunningItems(runningOrderId, items)} onClose={() => setRunningOrderId(null)} customerTheme />
       )}
 {showAiModal && (
         <AIOrderModal
           menu={menu}
+          customerTheme
           onClose={() => setShowAiModal(false)}
           onOrderParsed={(data) => {
             if (data.items && data.items.length > 0) {

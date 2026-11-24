@@ -3,13 +3,14 @@ import { db } from "./firebase";
 import { collection, onSnapshot, addDoc, doc } from "firebase/firestore";
 
 const C = {
-  bg: "#0f172a", card: "#1e293b", cardAlt: "#334155", line: "#475569",
-  ink: "#f8fafc", gray: "#94a3b8", gold: "#f97316", green: "#22c55e"
+  bg: "#fff", card: "#fff", cardAlt: "#F4F4F5", line: "#EEEEEE",
+  ink: "#1F1F1F", gray: "#6B6B6B", gold: "#C2410C", green: "#15803D"
 };
 
 export default function CustomerMenu() {
   const [menu, setMenu] = useState([]);
   const [cart, setCart] = useState({});
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [customerName, setCustomerName] = useState("");
   const [activeCat, setActiveCat] = useState("All");
   const [ordered, setOrdered] = useState(false);
@@ -83,13 +84,23 @@ export default function CustomerMenu() {
     }
   };
 
-  if (loading) return <div style={{ padding: 50, textAlign: "center", color: C.ink, background: C.bg, minHeight: "100vh" }}>Loading...</div>;
+  if (loading) return <div className="ep-customer-menu" style={{ padding: 50, textAlign: "center", color: C.ink, background: C.bg, minHeight: "100dvh", colorScheme: "light", fontFamily: "Poppins, system-ui, sans-serif" }}>Loading...</div>;
 
   if (ordered) return (
-    <div style={{ padding: 50, textAlign: "center", color: C.green, background: C.bg, minHeight: "100vh", display: "flex", flexDirection: "column", justifyContent: "center" }}>
-      <div style={{ fontSize: 60 }}>🛍️</div>
-      <h1>Takeaway Order Place Ho Gaya!</h1>
-      <p style={{ color: C.ink }}>Aapka khana taiyaar ho raha hai. Counter par le lein.</p>
+    <div className="ep-customer-menu" style={{ padding: "24px 20px", textAlign: "center", color: C.ink, background: C.bg, minHeight: "100dvh", boxSizing: "border-box", colorScheme: "light", fontFamily: "Poppins, system-ui, sans-serif" }}>
+      <style>{"@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');"}</style>
+      <div style={{ width: 72, height: 72, margin: "0 auto 14px", borderRadius: "50%", background: C.green, display: "grid", placeItems: "center" }}>
+        <svg aria-hidden="true" viewBox="0 0 24 24" width="40" height="40" fill="none"><path d="m5 12.5 4.5 4.5L19 7" stroke="#fff" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+      </div>
+      <h1 style={{ margin: 0, color: C.green, fontSize: 18, fontWeight: 600 }}>Order Placed!</h1>
+      <div style={{ marginTop: 10, color: C.ink, fontSize: 32, fontWeight: 700 }}>₹{total}</div>
+      <p style={{ margin: "8px 0 20px", color: C.gray, fontSize: 12 }}>Your takeaway order is on its way to the counter.</p>
+      <div style={{ background: "#FFF3EA", borderRadius: 16, padding: 18, marginBottom: 20, textAlign: "left" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "6px 0", fontSize: 13 }}><span style={{ color: C.gray }}>Type</span><strong style={{ color: C.ink }}>Takeaway</strong></div>
+        {customerName.trim() && <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "6px 0", fontSize: 13 }}><span style={{ color: C.gray }}>Customer</span><strong style={{ color: C.ink }}>{customerName}</strong></div>}
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "6px 0", fontSize: 13 }}><span style={{ color: C.gray }}>Total</span><strong style={{ color: C.ink }}>₹{total}</strong></div>
+      </div>
+      <button type="button" onClick={() => { setOrdered(false); setCheckoutOpen(false); }} style={{ width: "100%", height: 56, minHeight: 56, border: 0, borderRadius: 14, background: C.gold, color: "#fff", fontSize: 16, fontWeight: 600, cursor: "pointer" }}>Back to Menu</button>
     </div>
   );
 
@@ -97,47 +108,105 @@ export default function CustomerMenu() {
   const filteredMenu = menu.filter(m => activeCat === "All" || (m.category || m.cat || "Main") === activeCat);
 
   return (
-    <div style={{ background: C.bg, minHeight: "100vh", color: C.ink, paddingBottom: "120px", fontFamily: "system-ui" }}>
-      <div style={{ background: C.card, padding: "20px 16px", position: "sticky", top: 0, zIndex: 10, borderBottom: "1px solid " + C.line }}>
-        <h2 style={{ margin: "0 0 15px 0", color: C.gold, fontSize: 22, textAlign: "center" }}>Eat & Park (Takeaway)</h2>
-        <input placeholder="Aapka Naam (Zaroori hai)" value={customerName} onChange={(e) => setCustomerName(e.target.value)} style={{ width: "100%", padding: "12px", borderRadius: 8, border: "1px solid " + C.line, background: C.cardAlt, color: C.ink, outline: "none", fontSize: 14, boxSizing: "border-box" }} />
-      </div>
+    <div className="ep-customer-menu" style={{ background: C.bg, minHeight: "100dvh", color: C.ink, paddingBottom: totalItems ? 110 : 28, fontFamily: "Poppins, system-ui, sans-serif", colorScheme: "light" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');
+        .ep-customer-menu { color-scheme: light; }
+        .ep-customer-menu input, .ep-customer-menu button { font-family: Poppins, system-ui, sans-serif; }
+        .ep-customer-menu input { color-scheme: light; }
+        .ep-customer-menu input::placeholder { color: #6B6B6B; opacity: 1; }
+        .ep-customer-menu button { min-height: 44px; }
+        .ep-customer-menu input:focus { outline: 2px solid #C2410C; outline-offset: 0; border-color: #C2410C; }
+        .ep-customer-menu-scroll { color-scheme: light; scrollbar-width: thin; }
+      `}</style>
 
-      <div style={{ display: "flex", gap: 10, padding: "15px 16px", overflowX: "auto" }}>
-        {categories.map(c => (
-          <button key={c} onClick={() => setActiveCat(c)} style={{ padding: "8px 16px", borderRadius: 20, border: "1px solid " + (activeCat === c ? C.gold : C.line), background: activeCat === c ? C.gold : C.card, color: activeCat === c ? "#fff" : C.gray, fontWeight: "bold", fontSize: 13, whiteSpace: "nowrap" }}>{c}</button>
-        ))}
-      </div>
+      <header style={{ position: "sticky", top: 0, zIndex: 10, background: "#fff", padding: "16px", borderBottom: "1px solid #EEEEEE" }}>
+        <h1 style={{ margin: 0, color: C.ink, fontSize: 18, fontWeight: 600, textAlign: "center" }}>Eat & Park · Takeaway</h1>
+      </header>
 
-      <div style={{ padding: "0 16px", display: "grid", gap: 12 }}>
-        {filteredMenu.map((item) => (
-          <div key={item.id} style={{ background: C.card, padding: "16px", borderRadius: 12, display: "flex", justifyContent: "space-between", alignItems: "center", border: "1px solid " + C.line }}>
-            <div style={{ flex: 1 }}>
-              <h3 style={{ margin: 0, fontSize: 16, color: C.ink }}>{item.name}</h3>
-              <p style={{ margin: "4px 0 0", color: C.gold, fontWeight: "bold", fontSize: 15 }}>₹{item.price}</p>
+      <nav aria-label="Menu categories" className="ep-customer-menu-scroll" style={{ display: "flex", gap: 10, padding: "14px 16px", overflowX: "auto" }}>
+        {categories.map((category, index) => {
+          const pastel = ["#E8F5E9", "#FFF3EA", "#EAF2FF", "#FFF6D6"][index % 4];
+          const selected = activeCat === category;
+          return (
+            <button type="button" key={category} onClick={() => setActiveCat(category)} aria-pressed={selected} style={{ minWidth: 88, minHeight: 56, padding: "8px 14px", borderRadius: 16, border: `1px solid ${selected ? C.gold : C.line}`, background: selected ? "#FFF3EA" : pastel, color: selected ? C.gold : C.ink, fontWeight: 600, fontSize: 13, whiteSpace: "nowrap", cursor: "pointer" }}>{category}</button>
+          );
+        })}
+      </nav>
+
+      <main style={{ padding: "0 16px 24px", display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 12 }}>
+        {filteredMenu.length === 0 ? (
+          <div style={{ padding: 28, textAlign: "center", background: "#fff", border: "1px solid #EEEEEE", borderRadius: 16, color: C.gray }}>No menu items available.</div>
+        ) : filteredMenu.map((item) => (
+          <article key={item.id} style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0, padding: 12, background: "#fff", border: "1px solid #EEEEEE", borderRadius: 16, color: C.ink }}>
+            <div style={{ position: "relative", width: 96, height: 96, flex: "0 0 96px", display: "grid", placeItems: "center", borderRadius: 14, overflow: "hidden", background: "#F4F4F5", fontSize: 30 }}>
+              {item.image ? <img src={item.image} alt={item.name || "Menu item"} loading="lazy" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={(e) => { e.currentTarget.style.display = "none"; }} /> : <span>🍽️</span>}
+              {item.veg !== undefined && <span aria-label={item.veg ? "Vegetarian" : "Non-vegetarian"} style={{ position: "absolute", top: 7, left: 7, width: 12, height: 12, borderRadius: "50%", border: `2px solid ${item.veg ? "#15803D" : "#B91C1C"}`, background: item.veg ? "#15803D" : "#B91C1C", boxShadow: "0 0 0 2px #fff" }} />}
             </div>
-            <div>
-              {cart[item.id] ? (
-                <div style={{ display: "flex", alignItems: "center", gap: 10, background: C.bg, padding: "5px", borderRadius: 8, border: "1px solid " + C.line }}>
-                  <button onClick={() => removeFromCart(item)} style={{ background: C.cardAlt, color: C.ink, border: "none", width: 30, height: 30, borderRadius: 6, fontSize: 18, fontWeight: "bold" }}>−</button>
-                  <span style={{ fontWeight: "bold", minWidth: 20, textAlign: "center" }}>{cart[item.id].qty}</span>
-                  <button onClick={() => addToCart(item)} style={{ background: C.gold, color: "#fff", border: "none", width: 30, height: 30, borderRadius: 6, fontSize: 18, fontWeight: "bold" }}>+</button>
-                </div>
-              ) : (
-                <button onClick={() => addToCart(item)} style={{ background: "transparent", color: C.gold, border: "1px solid " + C.gold, padding: "8px 20px", borderRadius: 8, fontWeight: "bold" }}>+ Add</button>
-              )}
+            <div style={{ flex: 1, minWidth: 0, minHeight: 96, display: "flex", flexDirection: "column", justifyContent: "center" }}>
+              <div style={{ display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2, overflow: "hidden", color: C.ink, fontSize: 14, fontWeight: 600, lineHeight: 1.35 }}>{item.name}</div>
+              {item.description && <div style={{ display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2, overflow: "hidden", marginTop: 4, color: C.gray, fontSize: 12, lineHeight: 1.4 }}>{item.description}</div>}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: "auto", paddingTop: 6 }}>
+                <span style={{ color: C.gold, fontSize: 14, fontWeight: 600 }}>₹{item.price}</span>
+                {cart[item.id] ? (
+                  <div role="group" aria-label={`${item.name} quantity`} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                    <button type="button" aria-label={`Remove ${item.name}`} onClick={() => removeFromCart(item)} style={{ width: 44, height: 44, minHeight: 44, borderRadius: "50%", border: "1.5px solid #C2410C", background: "#fff", color: C.gold, fontSize: 20, cursor: "pointer" }}>−</button>
+                    <span style={{ width: 20, textAlign: "center", color: C.ink, fontWeight: 600 }}>{cart[item.id].qty}</span>
+                    <button type="button" aria-label={`Add ${item.name}`} onClick={() => addToCart(item)} style={{ width: 44, height: 44, minHeight: 44, borderRadius: "50%", border: "1.5px solid #C2410C", background: "#fff", color: C.gold, fontSize: 20, cursor: "pointer" }}>+</button>
+                  </div>
+                ) : (
+                  <button type="button" aria-label={`Add ${item.name}`} onClick={() => addToCart(item)} style={{ width: 44, height: 44, minHeight: 44, flex: "0 0 44px", borderRadius: "50%", border: "1.5px solid #C2410C", background: "#fff", color: C.gold, fontSize: 22, cursor: "pointer" }}>+</button>
+                )}
+              </div>
             </div>
-          </div>
+          </article>
         ))}
-      </div>
+      </main>
 
       {totalItems > 0 && (
-        <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: C.card, padding: "16px 20px", borderTop: "1px solid " + C.line, display: "flex", justifyContent: "space-between", alignItems: "center", zIndex: 20 }}>
-          <div>
-            <p style={{ margin: 0, fontSize: 12, color: C.gray, fontWeight: "bold" }}>{totalItems} items</p>
-            <h2 style={{ margin: 0, fontSize: 22, color: C.ink }}>Total: ₹{total}</h2>
+        <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 20, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "12px 16px calc(12px + env(safe-area-inset-bottom))", borderTop: "1px solid #EEEEEE", background: "#fff", colorScheme: "light" }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ color: C.gray, fontSize: 12, fontWeight: 500 }}>{totalItems} items</div>
+            <div style={{ color: C.ink, fontSize: 18, fontWeight: 600 }}>Total: ₹{total}</div>
           </div>
-          <button onClick={placeOrder} style={{ background: C.gold, color: "#fff", border: "none", padding: "14px 24px", borderRadius: 10, fontWeight: "bold", fontSize: 16 }}>Takeaway Order 🛍️</button>
+          <button type="button" onClick={() => setCheckoutOpen(true)} style={{ height: 56, minHeight: 56, flex: "0 0 auto", padding: "0 18px", border: 0, borderRadius: 14, background: C.gold, color: "#fff", fontSize: 15, fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer" }}>View Cart</button>
+        </div>
+      )}
+
+      {checkoutOpen && (
+        <div role="presentation" onClick={() => setCheckoutOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "flex-end", justifyContent: "center", background: "rgba(0,0,0,0.4)", colorScheme: "light" }}>
+          <section role="dialog" aria-modal="true" aria-label="My Order" onClick={(e) => e.stopPropagation()} style={{ display: "flex", flexDirection: "column", width: "100%", maxWidth: 480, height: "min(85dvh, 760px)", maxHeight: "85dvh", minHeight: 0, overflow: "hidden", borderRadius: "20px 20px 0 0", background: "#fff", color: C.ink, boxSizing: "border-box", fontFamily: "Poppins, system-ui, sans-serif", colorScheme: "light" }}>
+            <header style={{ flexShrink: 0, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "12px 16px", borderBottom: "1px solid #EEEEEE", background: "#fff" }}>
+              <div>
+                <div style={{ color: C.ink, fontSize: 18, fontWeight: 600 }}>My Order</div>
+                <div style={{ marginTop: 2, color: C.gray, fontSize: 12 }}>Takeaway</div>
+              </div>
+              <button type="button" onClick={() => setCheckoutOpen(false)} aria-label="Close cart" style={{ width: 44, height: 44, minHeight: 44, border: 0, borderRadius: "50%", background: "#F4F4F5", color: C.ink, fontSize: 18, cursor: "pointer" }}>×</button>
+            </header>
+            <div className="ep-customer-menu-scroll" style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", padding: 16 }}>
+              <label style={{ display: "block", marginBottom: 12, color: C.ink, fontSize: 13, fontWeight: 600 }}>
+                Your name
+                <input placeholder="Aapka Naam (Zaroori hai)" value={customerName} onChange={(e) => setCustomerName(e.target.value)} style={{ display: "block", width: "100%", height: 48, marginTop: 6, padding: "0 14px", border: "1px solid #EEEEEE", borderRadius: 14, background: "#F4F4F5", color: C.ink, fontSize: 16, boxSizing: "border-box" }} />
+              </label>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {Object.values(cart).map((item) => (
+                  <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: 12, border: "1px solid #EEEEEE", borderRadius: 16, background: "#fff" }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ color: C.ink, fontSize: 14, fontWeight: 600 }}>{item.name}</div>
+                      <div style={{ marginTop: 4, color: C.gold, fontSize: 13, fontWeight: 600 }}>₹{item.price}</div>
+                    </div>
+                    <button type="button" aria-label={`Remove ${item.name}`} onClick={() => removeFromCart(item)} style={{ width: 44, height: 44, minHeight: 44, border: "1.5px solid #C2410C", borderRadius: "50%", background: "#fff", color: C.gold, fontSize: 20 }}>−</button>
+                    <span style={{ width: 20, textAlign: "center", color: C.ink, fontWeight: 600 }}>{item.qty}</span>
+                    <button type="button" aria-label={`Add ${item.name}`} onClick={() => addToCart(item)} style={{ width: 44, height: 44, minHeight: 44, border: "1.5px solid #C2410C", borderRadius: "50%", background: "#fff", color: C.gold, fontSize: 20 }}>+</button>
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", marginTop: 16, paddingTop: 12, borderTop: "1px dashed #D4D4D8", color: C.ink, fontSize: 14, fontWeight: 600 }}><span>Total</span><span style={{ color: C.gold }}>₹{total}</span></div>
+            </div>
+            <footer style={{ flexShrink: 0, padding: "12px 16px calc(12px + env(safe-area-inset-bottom))", borderTop: "1px solid #EEEEEE", background: "#fff" }}>
+              <button type="button" onClick={placeOrder} disabled={placing} style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "100%", height: 56, minHeight: 56, border: 0, borderRadius: 14, background: C.gold, color: "#fff", fontSize: 16, fontWeight: 600, cursor: placing ? "wait" : "pointer", opacity: placing ? 0.65 : 1 }}>{placing ? "Placing Order..." : `Place Order · ₹${total}`}</button>
+            </footer>
+          </section>
         </div>
       )}
     </div>

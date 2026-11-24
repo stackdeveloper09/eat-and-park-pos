@@ -12,7 +12,14 @@ export default defineConfig({
     sourcemap: true,
     minify: 'esbuild',
     rollupOptions: {
-      // Rollup engine force karne ke liye
+      output: {
+        manualChunks(id) {
+          const moduleId = id.replace(/\\/g, '/');
+          if (moduleId.includes('/node_modules/firebase/') || moduleId.includes('/node_modules/@firebase/')) {
+            return 'firebase';
+          }
+        },
+      },
     }
   },
 })
