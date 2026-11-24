@@ -37,7 +37,7 @@ import {
   getTodayIST,
   indiaMonthKey,
 } from "./lib/staffShifts";
-import { autoCloseOpenRecords } from "./lib/attendanceAutoClose";
+import { fetchFirebaseServerTime, getIndiaMinutes } from "./lib/attendanceServerTime";
 import { ROLES } from "./lib/roles";
 
 const ATTENDANCE_STATUSES = ["Present", "Half Day", "Late", "Absent", "Paid Leave"];
@@ -76,7 +76,53 @@ function getStaffId(record) {
 }
 
 function displayStaffName(member) {
-  return String(member?.name || "").trim() || String(member?.id || "").slice(0, 6);
+  return String(member?.name || member?.fullName || member?.displayName || member?.staffName || "").trim()
+    || String(member?.id || "").slice(0, 6);
+}
+
+function staffPhone(member) {
+  return String(member?.phone || member?.whatsapp || member?.whatsappNumber || member?.phoneNumber || member?.mobile || "").trim();
+}
+
+function staffMonthlySalary(member) {
+  const value = member?.monthlySalary ?? member?.salary ?? member?.monthlySalaryValue;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function staffShiftId(member, shifts = DEFAULT_SHIFTS) {
+  const direct = typeof member?.shift === "string"
+    ? String(member.shift).trim()
+    : String(member?.shiftId || member?.shift_id || "").trim();
+  if (direct) return direct;
+  const shiftName = String(member?.shiftName || (typeof member?.shift === "object" ? member.shift?.name : "") || "").trim().toLowerCase();
+  if (shiftName) {
+    const match = Object.entries(shifts).find(([, shift]) => String(shift.name || "").toLowerCase() === shiftName);
+    if (match) return match[0];
+  }
+  return "";
+}
+
+function normalizeStaffMember(member, shifts = DEFAULT_SHIFTS) {
+  if (!member) return member;
+  return {
+    ...member,
+    name: String(member.name || member.fullName || member.displayName || member.staffName || "").trim(),
+    phone: staffPhone(member),
+    monthlySalary: staffMonthlySalary(member),
+    shiftId: staffShiftId(member, shifts),
+  };
+}
+
+function derivedCheckOutAt(record, todayIST, serverMinutes) {
+  if (!record?.checkInAt) return null;
+  if (record.checkOutAt) return record.checkOutAt;
+  const eligible = record.date < todayIST
+    || (record.date === todayIST && Number.isFinite(serverMinutes) && serverMinutes >= 22 * 60);
+  if (!eligible) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(record.date || "")) return null;
+  const [year, month, day] = record.date.split("-").map(Number);
+  return Timestamp.fromMillis(Date.UTC(year, month - 1, day, 16, 30));
 }
 
 function canReceiveStaffNotification(member) {
@@ -145,6 +191,7 @@ export default function Staff({ C, isMobile }) {
   const [attendanceToday, setAttendanceToday] = useState("");
   const attendanceDateRef = useRef("");
   const todayIST = attendanceToday || getTodayIST();
+  const [attendanceServerMinutes, setAttendanceServerMinutes] = useState(null);
   const [members, setMembers] = useState([]);
   const [shifts, setShifts] = useState(DEFAULT_SHIFTS);
   const [shiftDrafts, setShiftDrafts] = useState(DEFAULT_SHIFTS);
@@ -292,7 +339,7 @@ export default function Staff({ C, isMobile }) {
   useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, "staff"), (snapshot) => {
       const staffList = snapshot.docs
-        .map((staffDoc) => ({ id: staffDoc.id, ...staffDoc.data() }))
+        .map((staffDoc) => normalizeStaffMember({ id: staffDoc.id, ...staffDoc.data() }, shifts))
         .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
       setMembers(staffList);
       setAttendanceForm((form) => {
@@ -311,7 +358,7 @@ export default function Staff({ C, isMobile }) {
       setLoadError(`Staff list load nahi hui: ${getErrorMessage(error)}`);
     });
     return unsubscribe;
-  }, []);
+  }, [shifts]);
 
   useEffect(() => {
     if (!canSendStaffNotifications) {
@@ -552,36 +599,26 @@ export default function Staff({ C, isMobile }) {
     if (!uid
       || currentAdminMember?.active === false
       || !["admin", "owner", "manager"].includes(String(currentAdminRole || "").toLowerCase())) {
+      setAttendanceServerMinutes(null);
       return undefined;
     }
     let active = true;
-    let running = false;
-    const runAutoClose = async () => {
-      if (running) return;
-      running = true;
+    const synchronize = async () => {
       try {
-        await autoCloseOpenRecords({ staffId: uid, role: currentAdminRole, shifts });
+        const timestamp = await fetchFirebaseServerTime(uid);
+        if (active) setAttendanceServerMinutes(getIndiaMinutes(timestamp));
       } catch (error) {
-        console.error("Admin attendance auto-checkout backup failed:", error);
-        if (active) setActionError(`Auto check-out sync nahi hua: ${getErrorMessage(error)}`);
-      } finally {
-        running = false;
+        console.warn("Attendance server time unavailable; derived auto-checkout will use date-only state.", error);
+        if (active) setAttendanceServerMinutes(null);
       }
     };
-    void runAutoClose();
-    const timer = window.setInterval(() => void runAutoClose(), 60000);
-    const onVisibilityChange = () => {
-      if (document.visibilityState === "visible") void runAutoClose();
-    };
-    window.addEventListener("focus", runAutoClose);
-    document.addEventListener("visibilitychange", onVisibilityChange);
+    void synchronize();
+    const timer = window.setInterval(() => void synchronize(), 60000);
     return () => {
       active = false;
       window.clearInterval(timer);
-      window.removeEventListener("focus", runAutoClose);
-      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [currentAdminMember?.active, currentAdminRole, shifts]);
+  }, [currentAdminMember?.active, currentAdminRole]);
 
   const activeMembers = useMemo(
     () => members.filter((member) => member.active !== false),
@@ -601,6 +638,7 @@ export default function Staff({ C, isMobile }) {
         status,
         source: attendanceSource(record),
         late: record.late === true || status === "Late" || Number(record.lateMinutes || 0) > 0,
+        effectiveCheckOutAt: derivedCheckOutAt(record, todayIST, attendanceServerMinutes),
       };
       const current = recordsByStaffDate.get(key);
       const sourcePriority = { gps: 0, manual: 1, leave: 2 };
@@ -613,7 +651,7 @@ export default function Staff({ C, isMobile }) {
       }
     });
     return recordsByStaffDate;
-  }, [gpsAttendance, manualAttendance]);
+  }, [attendanceServerMinutes, gpsAttendance, manualAttendance, todayIST]);
 
   const attendanceStatsByStaff = useMemo(() => {
     const stats = new Map();
@@ -1777,7 +1815,7 @@ export default function Staff({ C, isMobile }) {
                             <input
                               aria-label={`Name for ${member.id}`}
                               maxLength={80}
-                              value={staffDrafts[member.id]?.name ?? member.name ?? ""}
+                              value={staffDrafts[member.id]?.name ?? displayStaffName(member) ?? ""}
                               onChange={(event) => setStaffDrafts((current) => ({ ...current, [member.id]: { ...current[member.id], name: event.target.value } }))}
                               onBlur={() => handleSaveStaffField(member, "name")}
                               style={{ ...inputStyle, minWidth: 120, padding: "7px 8px" }}
@@ -1789,7 +1827,7 @@ export default function Staff({ C, isMobile }) {
                               aria-label={`WhatsApp number for ${member.id}`}
                               type="tel"
                               autoComplete="tel"
-                              value={staffDrafts[member.id]?.phone ?? member.phone ?? ""}
+                              value={staffDrafts[member.id]?.phone ?? staffPhone(member) ?? ""}
                               onChange={(event) => setStaffDrafts((current) => ({ ...current, [member.id]: { ...current[member.id], phone: event.target.value } }))}
                               onBlur={() => handleSaveStaffField(member, "phone")}
                               placeholder="+91..."
@@ -1800,7 +1838,7 @@ export default function Staff({ C, isMobile }) {
                           <td style={{ padding: "8px", borderBottom: `1px solid ${C.line}` }}>
                             <select
                               aria-label={`Shift for ${member.id}`}
-                              value={staffDrafts[member.id]?.shiftId ?? member.shiftId ?? ""}
+                              value={staffDrafts[member.id]?.shiftId ?? staffShiftId(member) ?? ""}
                               onChange={(event) => setStaffDrafts((current) => ({ ...current, [member.id]: { ...current[member.id], shiftId: event.target.value } }))}
                               onBlur={() => handleSaveStaffField(member, "shiftId")}
                               style={{ ...inputStyle, minWidth: 110, padding: "7px 8px" }}
@@ -1829,7 +1867,7 @@ export default function Staff({ C, isMobile }) {
                               type="number"
                               min="0"
                               step="0.01"
-                              value={staffDrafts[member.id]?.monthlySalary ?? legacyPayroll[member.id]?.monthlySalary ?? member.monthlySalary ?? ""}
+                              value={staffDrafts[member.id]?.monthlySalary ?? legacyPayroll[member.id]?.monthlySalary ?? (staffMonthlySalary(member) || "")}
                               onChange={(event) => setStaffDrafts((current) => ({ ...current, [member.id]: { ...current[member.id], monthlySalary: event.target.value } }))}
                               onBlur={() => handleSaveStaffField(member, "monthlySalary")}
                               style={{ ...inputStyle, minWidth: 120, padding: "7px 8px" }}
@@ -1863,8 +1901,8 @@ export default function Staff({ C, isMobile }) {
                           <td style={{ padding: "8px", borderBottom: `1px solid ${C.line}` }}>
                             {staffWelcomeWhatsAppUrl(
                               member,
-                              staffDrafts[member.id]?.name ?? member.name,
-                              staffDrafts[member.id]?.phone ?? member.phone ?? "",
+                              staffDrafts[member.id]?.name ?? displayStaffName(member),
+                              staffDrafts[member.id]?.phone ?? staffPhone(member),
                             ) ? (
                               <a
                                 href={staffWelcomeWhatsAppUrl(
@@ -2619,10 +2657,10 @@ export default function Staff({ C, isMobile }) {
                           <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", fontSize: 8 }}>{status || "—"}</span>
                           {record && <span style={{ display: "block", fontSize: 7 }}>{record.source === "gps" ? "GPS" : "Manual"}</span>}
                           {record?.checkInAt && <span style={{ display: "block", fontSize: 7 }}>In {formatIndiaTime(record.checkInAt)}</span>}
-                          {record?.checkOutAt && <span style={{ display: "block", fontSize: 7 }}>Out {formatIndiaTime(record.checkOutAt)}</span>}
+                          {(record?.effectiveCheckOutAt || record?.checkOutAt) && <span style={{ display: "block", fontSize: 7 }}>Out {formatIndiaTime(record.effectiveCheckOutAt || record.checkOutAt)}</span>}
                           {record?.shiftName && <span style={{ display: "block", fontSize: 7 }}>{record.shiftName}</span>}
                           {record?.late && <span style={{ display: "block", fontSize: 7, color: C.gold }}>Late {record.lateMinutes || 0}m</span>}
-                          {record?.autoCheckout && <span style={{ display: "block", fontSize: 7, color: C.green }}>Auto checkout</span>}
+                          {(record?.autoCheckout || record?.effectiveCheckOutAt) && <span style={{ display: "block", fontSize: 7, color: C.green }}>Auto checkout</span>}
                           {record?.earlyLeave && <span style={{ display: "block", fontSize: 7, color: C.gold }}>Early leave</span>}
                         </button>
                       );

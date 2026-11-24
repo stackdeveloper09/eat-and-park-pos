@@ -30,7 +30,6 @@ import {
   getTodayIST,
   isShiftRestTime,
 } from "./lib/staffShifts";
-import { autoCloseOpenRecords } from "./lib/attendanceAutoClose";
 import { fetchFirebaseServerTime, getIndiaMinutes } from "./lib/attendanceServerTime";
 import "./AttendanceApp.css";
 import { STAFF_ROLES } from "./lib/roles";
@@ -220,6 +219,13 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
   const displayNow = new Date(serverNow || now);
   const today = getTodayIST(displayNow);
   const selectedMonth = selectedMonthDraft || today.slice(0, 7);
+  const effectiveCheckOutLabel = (record) => {
+    if (record?.checkOutAt) return formatIndiaTime(record.checkOutAt);
+    if (!record?.checkInAt || !record?.date) return null;
+    const dateClosed = record.date < today
+      || (record.date === today && serverIndiaMinutes != null && serverIndiaMinutes >= ATTENDANCE_END_MINUTES);
+    return dateClosed ? "10:00 PM" : null;
+  };
   const todayAttendanceLoaded = todayAttendanceLoadedDate === today;
   const serverTimeReady = serverNow != null;
   const serverIndiaMinutes = serverNow == null ? null : getIndiaMinutes(serverNow);
@@ -830,36 +836,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
     setProfileError(`Restaurant settings load nahi hui: ${getErrorMessage(error)}`);
   }), []);
 
-  useEffect(() => {
-    if (!staffUid || !staff || !serverTimeReady || !dataLoaded.attendance) return undefined;
-    let active = true;
-    let running = false;
-    const runAutoClose = async () => {
-      if (running) return;
-      running = true;
-      try {
-        await autoCloseOpenRecords({ staffId: staffUid, role: staff.role, shifts });
-      } catch (error) {
-        console.error("Attendance auto-checkout backup failed:", error);
-        if (active) setProfileError(`Auto check-out sync nahi hua: ${getErrorMessage(error)}`);
-      } finally {
-        running = false;
-      }
-    };
-    void runAutoClose();
-    const timer = window.setInterval(() => void runAutoClose(), 60000);
-    const onVisibilityChange = () => {
-      if (document.visibilityState === "visible") void runAutoClose();
-    };
-    window.addEventListener("focus", runAutoClose);
-    document.addEventListener("visibilitychange", onVisibilityChange);
-    return () => {
-      active = false;
-      window.clearInterval(timer);
-      window.removeEventListener("focus", runAutoClose);
-      document.removeEventListener("visibilitychange", onVisibilityChange);
-    };
-  }, [dataLoaded.attendance, serverTimeReady, staff, staffUid, shifts, today]);
+
 
   const downloadPayslip = async () => {
     const money = (v) => `Rs. ${Number(v || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -1871,7 +1848,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
               <div className="attendance-detail-card" role="status">
                 <strong>{selectedAttendanceDetail.date} · {localizeAttendanceStatus(selectedAttendanceDetail.status || "Present")}</strong>
                 <span>{t("in")}: {selectedAttendanceDetail.checkInAt ? formatIndiaTime(selectedAttendanceDetail.checkInAt) : "—"}</span>
-                <span>{t("out")}: {selectedAttendanceDetail.checkOutAt ? formatIndiaTime(selectedAttendanceDetail.checkOutAt) : "—"}</span>
+                <span>{t("out")}: {effectiveCheckOutLabel(selectedAttendanceDetail) || "—"}</span>
                 <span>{t("worked")}: {selectedAttendanceDetail.workedMinutes != null
                   ? `${Math.floor(selectedAttendanceDetail.workedMinutes / 60)}h ${selectedAttendanceDetail.workedMinutes % 60}m`
                   : "—"}</span>
@@ -1886,7 +1863,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
                     <span>{new Date(`${record.date}T00:00:00Z`).toLocaleDateString(locale, { timeZone: "UTC", day: "numeric", month: "short", year: "numeric" })}</span>
                     <div style={{ color: "#9ba8ba", fontSize: 10, marginTop: 4 }}>
                       {record.checkInAt ? `In ${formatIndiaTime(record.checkInAt)}` : "In —"}
-                      {record.checkOutAt ? ` · Out ${formatIndiaTime(record.checkOutAt)}` : ""}
+                      {effectiveCheckOutLabel(record) ? ` · Out ${effectiveCheckOutLabel(record)}` : ""}
                       {record.shiftName ? ` · ${record.shiftName}` : ""}
                       {record.lateMinutes ? ` · Late ${record.lateMinutes}m` : ""}
                     </div>
