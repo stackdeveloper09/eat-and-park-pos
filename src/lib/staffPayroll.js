@@ -3,7 +3,7 @@ export const RESTAURANT_LOCATION = Object.freeze({
   longitude: 77.209,
 });
 
-export const ATTENDANCE_RADIUS_METERS = 100;
+export const ATTENDANCE_RADIUS_METERS = 150;
 const EARTH_RADIUS_METERS = 6_371_000;
 
 export function haversineDistanceMeters(latitude1, longitude1, latitude2, longitude2) {

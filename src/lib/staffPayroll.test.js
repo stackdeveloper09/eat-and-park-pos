@@ -19,7 +19,7 @@ describe("staff geofence", () => {
       RESTAURANT_LOCATION.latitude,
       RESTAURANT_LOCATION.longitude,
     )).toBe(0);
-    expect(ATTENDANCE_RADIUS_METERS).toBe(100);
+    expect(ATTENDANCE_RADIUS_METERS).toBe(150);
   });
 
   test("calculates distance in meters and rejects invalid coordinates", () => {

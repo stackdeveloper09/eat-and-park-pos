@@ -87,6 +87,7 @@ function canReceiveStaffNotification(member) {
 function normalizedAttendanceStatus(record) {
   if (record.action === "present") return "Present";
   const status = String(record.status || "").trim().toLowerCase();
+  if (record.checkOutMissed === true || status === "checkout_missed") return "checkout_missed";
   if (status === "half day" || status === "half-day" || status === "half_day") return "Half Day";
   if (status === "paid leave" || status === "leave") return "Paid Leave";
   if (status === "absent") return "Absent";
@@ -503,7 +504,12 @@ export default function Staff({ C, isMobile }) {
       };
       const current = recordsByStaffDate.get(key);
       const sourcePriority = { gps: 0, manual: 1, leave: 2 };
-      if (!current || sourcePriority[normalized.source] > sourcePriority[current.source]) {
+      const currentIsCanonical = current?.id === `${staffId}_${record.date}`;
+      const normalizedIsCanonical = normalized.id === `${staffId}_${record.date}`;
+      if (!current
+        || (normalized.checkOutMissed === true && current.checkOutMissed !== true)
+        || (normalized.source === current.source && normalizedIsCanonical && !currentIsCanonical)
+        || sourcePriority[normalized.source] > sourcePriority[current.source]) {
         recordsByStaffDate.set(key, normalized);
       }
     });
@@ -1033,7 +1039,7 @@ export default function Staff({ C, isMobile }) {
               staffId: leave.staffId,
               date,
               status,
-              markedBy: "Admin",
+              markedBy: "admin",
               source: "leave",
               leaveRequestId: leave.id,
             },
@@ -1229,7 +1235,10 @@ export default function Staff({ C, isMobile }) {
       if (alreadyMarked) {
         const record = alreadyMarked.data();
         const existingStatus = normalizedAttendanceStatus(record) || "GPS attendance";
-        if (!window.confirm(`Already marked as ${existingStatus}, replace?`)) return;
+        const confirmMessage = record.checkOutMissed === true || existingStatus === "checkout_missed"
+          ? "Checkout missed hai. Manual check-out time save karke attendance update karein?"
+          : `Already marked as ${existingStatus}, replace?`;
+        if (!window.confirm(confirmMessage)) return;
       }
       const attendanceRef = doc(db, "attendance", `${staffId}_${date}`);
       const currentRecord = allAttendanceRecords.get(`${staffId}_${date}`);
@@ -1249,12 +1258,16 @@ export default function Staff({ C, isMobile }) {
       const automatic = checkInAt && shift
         ? autoStatus(checkInAt, shift, checkOutAt)
         : null;
+      const savedStatus = currentRecord?.checkOutMissed === true
+        ? checkOutAt ? automatic?.status || "Present" : "checkout_missed"
+        : status;
       const attendanceData = {
         staffId,
         date,
-        status,
-        markedBy: "Admin",
+        status: savedStatus,
+        markedBy: "admin",
         source: "manual",
+        ...(currentRecord?.checkOutMissed === true && !checkOutAt ? { checkOutMissed: true } : {}),
         ...(checkInAt ? { checkInAt } : {}),
         ...(checkOutAt ? { checkOutAt } : {}),
         ...(shift ? {
@@ -1296,7 +1309,7 @@ export default function Staff({ C, isMobile }) {
         ...form,
         staffId,
         date,
-        status,
+        status: savedStatus,
         checkInTime: checkInAt ? indiaTimeInput(checkInAt) : "",
         checkOutTime: checkOutAt ? indiaTimeInput(checkOutAt) : "",
       }));
@@ -1633,7 +1646,7 @@ export default function Staff({ C, isMobile }) {
                   <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1200, color: C.ink, fontSize: 13 }}>
                     <thead>
                       <tr style={{ color: C.gray, textAlign: "left" }}>
-                        {["Name", "WhatsApp number", "Shift", "Role", "Monthly salary", "Status", "Auth UID", "WhatsApp welcome"].map((heading) => (
+                        {["Name", "WhatsApp number", "Shift", "Role", "Monthly salary", "Status", "Skip geofence", "Auth UID", "WhatsApp welcome"].map((heading) => (
                           <th key={heading} style={{ padding: "9px 8px", borderBottom: `1px solid ${C.line}` }}>{heading}</th>
                         ))}
                       </tr>
@@ -1710,6 +1723,22 @@ export default function Staff({ C, isMobile }) {
                               {member.active === false ? "Inactive" : "Active"}
                             </label>
                             {renderStaffSaveStatus(member, "active")}
+                          </td>
+                          <td style={{ padding: "8px", borderBottom: `1px solid ${C.line}` }}>
+                            <label style={{ display: "flex", alignItems: "center", gap: 6, color: C.gray }}>
+                              <input
+                                type="checkbox"
+                                aria-label={`Skip geofence for ${member.id}`}
+                                checked={staffDrafts[member.id]?.skipGeofence ?? member.skipGeofence === true}
+                                onChange={(event) => setStaffDrafts((current) => ({
+                                  ...current,
+                                  [member.id]: { ...current[member.id], skipGeofence: event.target.checked },
+                                }))}
+                                onBlur={() => handleSaveStaffField(member, "skipGeofence")}
+                              />
+                              Skip geofence
+                            </label>
+                            {renderStaffSaveStatus(member, "skipGeofence")}
                           </td>
                           <td style={{ padding: "10px 8px", borderBottom: `1px solid ${C.line}`, fontSize: 11 }}>{member.id}</td>
                           <td style={{ padding: "8px", borderBottom: `1px solid ${C.line}` }}>
@@ -2410,13 +2439,16 @@ export default function Staff({ C, isMobile }) {
                             ...form,
                             staffId: selectedMember.id,
                             date,
-                            status: status || "Present",
+                            status: record?.checkOutMissed ? "Present" : status || "Present",
+                            checkInTime: record?.checkInAt ? indiaTimeInput(record.checkInAt) : "",
+                            checkOutTime: record?.checkOutAt ? indiaTimeInput(record.checkOutAt) : "",
                           }))}
                           title={status ? `${status} · ${record.source === "gps" ? "GPS" : record.source === "leave" ? "Leave" : "Manual"}` : "Not marked"}
                           style={{ minWidth: 0, padding: "6px 2px", border: `1px solid ${date === attendanceForm.date ? C.gold : C.line}`, borderRadius: 7, background: C.bg, color: date > todayKey() ? C.gray : color, cursor: date > todayKey() ? "not-allowed" : "pointer", opacity: date > todayKey() ? 0.45 : 1 }}
                         >
                           <span style={{ display: "block", fontSize: 12, fontWeight: 800 }}>{day}</span>
                           <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", fontSize: 8 }}>{status || "—"}</span>
+                          {record?.checkOutMissed && <span style={{ display: "block", color: "#FCA5A5", fontSize: 7, fontWeight: 800 }}>Checkout missed</span>}
                           {record && <span style={{ display: "block", fontSize: 7 }}>{record.source === "gps" ? "GPS" : "Manual"}</span>}
                           {record?.checkInAt && <span style={{ display: "block", fontSize: 7 }}>In {formatIndiaTime(record.checkInAt)}</span>}
                           {record?.checkOutAt && <span style={{ display: "block", fontSize: 7 }}>Out {formatIndiaTime(record.checkOutAt)}</span>}
@@ -2428,6 +2460,37 @@ export default function Staff({ C, isMobile }) {
                       );
                     })}
                   </div>
+
+                  {selectedDateRecord?.checkOutMissed && (
+                    <div style={{ display: "flex", alignItems: "end", gap: 8, flexWrap: "wrap", marginTop: 10, padding: 10, border: "1px solid #7F1D1D", borderRadius: 9, background: "#2B171B" }}>
+                      <div style={{ flex: "1 1 180px", color: "#FCA5A5", fontSize: 12, fontWeight: 800 }}>
+                        Checkout missed · {selectedDateRecord.date}
+                      </div>
+                      <label style={{ ...labelStyle, minWidth: 150 }}>
+                        Manual check-out time
+                        <input
+                          type="time"
+                          value={attendanceForm.checkOutTime}
+                          onChange={(event) => setAttendanceForm((form) => ({ ...form, checkOutTime: event.target.value }))}
+                          style={inputStyle}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        disabled={busyId === "attendance" || !attendanceForm.checkOutTime}
+                        onClick={() => saveAttendance(
+                          selectedMember.id,
+                          attendanceForm.date,
+                          "Present",
+                          attendanceForm.checkInTime,
+                          attendanceForm.checkOutTime,
+                        )}
+                        style={buttonStyle}
+                      >
+                        {busyId === "attendance" ? "Saving..." : "Save check-out"}
+                      </button>
+                    </div>
+                  )}
 
                   <form
                     onSubmit={(event) => {
@@ -2448,7 +2511,8 @@ export default function Staff({ C, isMobile }) {
                   </form>
                   {selectedDateRecord && (
                     <div style={{ marginTop: 6, color: C.gray, fontSize: 11 }}>
-                      Current: {selectedDateRecord.status} · {selectedDateRecord.source === "gps" ? "GPS" : "Manual"}
+                      Current: {selectedDateRecord.checkOutMissed ? "Checkout missed" : selectedDateRecord.status}
+                      {" · "}{selectedDateRecord.source === "gps" ? "GPS" : "Manual"}
                     </div>
                   )}
 
