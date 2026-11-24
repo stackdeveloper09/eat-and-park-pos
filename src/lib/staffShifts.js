@@ -1,5 +1,20 @@
 export const INDIA_TIME_ZONE = "Asia/Kolkata";
 
+export function getTodayIST(value = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: INDIA_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(value);
+  const result = Object.fromEntries(parts.map(({ type, value: part }) => [type, part]));
+  return `${result.year}-${result.month}-${result.day}`;
+}
+
+function utcDateKey(value) {
+  return `${value.getUTCFullYear()}-${String(value.getUTCMonth() + 1).padStart(2, "0")}-${String(value.getUTCDate()).padStart(2, "0")}`;
+}
+
 export const DEFAULT_SHIFTS = Object.freeze({
   morning: Object.freeze({
     name: "Morning",
@@ -65,12 +80,12 @@ function timestampForIndia(dateKey, time) {
   if (minute == null) return null;
   const [year, month, day] = dateKey.split("-").map(Number);
   const date = new Date(Date.UTC(year, month - 1, day));
-  if (date.toISOString().slice(0, 10) !== dateKey) return null;
+  if (utcDateKey(date) !== dateKey) return null;
   return Date.UTC(year, month - 1, day, Math.floor(minute / 60), minute % 60) - (5 * 60 + 30) * 60_000;
 }
 
 export function indiaDateKey(value = new Date()) {
-  return partsInIndia(value)?.date || "";
+  return getTodayIST(value);
 }
 
 export function indiaMonthKey(value = new Date()) {
@@ -139,7 +154,6 @@ export function autoStatus(checkIn, shift, checkOut = null) {
     status: lateMinutes >= halfDayLateMinutes ? "Half Day" : "Present",
     late: lateMinutes >= lateGraceMinutes && lateMinutes > 0,
     lateMinutes,
-    incomplete: !hasCheckOut,
     earlyLeave,
   };
 }
@@ -158,7 +172,7 @@ export function calculateWorkedMinutes(checkIn, checkOut, shift) {
   const date = new Date(`${firstDate}T00:00:00Z`);
   const finalDate = new Date(`${lastDate}T00:00:00Z`);
   while (date <= finalDate) {
-    const dateKey = date.toISOString().slice(0, 10);
+    const dateKey = utcDateKey(date);
     const breakStart = timestampForIndia(dateKey, shift.breakStart);
     let breakEnd = timestampForIndia(dateKey, shift.breakEnd);
     if (breakStart != null && breakEnd != null) {

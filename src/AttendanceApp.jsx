@@ -9,7 +9,7 @@ import {
   signOut,
   updatePassword,
 } from "firebase/auth";
-import { addDoc, collection, doc, getDoc, getDocFromServer, getDocs, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
+import { addDoc, collection, doc, getDoc, getDocs, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
 import { auth } from "./firebase";
 import { db } from "./firebase";
 import {
@@ -25,12 +25,13 @@ import {
 } from "./lib/staffPayroll";
 import {
   autoStatus,
-  calculateWorkedMinutes,
   DEFAULT_SHIFTS,
   formatIndiaTime,
-  indiaDateKey,
+  getTodayIST,
   isShiftRestTime,
 } from "./lib/staffShifts";
+import { autoCloseOpenRecords } from "./lib/attendanceAutoClose";
+import { fetchFirebaseServerTime, getIndiaMinutes } from "./lib/attendanceServerTime";
 import "./AttendanceApp.css";
 import { STAFF_ROLES } from "./lib/roles";
 import { ATTENDANCE_STRINGS } from "./lib/attendanceStrings";
@@ -67,80 +68,35 @@ function logFirestoreAccessError(label, error, expectedUid) {
   });
 }
 
+function clearStaleAttendanceStorage(todayIST) {
+  try {
+    [localStorage, sessionStorage].forEach((storage) => {
+      Object.keys(storage).forEach((key) => {
+        if (key.toLowerCase().includes("attendance")
+          && key !== "attendance_language"
+          && /\d{4}-\d{2}-\d{2}/.test(key)
+          && !key.includes(todayIST)) {
+          storage.removeItem(key);
+        }
+      });
+    });
+  } catch (error) {
+    console.log("Attendance stale storage cleanup skipped", error);
+  }
+}
+
 const ATTENDANCE_START_MINUTES = 9 * 60 + 30;
+const ATTENDANCE_END_MINUTES = 22 * 60;
 const MAX_GEOFENCE_TOLERANCE_METERS = 100;
-const MAX_ACCEPTED_GPS_ACCURACY_METERS = 200;
-
-async function fetchFirebaseServerTime(uid) {
-  const clockRef = doc(db, "attendanceServerTime", uid);
-  await setDoc(clockRef, { serverTime: serverTimestamp() });
-  const snapshot = await getDocFromServer(clockRef);
-  const timestamp = timestampMillis(snapshot.data()?.serverTime);
-  if (!snapshot.exists() || !timestamp) throw new Error("Firebase server time verify nahi ho saka.");
-  return timestamp;
-}
-
-function getIndiaMinutes(timestamp) {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Asia/Kolkata",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(new Date(timestamp));
-  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
-  return Number(values.hour) * 60 + Number(values.minute);
-}
+const PENDING_APPROVAL_ACCURACY_METERS = 300;
 
 function geolocationErrorMessage(error) {
-  if (error?.code === 1) return "Location permission denied. Browser settings mein location allow karein.";
-  if (error?.code === 2) return "GPS location unavailable hai. Device ki location settings check karein.";
-  if (error?.code === 3) return "GPS request timeout ho gayi. Dobara try karein.";
+  if (error?.code === 1) return "Location permission denied.";
+  if (error?.code === 2) return "GPS location unavailable.";
+  if (error?.code === 3) return "GPS request timeout.";
+  if (error?.message === "secure-context") return "GPS ke liye HTTPS connection zaroori hai.";
+  if (error?.message === "geolocation-unavailable") return "Is browser mein geolocation available nahi hai.";
   return error?.message || "Location nahi mil saki. GPS settings check karke dobara try karein.";
-}
-
-function getBestGeolocationPosition() {
-  return new Promise((resolve, reject) => {
-    if (typeof window !== "undefined" && !window.isSecureContext) {
-      reject(new Error("GPS ke liye secure HTTPS connection zaroori hai."));
-      return;
-    }
-    if (!navigator.geolocation) {
-      reject(new Error("Is browser mein geolocation available nahi hai."));
-      return;
-    }
-
-    let bestPosition = null;
-    let bestAccuracy = Number.POSITIVE_INFINITY;
-    let lastError = null;
-    let attempts = 0;
-    const requestPosition = () => navigator.geolocation.getCurrentPosition(
-      (position) => {
-        attempts += 1;
-        const accuracy = Number(position.coords.accuracy);
-        if (Number.isFinite(accuracy) && accuracy < bestAccuracy) {
-          bestPosition = position;
-          bestAccuracy = accuracy;
-        }
-        if (attempts < 3) requestPosition();
-        else if (bestPosition) resolve(bestPosition);
-        else reject(new Error("GPS ne valid location reading nahi di."));
-      },
-      (error) => {
-        lastError = error;
-        if (error.code === 1) {
-          reject(error);
-          return;
-        }
-        attempts += 1;
-        if (attempts >= 3) {
-          if (bestPosition) resolve(bestPosition);
-          else reject(lastError);
-        } else requestPosition();
-      },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
-    );
-    requestPosition();
-  });
 }
 
 function buildPayslipPdf(items) {
@@ -200,7 +156,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
   const [markingAllNotifications, setMarkingAllNotifications] = useState(false);
   const [notificationActionError, setNotificationActionError] = useState("");
   const notificationReadLock = useRef(false);
-  const [selectedMonth, setSelectedMonth] = useState(indiaDateKey().slice(0, 7));
+  const [selectedMonthDraft, setSelectedMonth] = useState("");
   const [language, setLanguage] = useState(() => {
     try { return localStorage.getItem("attendance_language") === "hi" ? "hi" : "en"; } catch { return "en"; }
   });
@@ -230,8 +186,8 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
   const [advanceReason, setAdvanceReason] = useState("");
   const [submittingAdvance, setSubmittingAdvance] = useState(false);
   const [leaveForm, setLeaveForm] = useState({
-    fromDate: indiaDateKey(),
-    toDate: indiaDateKey(),
+    fromDate: "",
+    toDate: "",
     type: "Paid Leave",
     reason: "",
   });
@@ -244,6 +200,15 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
   const [notice, setNotice] = useState("");
   const [optimisticAttendance, setOptimisticAttendance] = useState(null);
   const [checkingLocation, setCheckingLocation] = useState(false);
+  const [gpsWarmupState, setGpsWarmupState] = useState("searching");
+  const [gpsAccuracy, setGpsAccuracy] = useState(null);
+  const [gpsWaitSeconds, setGpsWaitSeconds] = useState(0);
+  const [gpsPermissionDenied, setGpsPermissionDenied] = useState(false);
+  const [pendingAttendanceDraft, setPendingAttendanceDraft] = useState(null);
+  const bestGpsPositionRef = useRef(null);
+  const gpsWatchIdRef = useRef(null);
+  const gpsWaiterRef = useRef(null);
+  const [gpsRetryKey, setGpsRetryKey] = useState(0);
   const [attendanceRadius, setAttendanceRadius] = useState(ATTENDANCE_RADIUS_METERS);
   const [gpsSettingsLoading, setGpsSettingsLoading] = useState(true);
   const [gpsSettingsError, setGpsSettingsError] = useState("");
@@ -252,10 +217,15 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
   const [serverTimeError, setServerTimeError] = useState("");
   const serverTimeAnchor = useRef(null);
   const displayNow = new Date(serverNow || now);
-  const today = indiaDateKey(displayNow);
+  const today = getTodayIST(displayNow);
+  const selectedMonth = selectedMonthDraft || today.slice(0, 7);
   const todayAttendanceLoaded = todayAttendanceLoadedDate === today;
   const serverTimeReady = serverNow != null;
-  const attendanceTimeAllowed = serverNow != null && getIndiaMinutes(serverNow) >= ATTENDANCE_START_MINUTES;
+  const serverIndiaMinutes = serverNow == null ? null : getIndiaMinutes(serverNow);
+  const attendanceTimeAllowed = serverIndiaMinutes != null
+    && serverIndiaMinutes >= ATTENDANCE_START_MINUTES
+    && serverIndiaMinutes < ATTENDANCE_END_MINUTES;
+  const attendanceTimeClosed = serverIndiaMinutes != null && serverIndiaMinutes >= ATTENDANCE_END_MINUTES;
   const staffUid = user?.uid || null;
   const suppliedName = currentUserProp?.uid && currentUserProp.uid === staffUid ? currentUserProp.name : "";
   const displayName = staff?.name || suppliedName || user?.email?.split("@")[0] || "Staff";
@@ -267,7 +237,6 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
     Absent: t("absent"),
     "Paid Leave": t("paidLeave"),
     "Unpaid Leave": t("unpaidLeave"),
-    checkout_missed: "Checkout missed",
   })[status] || status;
   const localizeRequestStatus = (status) => ({
     pending: t("pendingStatus"),
@@ -326,7 +295,10 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
   const todayAttendance = optimisticAttendance?.date === today
     ? optimisticAttendance
     : todayAttendanceRecord?.date === today ? todayAttendanceRecord : null;
-  const todayAttendanceComplete = Boolean(todayAttendance?.checkInAt && todayAttendance?.checkOutAt);
+  const todayAttendanceMarked = Boolean(
+    todayAttendance?.checkInAt
+    && String(todayAttendance.status || "").toLowerCase() !== "pending_approval",
+  );
   const adminAttendanceBlocksCheckIn = Boolean(
     todayAttendance
     && !todayAttendance.checkInAt
@@ -336,11 +308,15 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
   );
   const buttonShown = !todayAttendanceLoaded
     ? "loading"
-    : todayAttendanceComplete
-      ? "complete"
+    : todayAttendanceMarked
+      ? "present"
       : adminAttendanceBlocksCheckIn
         ? "admin-override"
-        : todayAttendance?.checkInAt ? "checkout" : "checkin";
+        : todayAttendance?.checkInAt
+          ? String(todayAttendance.status || "").toLowerCase() === "pending_approval" ? "pending" : "present"
+          : attendanceTimeClosed ? "closed"
+            : serverIndiaMinutes != null && serverIndiaMinutes < ATTENDANCE_START_MINUTES ? "too-early"
+              : "checkin";
   useEffect(() => {
     console.log("attendance state", { todayIST: today, todayRecord: todayAttendance, buttonShown });
   }, [today, todayAttendance, buttonShown]);
@@ -362,12 +338,12 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
       }));
   });
   const attendanceSummary = [...attendanceByDate.values()].reduce((summary, record) => {
-    const status = String(record.status || (record.action === "present" ? "Present" : ""));
-    if (status === "Present") summary.present += 1;
-    else if (status === "Half Day") summary.halfDay += 1;
-    else if (status === "Absent") summary.absent += 1;
-    else if (status === "Paid Leave" || status === "Unpaid Leave") summary.leave += 1;
-    if (Number(record.lateMinutes || 0) > 0) summary.late += 1;
+    const status = String(record.status || (record.action === "present" ? "Present" : "")).toLowerCase();
+    if (status === "present" || status === "late") summary.present += 1;
+    else if (["half day", "half-day", "half_day"].includes(status)) summary.halfDay += 1;
+    else if (status === "absent") summary.absent += 1;
+    else if (["paid leave", "unpaid leave", "leave"].includes(status)) summary.leave += 1;
+    if (record.late === true || status === "late" || Number(record.lateMinutes || 0) > 0) summary.late += 1;
     return summary;
   }, { present: 0, halfDay: 0, absent: 0, leave: 0, late: 0 });
   const selectedPresentDays = selectedMonthRecords.reduce((total, record) => (
@@ -550,7 +526,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
       const anchor = serverTimeAnchor.current;
       if (anchor) setServerNow(anchor.timestamp + performance.now() - anchor.monotonicTime);
     }, 1000);
-    const refreshTimer = window.setInterval(() => void synchronizeServerTime(), 60000);
+    const refreshTimer = window.setInterval(() => void synchronizeServerTime(), 30000);
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") void synchronizeServerTime();
     };
@@ -566,6 +542,60 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
       setServerNow(null);
     };
   }, [staffUid, staff?.mustChangePassword]);
+
+  useEffect(() => {
+    if (!selectedMonthDraft) setSelectedMonth(today.slice(0, 7));
+    setLeaveForm((form) => ({
+      ...form,
+      fromDate: form.fromDate || today,
+      toDate: form.toDate || today,
+    }));
+    setOptimisticAttendance((current) => current?.date === today ? current : null);
+    setTodayAttendanceRecord((current) => current?.date === today ? current : null);
+    setTodayAttendanceLoadedDate("");
+    setTodayAttendanceLoadError("");
+    setSelectedAttendanceDetail(null);
+    clearStaleAttendanceStorage(today);
+  }, [selectedMonthDraft, today]);
+
+  useEffect(() => {
+    if (!staffUid || staff?.mustChangePassword === true || todayAttendance?.checkInAt) return undefined;
+    if (typeof window !== "undefined" && !window.isSecureContext) {
+      setGpsWarmupState("searching");
+      return undefined;
+    }
+    if (!navigator.geolocation) {
+      setGpsWarmupState("searching");
+      return undefined;
+    }
+
+    let active = true;
+    let watchErrorReported = false;
+    const watchId = navigator.geolocation.watchPosition((position) => {
+      if (!active) return;
+      const accuracy = Number(position.coords.accuracy);
+      if (Number.isFinite(accuracy)
+        && (!bestGpsPositionRef.current || accuracy < bestGpsPositionRef.current.accuracy)) {
+        bestGpsPositionRef.current = { position, accuracy, receivedAt: performance.now() };
+        setGpsAccuracy(accuracy);
+        setGpsWarmupState("ready");
+      }
+      gpsWaiterRef.current?.onPosition(position);
+    }, (error) => {
+      if (!active) return;
+      if (error.code === 1) setGpsPermissionDenied(true);
+      if (!watchErrorReported) {
+        watchErrorReported = true;
+        gpsWaiterRef.current?.onError(error);
+      }
+    }, { enableHighAccuracy: true, maximumAge: 15000, timeout: 20000 });
+    gpsWatchIdRef.current = watchId;
+    return () => {
+      active = false;
+      navigator.geolocation.clearWatch(watchId);
+      if (gpsWatchIdRef.current === watchId) gpsWatchIdRef.current = null;
+    };
+  }, [gpsRetryKey, staffUid, staff?.mustChangePassword, today, todayAttendance?.checkInAt]);
 
   useEffect(() => {
     if (
@@ -585,15 +615,9 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
     setTodayAttendanceRecord(null);
     setTodayAttendanceLoadedDate("");
     setTodayAttendanceLoadError("");
-    const todayQuery = query(
-      collection(db, "attendance"),
-      where("staffId", "==", staffUid),
-      where("date", "==", today),
-    );
-    return onSnapshot(todayQuery, (snapshot) => {
-      const expectedId = `${staffUid}_${today}`;
-      const entry = snapshot.docs.find((record) => record.id === expectedId) || snapshot.docs[0];
-      setTodayAttendanceRecord(entry ? { id: entry.id, ...entry.data() } : null);
+    const todayRef = doc(db, "attendance", `${staffUid}_${today}`);
+    return onSnapshot(todayRef, (snapshot) => {
+      setTodayAttendanceRecord(snapshot.exists() ? { id: snapshot.id, ...snapshot.data() } : null);
       setTodayAttendanceLoadedDate(today);
       setTodayAttendanceLoadError("");
     }, (error) => {
@@ -805,24 +829,36 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
     setProfileError(`Restaurant settings load nahi hui: ${getErrorMessage(error)}`);
   }), []);
 
-  const missedCheckoutRef = useRef(new Set());
   useEffect(() => {
-    if (!staffUid || !serverTimeReady || !dataLoaded.attendance) return;
-    attendanceRecords.forEach((record) => {
-      if (!record.date || record.date >= today || !record.checkInAt || record.checkOutAt) return;
-      if (record.checkOutMissed === true && record.status === "checkout_missed") return;
-      const key = `${staffUid}_${record.date}`;
-      if (missedCheckoutRef.current.has(key)) return;
-      missedCheckoutRef.current.add(key);
-      updateDoc(doc(db, "attendance", record.id || key), {
-        checkOutMissed: true,
-        status: "checkout_missed",
-      }).catch((error) => {
-        missedCheckoutRef.current.delete(key);
-        console.error("Missed checkout flag save failed:", error);
-      });
-    });
-  }, [attendanceRecords, dataLoaded.attendance, serverTimeReady, staffUid, today]);
+    if (!staffUid || !staff || !serverTimeReady || !dataLoaded.attendance) return undefined;
+    let active = true;
+    let running = false;
+    const runAutoClose = async () => {
+      if (running) return;
+      running = true;
+      try {
+        await autoCloseOpenRecords({ staffId: staffUid, role: staff.role, shifts });
+      } catch (error) {
+        console.error("Attendance auto-checkout backup failed:", error);
+        if (active) setProfileError(`Auto check-out sync nahi hua: ${getErrorMessage(error)}`);
+      } finally {
+        running = false;
+      }
+    };
+    void runAutoClose();
+    const timer = window.setInterval(() => void runAutoClose(), 60000);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") void runAutoClose();
+    };
+    window.addEventListener("focus", runAutoClose);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", runAutoClose);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [dataLoaded.attendance, serverTimeReady, staff, staffUid, shifts, today]);
 
   const downloadPayslip = async () => {
     const money = (v) => `Rs. ${Number(v || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -915,196 +951,276 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
     }
   };
 
-  const markAttendance = async () => {
-    if (!staffUid || checkingLocation) return;
+  const getAttendanceContext = async () => {
+    const checkInAt = await fetchFirebaseServerTime(staffUid);
+    serverTimeAnchor.current = { timestamp: checkInAt, monotonicTime: performance.now() };
+    setServerNow(checkInAt);
+    setServerTimeError("");
+    const minutes = getIndiaMinutes(checkInAt);
+    if (minutes < ATTENDANCE_START_MINUTES) {
+      throw new Error("Attendance 9:30 AM ke baad hi lag sakti hai");
+    }
+    if (minutes >= ATTENDANCE_END_MINUTES) {
+      throw new Error("Aaj ki attendance band ho chuki hai. Kal subah 9:30 baje se lagegi.");
+    }
+
+    const date = getTodayIST(new Date(checkInAt));
+    const currentDaySnapshot = await getDoc(doc(db, "attendance", `${staffUid}_${date}`));
+    const existing = currentDaySnapshot.exists() ? currentDaySnapshot.data() : null;
+    if (existing?.checkInAt) throw new Error("Aaj ki attendance already lag chuki hai");
+    const existingStatus = String(existing?.status || "").trim().toLowerCase();
+    const adminMarked = ["admin", "admin_approved"].includes(String(existing?.markedBy || "").toLowerCase())
+      || (existing?.source === "manual" && String(existing?.markedBy || "").toLowerCase() !== "staff");
+    if (adminMarked && ["present", "leave", "paid leave"].includes(existingStatus)) {
+      throw new Error("Admin ne aaj ki attendance set ki hai");
+    }
+    return { checkInAt, date, existing };
+  };
+
+  const waitForGpsPosition = async () => {
+    const cached = bestGpsPositionRef.current;
+    if (cached && performance.now() - cached.receivedAt < 60000) return cached.position;
+    if (typeof window !== "undefined" && !window.isSecureContext) {
+      throw new Error("secure-context");
+    }
+    if (!navigator.geolocation) throw new Error("geolocation-unavailable");
+
+    setGpsWaitSeconds(0);
+    const startedAt = performance.now();
+    const progressTimer = window.setInterval(
+      () => setGpsWaitSeconds(Math.floor((performance.now() - startedAt) / 1000)),
+      1000,
+    );
+    try {
+      return await new Promise((resolve, reject) => {
+        let lastError = null;
+        let settled = false;
+        const finish = (callback, value) => {
+          if (settled) return;
+          settled = true;
+          window.clearTimeout(timeout);
+          gpsWaiterRef.current = null;
+          callback(value);
+        };
+        const acceptPosition = (position) => {
+          const accuracy = Number(position.coords.accuracy);
+          if (Number.isFinite(accuracy)
+            && (!bestGpsPositionRef.current || accuracy < bestGpsPositionRef.current.accuracy)) {
+            bestGpsPositionRef.current = { position, accuracy, receivedAt: performance.now() };
+            setGpsAccuracy(accuracy);
+            setGpsWarmupState("ready");
+          }
+          finish(resolve, position);
+        };
+        const fail = (error) => {
+          lastError = error;
+          if (error?.code === 1) {
+            setGpsPermissionDenied(true);
+            finish(reject, error);
+          }
+        };
+        const timeout = window.setTimeout(
+          () => finish(reject, lastError || { code: 3 }),
+          10000,
+        );
+        gpsWaiterRef.current = { onPosition: acceptPosition, onError: fail };
+        navigator.geolocation.getCurrentPosition(
+          acceptPosition,
+          fail,
+          { enableHighAccuracy: false, maximumAge: 60000, timeout: 5000 },
+        );
+      });
+    } finally {
+      window.clearInterval(progressTimer);
+    }
+  };
+
+  const saveAttendanceRecord = async ({
+    context,
+    status = "present",
+    verified,
+    verifyReason = "",
+    position = null,
+    distance = null,
+    accuracy = null,
+    skipGeofence = false,
+  }) => {
+    const shiftId = staff?.shiftId || "";
+    const shift = shifts[shiftId];
+    const result = shift ? autoStatus(context.checkInAt, shift) : null;
+    const coords = position ? {
+      latitude: Number.parseFloat(position.coords.latitude),
+      longitude: Number.parseFloat(position.coords.longitude),
+      accuracy: Number.parseFloat(position.coords.accuracy),
+    } : null;
+    const record = {
+      staffId: staffUid,
+      date: context.date,
+      status,
+      source: skipGeofence ? "manual" : "gps",
+      markedBy: "staff",
+      verified,
+      checkInAt: context.checkInAt,
+      late: result?.late ?? false,
+      lateMinutes: result?.lateMinutes ?? 0,
+      earlyLeave: false,
+      ...(verifyReason ? { verifyReason } : {}),
+      ...(coords ? { lastKnownCoords: { ...coords, ...(Number.isFinite(distance) ? { distanceMeters: distance } : {}) } } : {}),
+      ...(Number.isFinite(distance) ? { distanceMeters: distance } : {}),
+      ...(Number.isFinite(accuracy) ? { accuracyMeters: accuracy } : {}),
+      ...(shiftId && shift ? { shiftId, shiftName: shift.name } : {}),
+    };
+    await setDoc(doc(db, "attendance", `${staffUid}_${context.date}`), record);
+    setOptimisticAttendance(record);
+    setPendingAttendanceDraft(null);
+    setGpsPermissionDenied(false);
+    setNotice(status === "pending_approval"
+      ? "GPS verify nahi ho paya. Aapki attendance admin approval ke liye bhej di gayi hai."
+      : t("gpsCheckinSaved"));
+  };
+
+  const submitPendingAttendance = async () => {
+    if (!staffUid || checkingLocation || !pendingAttendanceDraft) return;
     setCheckingLocation(true);
     setAttendanceError("");
-    setNotice("");
     try {
-      const checkInAt = await fetchFirebaseServerTime(staffUid);
-      serverTimeAnchor.current = { timestamp: checkInAt, monotonicTime: performance.now() };
-      setServerNow(checkInAt);
-      setServerTimeError("");
-      if (getIndiaMinutes(checkInAt) < ATTENDANCE_START_MINUTES) {
-        throw new Error("Attendance 9:30 AM ke baad hi lag sakti hai");
-      }
-
-      const currentDate = indiaDateKey(new Date(checkInAt));
-      const currentDaySnapshot = await getDocs(query(
-        collection(db, "attendance"),
-        where("staffId", "==", staffUid),
-        where("date", "==", currentDate),
-      ));
-      const existingEntry = currentDaySnapshot.docs.find((entry) => entry.id === `${staffUid}_${currentDate}`)
-        || currentDaySnapshot.docs[0];
-      const existing = existingEntry?.data() || null;
-      if (existing?.checkInAt) {
-        setNotice("Aaj ki attendance already lag chuki hai");
-        return;
-      }
-      const existingStatus = String(existing?.status || "").trim().toLowerCase();
-      const adminMarked = String(existing?.markedBy || "").toLowerCase() === "admin"
-        || (existing?.source === "manual" && String(existing?.markedBy || "").toLowerCase() !== "staff");
-      if (adminMarked && ["present", "leave", "paid leave"].includes(existingStatus)) {
-        setNotice("Admin ne aaj ki attendance set ki hai");
-        return;
-      }
-
-      const shiftId = staff?.shiftId || "";
-      const shift = shifts[shiftId];
-      const result = shift ? autoStatus(checkInAt, shift) : null;
-      let distance = null;
-      let accuracy = null;
-      const skipGeofence = staff?.skipGeofence === true;
-      if (!skipGeofence) {
-        const settingsSnapshot = await getDoc(doc(db, "settings", "restaurant"));
-        const settings = settingsSnapshot.exists() ? settingsSnapshot.data() : {
-          lat: RESTAURANT_LOCATION.latitude,
-          lng: RESTAURANT_LOCATION.longitude,
-          radius: ATTENDANCE_RADIUS_METERS,
-        };
-        const restaurantLat = Number.parseFloat(settings.lat);
-        const restaurantLng = Number.parseFloat(settings.lng);
-        const radiusMeters = Number.parseFloat(settings.radius);
-        if (!Number.isFinite(restaurantLat) || restaurantLat < -90 || restaurantLat > 90
-          || !Number.isFinite(restaurantLng) || restaurantLng < -180 || restaurantLng > 180
-          || !Number.isFinite(radiusMeters) || radiusMeters <= 0 || radiusMeters > 10000) {
-          throw new Error("Restaurant GPS settings are invalid.");
-        }
-
-        const position = await getBestGeolocationPosition();
-        const userLat = Number.parseFloat(position.coords.latitude);
-        const userLng = Number.parseFloat(position.coords.longitude);
-        accuracy = Number.parseFloat(position.coords.accuracy);
-        distance = haversineDistanceMeters(userLat, userLng, restaurantLat, restaurantLng);
-        console.log("Attendance geofence check:", {
-          distanceMeters: distance,
-          accuracyMeters: accuracy,
-          radiusMeters,
-          restaurantLat,
-          restaurantLng,
-          userLat,
-          userLng,
-        });
-        if (!Number.isFinite(accuracy) || accuracy > MAX_ACCEPTED_GPS_ACCURACY_METERS) {
-          throw new Error("GPS signal weak, khuli jagah jaake dobara try karo");
-        }
-        const allowedDistance = radiusMeters + Math.min(accuracy, MAX_GEOFENCE_TOLERANCE_METERS);
-        if (!Number.isFinite(distance) || distance > allowedDistance) {
-          throw new Error(t("outOfRange"));
-        }
-      }
-
-      const record = {
-        staffId: staffUid,
-        date: currentDate,
-        status: result?.status || "Present",
-        source: skipGeofence ? "manual" : "gps",
-        markedBy: "staff",
-        ...(skipGeofence ? {} : {
-          distanceMeters: distance,
-          accuracyMeters: accuracy,
-        }),
-        checkInAt,
-        incomplete: result?.incomplete ?? true,
-        late: result?.late ?? false,
-        lateMinutes: result?.lateMinutes ?? 0,
-        earlyLeave: false,
-        ...(shiftId ? { shiftId, shiftName: shift.name } : {}),
-      };
-      await setDoc(doc(db, "attendance", `${staffUid}_${currentDate}`), record);
-      setOptimisticAttendance(record);
-      setNotice(result?.status === "Half Day" ? t("halfDayMarked") : t("gpsCheckinSaved"));
+      const context = await getAttendanceContext();
+      await saveAttendanceRecord({
+        context,
+        status: "pending_approval",
+        verified: false,
+        verifyReason: pendingAttendanceDraft.reason,
+        position: pendingAttendanceDraft.position,
+        distance: pendingAttendanceDraft.distance,
+        accuracy: pendingAttendanceDraft.accuracy,
+      });
     } catch (error) {
-      console.error("GPS attendance failed:", error);
-      if (error?.code === 1 || error?.code === 2 || error?.code === 3) {
-        setAttendanceError(geolocationErrorMessage(error));
-      } else if (error?.message === "Attendance 9:30 AM ke baad hi lag sakti hai"
-        || error?.message === "GPS signal weak, khuli jagah jaake dobara try karo"
-        || error?.message === t("outOfRange")) {
-        setAttendanceError(error.message);
-      } else {
-        setAttendanceError(`${t("attendanceFailed")} ${getErrorMessage(error)}`);
-      }
+      console.error("Pending attendance submit failed:", error);
+      setAttendanceError(getErrorMessage(error));
     } finally {
       setCheckingLocation(false);
     }
   };
 
-  const markCheckout = async () => {
-    if (!staffUid || checkingLocation || !todayAttendance?.checkInAt || todayAttendance?.checkOutAt) return;
-    if (todayAttendance.source === "manual" && todayAttendance.markedBy !== "staff") {
-      setNotice(t("manualOverride"));
-      return;
-    }
+  const markAttendance = async () => {
+    if (!staffUid || checkingLocation) return;
     setCheckingLocation(true);
     setAttendanceError("");
     setNotice("");
+    setGpsPermissionDenied(false);
     try {
-      let distance = null;
-      let accuracy = null;
-      if (staff?.skipGeofence !== true) {
-        const settingsSnapshot = await getDoc(doc(db, "settings", "restaurant"));
-        const settings = settingsSnapshot.exists() ? settingsSnapshot.data() : {
-          lat: RESTAURANT_LOCATION.latitude,
-          lng: RESTAURANT_LOCATION.longitude,
-          radius: ATTENDANCE_RADIUS_METERS,
-        };
-        const restaurantLat = Number.parseFloat(settings.lat);
-        const restaurantLng = Number.parseFloat(settings.lng);
-        const radiusMeters = Number.parseFloat(settings.radius);
-        if (!Number.isFinite(restaurantLat) || restaurantLat < -90 || restaurantLat > 90
-          || !Number.isFinite(restaurantLng) || restaurantLng < -180 || restaurantLng > 180
-          || !Number.isFinite(radiusMeters) || radiusMeters <= 0 || radiusMeters > 10000) {
-          throw new Error("Restaurant GPS settings are invalid.");
-        }
-        const position = await getBestGeolocationPosition();
-        const userLat = Number.parseFloat(position.coords.latitude);
-        const userLng = Number.parseFloat(position.coords.longitude);
-        accuracy = Number.parseFloat(position.coords.accuracy);
-        distance = haversineDistanceMeters(userLat, userLng, restaurantLat, restaurantLng);
-        console.log("Attendance checkout geofence check:", {
-          distanceMeters: distance,
-          accuracyMeters: accuracy,
-          radiusMeters,
-          restaurantLat,
-          restaurantLng,
-          userLat,
-          userLng,
-        });
-        if (!Number.isFinite(accuracy) || accuracy > MAX_ACCEPTED_GPS_ACCURACY_METERS) {
-          throw new Error("GPS signal weak, khuli jagah jaake dobara try karo");
-        }
-        if (!Number.isFinite(distance)
-          || distance > radiusMeters + Math.min(accuracy, MAX_GEOFENCE_TOLERANCE_METERS)) {
-          throw new Error(t("outOfRange"));
-        }
+      const context = await getAttendanceContext();
+      const skipGeofence = staff?.skipGeofence === true;
+      if (skipGeofence) {
+        await saveAttendanceRecord({ context, verified: true, skipGeofence: true });
+        return;
       }
 
-      const checkOutAt = await fetchFirebaseServerTime(staffUid);
-      serverTimeAnchor.current = { timestamp: checkOutAt, monotonicTime: performance.now() };
-      setServerNow(checkOutAt);
-      const shift = shifts[todayAttendance.shiftId] || shifts.staff?.[todayAttendance.shiftId];
-      const result = shift ? autoStatus(todayAttendance.checkInAt, shift, checkOutAt) : null;
-      const updated = {
-        ...todayAttendance,
-        checkOutAt,
-        incomplete: false,
-        earlyLeave: result?.earlyLeave ?? false,
-        status: todayAttendance.source === "manual" ? todayAttendance.status : (result?.status || todayAttendance.status),
-        workedMinutes: shift ? calculateWorkedMinutes(todayAttendance.checkInAt, checkOutAt, shift) : null,
+      const settingsSnapshot = await getDoc(doc(db, "settings", "restaurant"));
+      const settings = settingsSnapshot.exists() ? settingsSnapshot.data() : {
+        lat: RESTAURANT_LOCATION.latitude,
+        lng: RESTAURANT_LOCATION.longitude,
+        radius: ATTENDANCE_RADIUS_METERS,
       };
-      await updateDoc(doc(db, "attendance", `${staffUid}_${todayAttendance.date || today}`), {
-        checkOutAt,
-        incomplete: false,
-        earlyLeave: result?.earlyLeave ?? false,
-        workedMinutes: shift ? calculateWorkedMinutes(todayAttendance.checkInAt, checkOutAt, shift) : null,
+      const restaurantLat = Number.parseFloat(settings.lat);
+      const restaurantLng = Number.parseFloat(settings.lng);
+      const radiusMeters = Number.parseFloat(settings.radius);
+      if (!Number.isFinite(restaurantLat) || restaurantLat < -90 || restaurantLat > 90
+        || !Number.isFinite(restaurantLng) || restaurantLng < -180 || restaurantLng > 180
+        || !Number.isFinite(radiusMeters) || radiusMeters <= 0 || radiusMeters > 10000) {
+        throw new Error("Restaurant GPS settings are invalid.");
+      }
+
+      let position;
+      try {
+        position = await waitForGpsPosition();
+      } catch (gpsError) {
+        const reason = geolocationErrorMessage(gpsError);
+        const reading = bestGpsPositionRef.current?.position || null;
+        const pending = {
+          reason,
+          position: reading,
+          accuracy: reading ? Number(reading.coords.accuracy) : null,
+        };
+        console.log({
+          distance: null,
+          accuracy: pending.accuracy,
+          source: "gps",
+          case: "pending",
+          todayIST: context.date,
+          recordDate: context.date,
+        });
+        if (gpsError?.code === 1 || gpsError?.message === "secure-context") {
+          setPendingAttendanceDraft(pending);
+          setGpsPermissionDenied(true);
+          setAttendanceError(reason);
+          return;
+        }
+        await saveAttendanceRecord({
+          context,
+          status: "pending_approval",
+          verified: false,
+          verifyReason: reason,
+          position: reading,
+          accuracy: pending.accuracy,
+        });
+        return;
+      }
+
+      const userLat = Number.parseFloat(position.coords.latitude);
+      const userLng = Number.parseFloat(position.coords.longitude);
+      const accuracy = Number.parseFloat(position.coords.accuracy);
+      let distance = null;
+      try {
+        distance = haversineDistanceMeters(userLat, userLng, restaurantLat, restaurantLng);
+      } catch (error) {
+        console.error("Attendance coordinates invalid:", error);
+      }
+
+      let geofenceCase = "pending";
+      if (Number.isFinite(distance) && Number.isFinite(accuracy)
+        && distance - accuracy > radiusMeters) {
+        geofenceCase = "outside";
+      } else if (!Number.isFinite(accuracy) || accuracy > PENDING_APPROVAL_ACCURACY_METERS) {
+        geofenceCase = "pending";
+      } else if (Number.isFinite(distance)
+        && distance <= radiusMeters + Math.min(accuracy, MAX_GEOFENCE_TOLERANCE_METERS)) {
+        geofenceCase = "inside";
+      }
+      console.log({
+        distance,
+        accuracy,
+        source: "gps",
+        case: geofenceCase,
+        todayIST: context.date,
+        recordDate: context.date,
+        restaurant: { latitude: restaurantLat, longitude: restaurantLng },
+        user: { latitude: userLat, longitude: userLng },
       });
-      setOptimisticAttendance(updated);
-      setNotice(result?.earlyLeave ? `${t("checkoutSaved")} ${t("earlyLeave")}.` : t("checkoutSaved"));
+
+      if (geofenceCase === "outside") {
+        setAttendanceError(`Aap restaurant se door ho (${Math.round(distance)} meter)`);
+      } else if (geofenceCase === "pending") {
+        await saveAttendanceRecord({
+          context,
+          status: "pending_approval",
+          verified: false,
+          verifyReason: !Number.isFinite(accuracy) || accuracy > PENDING_APPROVAL_ACCURACY_METERS
+            ? `GPS accuracy ${Number.isFinite(accuracy) ? Math.round(accuracy) : "unknown"}m`
+            : "GPS location boundary verify nahi ho saki",
+          position,
+          distance,
+          accuracy,
+        });
+      } else {
+        await saveAttendanceRecord({ context, verified: true, position, distance, accuracy });
+      }
     } catch (error) {
-      console.error("GPS check-out failed:", error);
-      setAttendanceError(error?.code ? geolocationErrorMessage(error) : `${t("checkoutFailed")} ${getErrorMessage(error)}`);
+      console.error("GPS attendance failed:", error);
+      if (error.message === "Firebase server time verify nahi ho saka.") {
+        setServerTimeError(error.message);
+      }
+      setAttendanceError(getErrorMessage(error));
     } finally {
       setCheckingLocation(false);
     }
@@ -1519,7 +1635,10 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
           <div className={`attendance-status-pill ${todayAttendance ? "is-marked" : ""}`}>
             <span>{todayAttendance ? "✓" : "•"}</span>
             {todayAttendance
-              ? `${todayAttendance.status || t("present")}${todayAttendance.incomplete ? ` · ${t("incompleteAttendance")}` : ""}${todayAttendance.earlyLeave ? ` · ${t("earlyLeave")}` : ""}`
+              ? String(todayAttendance.status || "").toLowerCase() === "pending_approval"
+                ? "Pending approval"
+                : todayAttendance.checkInAt ? `${t("present")} · In: ${formatIndiaTime(todayAttendance.checkInAt)}`
+                  : todayAttendance.status || t("present")
               : t("notCheckedIn")}
           </div>
           {todayAttendance?.late && (
@@ -1529,8 +1648,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
           )}
           {todayAttendance?.checkInAt && (
             <div style={{ marginTop: 8, color: "#9ba8ba", fontSize: 12 }}>
-              In: {formatIndiaTime(todayAttendance.checkInAt)}
-              {todayAttendance.checkOutAt ? ` · Out: ${formatIndiaTime(todayAttendance.checkOutAt)}` : ""}
+              Auto check-out at 10:00 PM
               {todayAttendance.shiftName ? ` · ${todayAttendance.shiftName}` : ""}
             </div>
           )}
@@ -1553,41 +1671,80 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
                 ? `Aaj ki attendance load nahi hui: ${todayAttendanceLoadError}`
                 : "Aaj ki attendance load ho rahi hai..."}
             </div>
-            : todayAttendanceComplete
-              ? <div className="attendance-success" role="status">Attendance complete for today</div>
+            : todayAttendance?.checkInAt
+              ? String(todayAttendance.status || "").toLowerCase() === "pending_approval"
+                ? <div className="attendance-gps-note" role="status">Attendance admin approval ke liye pending hai.</div>
+                : <div className="attendance-success" role="status">Aaj ki attendance lag chuki hai.</div>
               : adminAttendanceBlocksCheckIn
                 ? <div className="attendance-error" role="status">Admin ne aaj ki attendance set ki hai</div>
-                : <button
+                : attendanceTimeClosed
+                  ? <div className="attendance-error" role="status">Aaj ki attendance band ho chuki hai. Kal subah 9:30 baje se lagegi.</div>
+                  : !attendanceTimeAllowed && serverNow != null
+                    ? <div className="attendance-error" role="status">Attendance 9:30 AM ke baad hi lag sakti hai</div>
+                    : <button
                   type="button"
                   className="attendance-primary-button attendance-checkin-button"
-                  onClick={todayAttendance?.checkInAt ? markCheckout : markAttendance}
+                  onClick={markAttendance}
                   disabled={checkingLocation
-                    || (!todayAttendance?.checkInAt && (!attendanceTimeAllowed || Boolean(serverTimeError)))
+                    || !attendanceTimeAllowed
+                    || Boolean(serverTimeError)
                     || (staff?.skipGeofence !== true && (gpsSettingsLoading || Boolean(gpsSettingsError)))}
                 >
                   {gpsSettingsLoading && staff?.skipGeofence !== true
                     ? <>{t("gpsSettingsLoading")}</>
                     : checkingLocation
-                      ? <><span className="attendance-spinner" />{t("checkingLocation")}</>
-                      : todayAttendance?.checkInAt
-                        ? <>{t("checkoutGps")} <span>→</span></>
-                        : serverTimeError
-                          ? <>Server time verify nahi hua</>
-                          : serverNow == null
-                            ? <>Server time verify ho raha hai</>
-                            : !attendanceTimeAllowed
-                              ? <>Attendance 9:30 AM ke baad hi lag sakti hai</>
-                              : <>{t("checkinGps")} <span>→</span></>}
+                      ? <><span className="attendance-spinner" />GPS dhundh rahe hain... ({gpsWaitSeconds} sec)</>
+                      : serverTimeError
+                        ? <>Server time verify nahi hua</>
+                        : serverNow == null
+                          ? <>Server time verify ho raha hai</>
+                          : <>{t("checkinGps")} <span>→</span></>}
                 </button>}
-          {!todayAttendance?.checkInAt && !adminAttendanceBlocksCheckIn && todayAttendanceLoaded
-            && serverNow != null && !attendanceTimeAllowed && !serverTimeError
-            && <div className="attendance-error" role="status">Attendance 9:30 AM ke baad hi lag sakti hai</div>}
           {serverTimeError && !todayAttendance?.checkInAt && !adminAttendanceBlocksCheckIn
-            && <div className="attendance-error" role="alert">Server time verify nahi hua: {serverTimeError}</div>}
+            && <div className="attendance-error" role="alert">
+              Server time verify nahi hua: {serverTimeError}
+              <button type="button" onClick={async () => {
+                try {
+                  const timestamp = await fetchFirebaseServerTime(staffUid);
+                  serverTimeAnchor.current = { timestamp, monotonicTime: performance.now() };
+                  setServerNow(timestamp);
+                  setServerTimeError("");
+                } catch (error) {
+                  setServerTimeError(getErrorMessage(error));
+                }
+              }} style={{ marginLeft: 8 }}>Retry</button>
+            </div>}
+          {!todayAttendance?.checkInAt && !adminAttendanceBlocksCheckIn && todayAttendanceLoaded
+            && staff?.skipGeofence !== true
+            && <div className="attendance-gps-note" role="status">
+              {gpsWarmupState === "ready" && Number.isFinite(gpsAccuracy)
+                ? `GPS ready (±${Math.round(gpsAccuracy)}m)`
+                : "GPS dhundh rahe hain..."}
+            </div>}
+          {checkingLocation && <div className="attendance-gps-note" role="status">GPS dhundh rahe hain... ({gpsWaitSeconds} sec)</div>}
           <div className="attendance-gps-note">📍 {t("gpsRadiusNote")} {attendanceRadius} {language === "hi" ? "मीटर" : "meters"}.</div>
           {gpsSettingsError && <div className="attendance-error" role="alert">{gpsSettingsError}</div>}
+          {gpsPermissionDenied && (
+            <div className="attendance-error" role="alert">
+              Chrome &gt; Site settings &gt; Location &gt; Allow + Precise location on karein. {attendanceError}
+              <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                <button type="button" onClick={() => {
+                  setGpsPermissionDenied(false);
+                  setAttendanceError("");
+                  setGpsWarmupState("searching");
+                  setGpsRetryKey((key) => key + 1);
+                  void markAttendance();
+                }}>Dobara try karo</button>
+                {pendingAttendanceDraft && (
+                  <button type="button" disabled={checkingLocation} onClick={submitPendingAttendance}>
+                    Admin ko bhejo
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
           {notice && <div className="attendance-success" role="status">{notice}</div>}
-          {attendanceError && <div className="attendance-error" role="alert">{attendanceError}</div>}
+          {attendanceError && !gpsPermissionDenied && <div className="attendance-error" role="alert">{attendanceError}</div>}
         </section>}
 
         {activeSection === "profile" && <section style={{ ...panelStyle, marginTop: 16 }} aria-label="Staff profile">
@@ -1677,7 +1834,6 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
                   ? `${Math.floor(selectedAttendanceDetail.workedMinutes / 60)}h ${selectedAttendanceDetail.workedMinutes % 60}m`
                   : "—"}</span>
                 <span>{t("late")}: {selectedAttendanceDetail.lateMinutes || 0}m · {t("source")}: {selectedAttendanceDetail.source || "manual"}</span>
-                {selectedAttendanceDetail.incomplete && <span>{t("incomplete")}</span>}
                 {selectedAttendanceDetail.earlyLeave && <span>{t("earlyLeave")}</span>}
               </div>
             )}
@@ -1697,7 +1853,6 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
                     <strong style={{ display: "block", color: record.status?.toLowerCase() === "present" || record.action === "present" ? "#34d399" : "#fbbf24" }}>
                       {localizeAttendanceStatus(record.status || "Present")}
                     </strong>
-                    {record.incomplete && <small style={{ display: "block", color: "#FCA5A5" }}>Incomplete</small>}
                     {record.earlyLeave && <small style={{ display: "block", color: "#FBBF24" }}>Early leave</small>}
                   </div>
                 </div>

@@ -3,6 +3,7 @@ const admin = require("firebase-admin");
 const crypto = require("node:crypto");
 const nodemailer = require("nodemailer");
 const { defineSecret } = require("firebase-functions/params");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
 
 admin.initializeApp();
 
@@ -61,6 +62,58 @@ async function sendWelcomeEmail({ email, name, temporaryPassword, requiresPasswo
     text: message,
   });
 }
+
+function getTodayIST(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function attendanceCloseUpdates(record, checkOutAt) {
+  return {
+    checkOutAt,
+    autoCheckout: true,
+    incomplete: admin.firestore.FieldValue.delete(),
+    checkOutMissed: admin.firestore.FieldValue.delete(),
+    ...(String(record.status || "").toLowerCase() === "checkout_missed"
+      ? { status: "Present" }
+      : {}),
+  };
+}
+
+exports.autoCloseStaffAttendance = onSchedule({
+  schedule: "0 22 * * *",
+  timeZone: "Asia/Kolkata",
+  region: "asia-south1",
+}, async () => {
+  const today = getTodayIST();
+  const attendanceSnapshot = await admin.firestore()
+    .collection("attendance")
+    .where("date", "==", today)
+    .get();
+  const openRecords = attendanceSnapshot.docs.filter((entry) => {
+    const record = entry.data();
+    return record.checkInAt && !record.checkOutAt;
+  });
+  const checkOutAt = admin.firestore.Timestamp.fromMillis(
+    Date.UTC(...today.split("-").map(Number).map((part, index) => index === 1 ? part - 1 : part), 16, 30),
+  );
+
+  for (let offset = 0; offset < openRecords.length; offset += 400) {
+    const batch = admin.firestore().batch();
+    openRecords.slice(offset, offset + 400).forEach((entry) => {
+      batch.update(entry.ref, attendanceCloseUpdates(entry.data(), checkOutAt));
+    });
+    await batch.commit();
+  }
+
+  console.info("Auto-closed staff attendance", { date: today, count: openRecords.length });
+});
 
 exports.setStaffRole = functions.https.onCall(async (data, context) => {
   if (!context.auth) {

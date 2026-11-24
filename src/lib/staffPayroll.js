@@ -37,7 +37,8 @@ export function daysInMonth(monthKey) {
 export function isValidDateKey(dateKey) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey || "")) return false;
   const date = new Date(`${dateKey}T00:00:00Z`);
-  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === dateKey;
+  return !Number.isNaN(date.getTime())
+    && `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}` === dateKey;
 }
 
 export function dateRangeInclusive(fromDate, toDate) {
@@ -48,7 +49,7 @@ export function dateRangeInclusive(fromDate, toDate) {
   const end = new Date(`${toDate}T00:00:00Z`);
   const dates = [];
   while (current <= end) {
-    dates.push(current.toISOString().slice(0, 10));
+    dates.push(`${current.getUTCFullYear()}-${String(current.getUTCMonth() + 1).padStart(2, "0")}-${String(current.getUTCDate()).padStart(2, "0")}`);
     current.setUTCDate(current.getUTCDate() + 1);
   }
   return dates;
@@ -57,6 +58,7 @@ export function dateRangeInclusive(fromDate, toDate) {
 export function attendanceDayValue(status) {
   switch (String(status || "").trim().toLowerCase()) {
     case "present": return 1;
+    case "late": return 1;
     case "half day":
     case "half-day":
     case "half_day": return 0.5;

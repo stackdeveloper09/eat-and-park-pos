@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { beforeAll, afterAll, describe, test } from "vitest";
 import { initializeTestEnvironment, assertFails, assertSucceeds } from "@firebase/rules-unit-testing";
-import { doc, getDoc, setDoc, updateDoc, addDoc, deleteDoc, collection, getDocs, query, serverTimestamp, where } from "firebase/firestore";
+import { doc, getDoc, setDoc, updateDoc, addDoc, deleteDoc, deleteField, collection, getDocs, query, serverTimestamp, where } from "firebase/firestore";
 
 let env;
 const as = (uid) => env.authenticatedContext(uid).firestore();
@@ -33,6 +33,10 @@ beforeAll(async () => {
     await setDoc(doc(db, "staff/d1"), { role: "delivery" });
     await setDoc(doc(db, "staff/c1"), { role: "cashier" });
     await setDoc(doc(db, "staff/ch1"), { role: "chef" });
+    await setDoc(doc(db, "staff/w2"), { role: "waiter", active: true });
+    await setDoc(doc(db, "staff/w3"), { role: "waiter", active: true });
+    await setDoc(doc(db, "staff/w4"), { role: "waiter", active: true });
+    await setDoc(doc(db, "staff/wskip"), { name: "GPS Skip", role: "waiter", monthlySalary: 10000, active: true, skipGeofence: false });
     await setDoc(doc(db, "settings/privatePins"), { pin: "x" });
     await setDoc(doc(db, "settings/menu"), { items: [] });
     await setDoc(doc(db, "orders/paid1"), { paid: true, status: "served", finalTotal: 100, createdBy: "c1" });
@@ -87,7 +91,7 @@ describe("other collections", () => {
     }));
     await assertSucceeds(addDoc(collection(as("w1"), "staffAttendance"), {
       uid: "w1", name: "Waiter", role: "waiter", action: "present",
-      at: Date.now(), date: "2020-11-21", distanceMeters: 120,
+      at: Date.now(), date: todayIndiaKey(), distanceMeters: 120,
     }));
     await assertSucceeds(setDoc(doc(as("a1"), "settings/restaurant"), {
       lat: 28.6139, lng: 77.209, radius: 100,
@@ -113,12 +117,15 @@ describe("other collections", () => {
       status: "Paid Leave",
     }));
   });
-  test("admin manual attendance rejects unsupported status and wrong source", async () => {
-    await assertFails(setDoc(doc(as("a1"), "attendance/w1_2026-11-22"), {
+  test("admin manual attendance allows Late but rejects unsupported status and source", async () => {
+    await assertSucceeds(setDoc(doc(as("a1"), "attendance/w1_2026-11-22"), {
       staffId: "w1", date: "2026-11-22", status: "Late", markedBy: "Admin", source: "manual",
     }));
     await assertFails(setDoc(doc(as("a1"), "attendance/w1_2026-11-23"), {
-      staffId: "w1", date: "2026-11-23", status: "Present", markedBy: "Admin", source: "gps",
+      staffId: "w1", date: "2026-11-23", status: "Holiday", markedBy: "Admin", source: "manual",
+    }));
+    await assertFails(setDoc(doc(as("a1"), "attendance/w1_2026-11-24"), {
+      staffId: "w1", date: "2026-11-24", status: "Present", markedBy: "Admin", source: "checkout",
     }));
   });
   test("waiter cannot manually mark attendance", () => assertFails(addDoc(collection(as("w1"), "attendance"), {
@@ -405,107 +412,88 @@ describe("other collections", () => {
     await assertFails(getDocs(query(collection(waiterDb, "leaveRequests"), where("staffId", "==", "c1"))));
     await assertFails(getDocs(query(collection(waiterDb, "notifications"), where("userId", "==", "c1"))));
   });
-  test("staff can mark attendance only for self and within accuracy-adjusted radius", async () => {
-    const attendanceRef = doc(as("w1"), "attendance/w1_2020-11-21");
+  test("staff can create only today's canonical self attendance", async () => {
+    const today = todayIndiaKey();
+    const attendanceRef = doc(as("w1"), `attendance/w1_${today}`);
     await assertSucceeds(setDoc(attendanceRef, {
-      staffId: "w1", date: "2020-11-21", status: "Present", source: "gps", markedBy: "staff",
-      distanceMeters: 80, accuracyMeters: 25, checkInAt: Date.now() - 60000, shiftId: "morning",
-      shiftName: "Morning", late: false, lateMinutes: 0, incomplete: true, earlyLeave: false,
-    }));
-    await assertSucceeds(updateDoc(attendanceRef, {
-      checkOutAt: Date.now(), incomplete: false, earlyLeave: false,
-      workedMinutes: 600,
+      staffId: "w1", date: today, status: "present", source: "gps", markedBy: "staff",
+      distanceMeters: 80, accuracyMeters: 25, checkInAt: Date.now(), verified: true,
+      shiftId: "morning", shiftName: "Morning", late: false, lateMinutes: 0, earlyLeave: false,
     }));
     await assertSucceeds(getDocs(query(collection(as("w1"), "attendance"), where("staffId", "==", "w1"))));
     await assertFails(addDoc(collection(as("w1"), "attendance"), {
-      staffId: "a1", date: "2026-11-21", status: "Present", distanceMeters: 80,
+      staffId: "w1", date: today, status: "present", source: "gps", markedBy: "staff",
+      distanceMeters: 80, accuracyMeters: 25, checkInAt: Date.now(), verified: true,
     }));
-    await assertSucceeds(setDoc(doc(as("w1"), "attendance/w1_2020-11-22"), {
-      staffId: "w1", date: "2020-11-22", status: "Present", source: "gps", markedBy: "staff",
-      distanceMeters: 180, accuracyMeters: 100, checkInAt: Date.now(), incomplete: true,
+    await assertFails(updateDoc(attendanceRef, { late: true }));
+  });
+  test("GPS outside is rejected while unverifiable attendance is pending approval", async () => {
+    const today = todayIndiaKey();
+    await assertFails(setDoc(doc(as("c1"), `attendance/c1_${today}`), {
+      staffId: "c1", date: today, status: "present", source: "gps", markedBy: "staff",
+      distanceMeters: 201, accuracyMeters: 100, checkInAt: Date.now(), verified: true,
     }));
-    await assertFails(setDoc(doc(as("w1"), "attendance/w1_2020-11-23"), {
-      staffId: "w1", date: "2020-11-23", status: "Present", source: "gps", markedBy: "staff",
-      distanceMeters: 180, accuracyMeters: 201, checkInAt: Date.now(), incomplete: true,
+    await assertSucceeds(setDoc(doc(as("w2"), `attendance/w2_${today}`), {
+      staffId: "w2", date: today, status: "pending_approval", source: "gps", markedBy: "staff",
+      checkInAt: Date.now(), verified: false, verifyReason: "GPS accuracy 450m",
+      accuracyMeters: 450, lastKnownCoords: { latitude: 28.6, longitude: 77.2, accuracy: 450 },
     }));
-    await assertFails(setDoc(doc(as("w1"), "attendance/w1_2020-11-26"), {
-      staffId: "w1", date: "2020-11-26", status: "Present", source: "gps", markedBy: "staff",
-      distanceMeters: 201, accuracyMeters: 100, checkInAt: Date.now(), incomplete: true,
-    }));
-    await assertFails(addDoc(collection(as("w1"), "attendance"), {
-      staffId: "w1", date: "2026-11-21", status: "Present", distanceMeters: 120,
-    }));
-    await assertSucceeds(addDoc(collection(as("w1"), "staffAttendance"), {
-      uid: "w1", name: "Waiter", role: "waiter", action: "present",
-      at: Date.now(), date: "2020-11-21", distanceMeters: 80,
-    }));
-    await assertSucceeds(getDocs(query(collection(as("w1"), "staffAttendance"), where("uid", "==", "w1"))));
-    await assertFails(addDoc(collection(as("w1"), "staffAttendance"), {
-      uid: "w1", name: "Waiter", role: "waiter", action: "present",
-      at: Date.now(), date: "2020-11-21", distanceMeters: 120,
-    }));
-    await assertFails(addDoc(collection(as("w1"), "staffAttendance"), {
-      uid: "a1", name: "Admin", role: "admin", action: "present",
-      at: Date.now(), date: "2020-11-21", distanceMeters: 80,
+    await assertFails(setDoc(doc(as("w3"), `attendance/w3_${today}`), {
+      staffId: "w3", date: today, status: "present", source: "gps", markedBy: "staff",
+      distanceMeters: 80, accuracyMeters: 301, checkInAt: Date.now(), verified: true,
     }));
   });
   test("server clock writes are server timestamp only and skipGeofence is admin-controlled", async () => {
+    const today = todayIndiaKey();
     const clockRef = doc(as("w1"), "attendanceServerTime/w1");
     await assertSucceeds(setDoc(clockRef, { serverTime: serverTimestamp() }));
     await assertFails(updateDoc(clockRef, { serverTime: Date.now() }));
-    await assertSucceeds(updateDoc(doc(as("a1"), "staff/w1"), { skipGeofence: true }));
-    await assertSucceeds(setDoc(doc(as("w1"), "attendance/w1_2020-11-27"), {
-      staffId: "w1", date: "2020-11-27", status: "Present", source: "manual", markedBy: "staff",
-      checkInAt: Date.now(), incomplete: true,
+    await assertSucceeds(updateDoc(doc(as("a1"), "staff/wskip"), { skipGeofence: true }));
+    await assertSucceeds(setDoc(doc(as("wskip"), `attendance/wskip_${today}`), {
+      staffId: "wskip", date: today, status: "present", source: "manual", markedBy: "staff",
+      checkInAt: Date.now(), verified: true,
     }));
-    await assertFails(updateDoc(doc(as("w1"), "staff/w1"), { skipGeofence: false }));
-    await assertSucceeds(updateDoc(doc(as("a1"), "staff/w1"), { skipGeofence: false }));
+    await assertFails(updateDoc(doc(as("wskip"), "staff/wskip"), { skipGeofence: false }));
   });
-  test("staff can replace admin-set Absent but not admin-set Present", async () => {
-    await env.withSecurityRulesDisabled(async (ctx) => {
-      const db = ctx.firestore();
-      await setDoc(doc(db, "attendance/w1_2020-11-24"), {
-        staffId: "w1", date: "2020-11-24", status: "Absent", markedBy: "admin", source: "manual",
-      });
-      await setDoc(doc(db, "attendance/w1_2020-11-25"), {
-        staffId: "w1", date: "2020-11-25", status: "Present", markedBy: "admin", source: "manual",
-      });
-    });
-    const checkIn = {
-      staffId: "w1", status: "Present", source: "gps", markedBy: "staff",
-      distanceMeters: 80, accuracyMeters: 25, checkInAt: Date.now(), incomplete: true,
-    };
-    await assertSucceeds(setDoc(doc(as("w1"), "attendance/w1_2020-11-24"), {
-      ...checkIn, date: "2020-11-24",
-    }));
-    await assertFails(setDoc(doc(as("w1"), "attendance/w1_2020-11-25"), {
-      ...checkIn, date: "2020-11-25",
-    }));
-  });
-  test("staff can flag only an expired open check-in as checkout missed", async () => {
+  test("staff can replace admin-set absent but not present or leave", async () => {
     const today = todayIndiaKey();
     await env.withSecurityRulesDisabled(async (ctx) => {
       const db = ctx.firestore();
-      await setDoc(doc(db, "attendance/w1_2020-11-28"), {
-        staffId: "w1", date: "2020-11-28", status: "Present", markedBy: "staff",
-        source: "gps", checkInAt: Date.now(), incomplete: true,
+      await setDoc(doc(db, `attendance/w2_${today}`), {
+        staffId: "w2", date: today, status: "Absent", markedBy: "admin", source: "manual",
       });
-      await setDoc(doc(db, "attendance", `w1_${today}`), {
-        staffId: "w1", date: today, status: "Present", markedBy: "staff",
-        source: "gps", checkInAt: Date.now(), incomplete: true,
+      await setDoc(doc(db, `attendance/w3_${today}`), {
+        staffId: "w3", date: today, status: "Present", markedBy: "admin", source: "manual",
       });
     });
-    await assertSucceeds(updateDoc(doc(as("w1"), "attendance/w1_2020-11-28"), {
-      checkOutMissed: true, status: "checkout_missed",
-    }));
-    await assertFails(updateDoc(doc(as("w1"), "attendance", `w1_${today}`), {
-      checkOutMissed: true, status: "checkout_missed",
+    const checkIn = {
+      date: today, status: "present", source: "gps", markedBy: "staff",
+      distanceMeters: 80, accuracyMeters: 25, checkInAt: Date.now(), verified: true,
+    };
+    await assertSucceeds(setDoc(doc(as("w2"), `attendance/w2_${today}`), { ...checkIn, staffId: "w2" }));
+    await assertFails(setDoc(doc(as("w3"), `attendance/w3_${today}`), { ...checkIn, staffId: "w3" }));
+  });
+  test("staff auto-close writes only the record-date 22:00 checkout and legacy cleanup", async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await setDoc(doc(db, "attendance/w4_2020-11-28"), {
+        staffId: "w4", date: "2020-11-28", status: "checkout_missed", markedBy: "staff",
+        source: "gps", checkInAt: Date.now(), verified: true,
+        incomplete: true, checkOutMissed: true,
+      });
+    });
+    await assertSucceeds(updateDoc(doc(as("w4"), "attendance/w4_2020-11-28"), {
+      checkOutAt: new Date("2020-11-28T16:30:00.000Z"),
+      autoCheckout: true,
+      incomplete: deleteField(),
+      checkOutMissed: deleteField(),
+      status: "Present",
     }));
   });
-  test("staff cannot create attendance before the date's opening time", () => assertFails(
-    setDoc(doc(as("w1"), "attendance/w1_2999-01-01"), {
-      staffId: "w1", date: "2999-01-01", status: "Present", source: "gps", markedBy: "staff",
-      distanceMeters: 50, accuracyMeters: 10, checkInAt: Date.now(), incomplete: true,
+  test("staff cannot create attendance outside the current IST window", () => assertFails(
+    setDoc(doc(as("w4"), "attendance/w4_2999-01-01"), {
+      staffId: "w4", date: "2999-01-01", status: "present", source: "gps", markedBy: "staff",
+      distanceMeters: 50, accuracyMeters: 10, checkInAt: Date.now(), verified: true,
     }),
   ));
   test("legacy staffAttendance cannot bypass the opening-time rule", () => assertFails(
@@ -520,6 +508,6 @@ describe("other collections", () => {
   })));
   test("delivery staff can mark their own attendance", () => assertSucceeds(addDoc(collection(as("d1"), "staffAttendance"), {
     uid: "d1", name: "Rider", role: "delivery", action: "present",
-    at: Date.now(), date: "2020-11-21", distanceMeters: 80,
+    at: Date.now(), date: todayIndiaKey(), distanceMeters: 80,
   })));
 });

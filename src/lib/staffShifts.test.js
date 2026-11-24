@@ -19,17 +19,17 @@ describe("automatic shift attendance", () => {
       status,
       late,
       lateMinutes,
-      incomplete: true,
     });
+    expect(autoStatus(checkIn, DEFAULT_SHIFTS.morning)).not.toHaveProperty("incomplete");
   });
 
-  test("Late shift at 12:30 is Half Day and an open check-in is Incomplete", () => {
+  test("Late shift at 12:30 is Half Day without an incomplete flag", () => {
     expect(autoStatus("12:30", DEFAULT_SHIFTS.late)).toMatchObject({
       status: "Half Day",
       late: true,
       lateMinutes: 30,
-      incomplete: true,
     });
+    expect(autoStatus("12:30", DEFAULT_SHIFTS.late)).not.toHaveProperty("incomplete");
   });
 
   test("checkout after midnight is attributed to the check-in date and rest time is unpaid", () => {
@@ -38,9 +38,9 @@ describe("automatic shift attendance", () => {
     expect(indiaDateKey(checkOut)).toBe("2026-11-23");
     expect(autoStatus(checkIn, DEFAULT_SHIFTS.morning, checkOut)).toMatchObject({
       status: "Present",
-      incomplete: false,
       earlyLeave: false,
     });
+    expect(autoStatus(checkIn, DEFAULT_SHIFTS.morning, checkOut)).not.toHaveProperty("incomplete");
 
     const morningOut = attendanceTimestamp("2026-11-22", "22:00");
     expect(calculateWorkedMinutes(checkIn, morningOut, DEFAULT_SHIFTS.morning)).toBe(600);

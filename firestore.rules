@@ -23,17 +23,17 @@ service cloud.firestore {
         && (!('monthlySalary' in d)
           || (d.monthlySalary is number && d.monthlySalary >= 0 && d.monthlySalary <= 100000000));
     }
-    function attendanceAfterOpening(date) {
-      return request.time >= timestamp.value(date + 'T04:00:00Z');
-    }
-    function attendanceDayHasEnded(date) {
-      return request.time >= timestamp.value(date + 'T04:00:00Z')
-        + duration.value(14, 'h') + duration.value(30, 'm');
+    function attendanceInCurrentWindow(date) {
+      let dayStart = timestamp.value(date + 'T04:00:00Z');
+      return request.time >= dayStart
+        && request.time < dayStart + duration.value(12, 'h') + duration.value(30, 'm');
     }
     function validAttendanceStatus(data) {
-      return data.status in ['Present', 'Half Day', 'Absent', 'Paid Leave', 'checkout_missed']
-        && (!('checkOutMissed' in data) || data.checkOutMissed is bool)
-        && (data.status != 'checkout_missed' || data.get('checkOutMissed', false) == true);
+      return data.status in [
+        'Present', 'Half Day', 'Absent', 'Paid Leave', 'Late',
+        'present', 'half day', 'half-day', 'half_day', 'absent',
+        'paid leave', 'leave', 'pending_approval'
+      ];
     }
     function validSalaryCarryForward() {
       let d = request.resource.data;
@@ -72,28 +72,45 @@ service cloud.firestore {
       return id == d.staffId + '_' + d.date
         && d.keys().hasOnly([
           'staffId', 'date', 'status', 'distanceMeters', 'accuracyMeters', 'source',
-          'markedBy', 'checkInAt', 'checkOutAt', 'shiftId', 'shiftName',
+          'markedBy', 'checkInAt', 'shiftId', 'shiftName',
           'shiftStartTime', 'shiftEndTime', 'breakStart', 'breakEnd', 'late',
-          'lateMinutes', 'incomplete', 'earlyLeave', 'workedMinutes'
+          'lateMinutes', 'earlyLeave', 'workedMinutes',
+          'verified', 'verifyReason', 'lastKnownCoords'
         ])
-        && d.keys().hasAll(['staffId', 'date', 'status', 'source', 'markedBy', 'checkInAt'])
+        && d.keys().hasAll(['staffId', 'date', 'status', 'source', 'markedBy', 'checkInAt', 'verified'])
         && d.staffId == request.auth.uid
         && d.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
-        && attendanceAfterOpening(d.date)
-        && d.status in ['Present', 'Half Day']
+        && attendanceInCurrentWindow(d.date)
+        && d.status in ['present', 'pending_approval']
         && d.markedBy == 'staff'
         && d.checkInAt is number
-        && d.incomplete == true
+        && d.checkInAt >= request.time.toMillis() - 60000
+        && d.checkInAt <= request.time.toMillis() + 60000
         && !('checkOutAt' in d)
-        && (d.source == 'gps'
-          ? d.distanceMeters is number
-            && d.distanceMeters >= 0
-            && accuracy is number && accuracy >= 0 && accuracy <= 200
-            && d.distanceMeters <= restaurantRadius() + (accuracy > 100 ? 100 : accuracy)
-          : d.source == 'manual'
-            && staffProfile.get('skipGeofence', false) == true
-            && !('distanceMeters' in d)
-            && !('accuracyMeters' in d));
+        && (!('verifyReason' in d) || (d.verifyReason is string && d.verifyReason.size() <= 200))
+        && (!('lastKnownCoords' in d)
+          || (d.lastKnownCoords is map
+            && d.lastKnownCoords.keys().hasOnly(['latitude', 'longitude', 'accuracy', 'distanceMeters'])
+            && d.lastKnownCoords.latitude is number
+            && d.lastKnownCoords.latitude >= -90 && d.lastKnownCoords.latitude <= 90
+            && d.lastKnownCoords.longitude is number
+            && d.lastKnownCoords.longitude >= -180 && d.lastKnownCoords.longitude <= 180
+            && d.lastKnownCoords.accuracy is number
+            && d.lastKnownCoords.accuracy >= 0
+            && (!('distanceMeters' in d.lastKnownCoords)
+              || (d.lastKnownCoords.distanceMeters is number && d.lastKnownCoords.distanceMeters >= 0))))
+        && (d.status == 'pending_approval'
+          ? d.verified == false && d.verifyReason is string && d.verifyReason.size() > 0
+          : d.verified == true
+            && (d.source == 'gps'
+              ? d.distanceMeters is number
+                && d.distanceMeters >= 0
+                && accuracy is number && accuracy >= 0 && accuracy <= 300
+                && d.distanceMeters <= restaurantRadius() + (accuracy > 100 ? 100 : accuracy)
+              : d.source == 'manual'
+                && staffProfile.get('skipGeofence', false) == true
+                && !('distanceMeters' in d)
+                && !('accuracyMeters' in d)));
     }
     function validServerTimeWrite(uid) {
       return signedIn()
@@ -435,41 +452,47 @@ service cloud.firestore {
     match /attendance/{id} {
       allow read: if isAdmin()
         || (signedIn() && resource.data.staffId == request.auth.uid);
-      allow create: if (isAdminOrOwner()
+      allow create: if (isAdmin()
         && request.resource.data.keys().hasOnly([
-          'staffId', 'date', 'status', 'markedBy', 'source', 'leaveRequestId', 'checkOutMissed',
+          'staffId', 'date', 'status', 'markedBy', 'source', 'leaveRequestId',
           'checkInAt', 'checkOutAt', 'shiftId', 'shiftName', 'shiftStartTime',
           'shiftEndTime', 'breakStart', 'breakEnd', 'halfDayLateMinutes',
           'lateGraceMinutes', 'earlyLeaveHours', 'late', 'lateMinutes',
-          'incomplete', 'earlyLeave', 'workedMinutes'
+          'incomplete', 'earlyLeave', 'workedMinutes', 'verified', 'verifyReason',
+          'lastKnownCoords', 'distanceMeters', 'accuracyMeters', 'autoCheckout',
+          'reviewedAt', 'reviewedBy'
         ])
         && request.resource.data.keys().hasAll(['staffId', 'date', 'status', 'markedBy', 'source'])
         && request.resource.data.staffId is string
+        && id == request.resource.data.staffId + '_' + request.resource.data.date
         && exists(/databases/$(db)/documents/staff/$(request.resource.data.staffId))
         && request.resource.data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
         && validAttendanceStatus(request.resource.data)
         && request.resource.data.markedBy in ['Admin', 'admin']
-        && (request.resource.data.source == 'manual'
+        && (request.resource.data.source in ['manual', 'gps']
           || (request.resource.data.source == 'leave'
             && request.resource.data.keys().hasAll(['leaveRequestId'])
             && request.resource.data.leaveRequestId is string
             && exists(/databases/$(db)/documents/leaveRequests/$(request.resource.data.leaveRequestId)))))
         || ((isStaff() || isDelivery()) && validStaffAttendance(id));
-      allow update: if (isAdminOrOwner()
+      allow update: if (isAdmin()
         && request.resource.data.keys().hasOnly([
-          'staffId', 'date', 'status', 'markedBy', 'source', 'leaveRequestId', 'checkOutMissed',
+          'staffId', 'date', 'status', 'markedBy', 'source', 'leaveRequestId',
           'checkInAt', 'checkOutAt', 'shiftId', 'shiftName', 'shiftStartTime',
           'shiftEndTime', 'breakStart', 'breakEnd', 'halfDayLateMinutes',
           'lateGraceMinutes', 'earlyLeaveHours', 'late', 'lateMinutes',
-          'incomplete', 'earlyLeave', 'workedMinutes', 'distanceMeters'
+          'incomplete', 'earlyLeave', 'workedMinutes', 'distanceMeters',
+          'accuracyMeters', 'verified', 'verifyReason', 'lastKnownCoords',
+          'autoCheckout', 'reviewedAt', 'reviewedBy'
         ])
         && request.resource.data.keys().hasAll(['staffId', 'date', 'status', 'markedBy', 'source'])
         && request.resource.data.staffId is string
+        && id == request.resource.data.staffId + '_' + request.resource.data.date
         && exists(/databases/$(db)/documents/staff/$(request.resource.data.staffId))
         && request.resource.data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
         && validAttendanceStatus(request.resource.data)
-        && request.resource.data.markedBy in ['Admin', 'admin']
-        && (request.resource.data.source == 'manual'
+        && request.resource.data.markedBy in ['Admin', 'admin', 'admin_approved']
+        && (request.resource.data.source in ['manual', 'gps']
           || (request.resource.data.source == 'leave'
             && request.resource.data.keys().hasAll(['leaveRequestId'])
             && request.resource.data.leaveRequestId is string
@@ -477,41 +500,39 @@ service cloud.firestore {
         || ((isStaff() || isDelivery())
           && id == resource.data.staffId + '_' + resource.data.date
           && resource.data.staffId == request.auth.uid
-          && (resource.data.get('source', '') == 'gps'
-            || (resource.data.get('source', '') == 'manual'
-              && resource.data.get('markedBy', '') == 'staff'
-              && get(/databases/$(db)/documents/staff/$(request.auth.uid)).data.get('skipGeofence', false) == true)
-            || (!('source' in resource.data) && resource.data.distanceMeters is number))
-          && request.resource.data.staffId == request.auth.uid
-          && request.resource.data.get('source', '') == resource.data.get('source', '')
-          && request.resource.data.date == resource.data.date
-          && request.resource.data.checkInAt == resource.data.checkInAt
-          && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['checkOutAt', 'incomplete', 'earlyLeave', 'workedMinutes'])
-          && request.resource.data.status == resource.data.status
-          && request.resource.data.checkOutAt is number
-          && request.resource.data.checkOutAt > resource.data.checkInAt
-          && request.resource.data.incomplete == false)
-        || ((isStaff() || isDelivery())
-          && id == resource.data.staffId + '_' + resource.data.date
-          && resource.data.staffId == request.auth.uid
           && resource.data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
-          && attendanceDayHasEnded(resource.data.date)
           && resource.data.get('checkInAt', null) is number
           && resource.data.get('checkOutAt', null) == null
           && request.resource.data.staffId == resource.data.staffId
           && request.resource.data.date == resource.data.date
-          && request.resource.data.checkOutMissed == true
-          && request.resource.data.status == 'checkout_missed'
+          && request.resource.data.checkOutAt is timestamp
+          && request.resource.data.checkOutAt == timestamp.value(resource.data.date + 'T16:30:00Z')
+          && request.time >= request.resource.data.checkOutAt
+          && request.resource.data.autoCheckout == true
+          && !('incomplete' in request.resource.data)
+          && !('checkOutMissed' in request.resource.data)
           && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['checkOutMissed', 'status']))
+            .hasOnly(['checkOutAt', 'autoCheckout', 'incomplete', 'checkOutMissed', 'status'])
+          && (request.resource.data.status == resource.data.status
+            || (resource.data.get('status', '') == 'checkout_missed'
+              && request.resource.data.status == 'Present')))
+        || ((isStaff() || isDelivery())
+          && id == resource.data.staffId + '_' + resource.data.date
+          && resource.data.staffId == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['incomplete', 'checkOutMissed', 'status'])
+          && !('incomplete' in request.resource.data)
+          && !('checkOutMissed' in request.resource.data)
+          && (request.resource.data.status == resource.data.status
+            || (resource.data.get('status', '') == 'checkout_missed'
+              && request.resource.data.status == 'Present')))
         || ((isStaff() || isDelivery())
           && id == resource.data.staffId + '_' + resource.data.date
           && resource.data.staffId == request.auth.uid
           && resource.data.get('checkInAt', null) == null
           && (resource.data.get('markedBy', '') in ['Admin', 'admin']
             || (resource.data.get('source', '') == 'manual' && resource.data.get('markedBy', '') == ''))
-          && resource.data.get('status', '') in ['Absent', '']
+          && resource.data.get('status', '') in ['Absent', 'absent', '']
           && request.resource.data.staffId == request.auth.uid
           && request.resource.data.date == resource.data.date
           && validStaffAttendance(id));
@@ -644,7 +665,7 @@ service cloud.firestore {
         && request.resource.data.at is int
         && request.resource.data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
         && (request.resource.data.action != 'present'
-          || (attendanceAfterOpening(request.resource.data.date)
+          || (attendanceInCurrentWindow(request.resource.data.date)
             && request.resource.data.distanceMeters is number
             && request.resource.data.distanceMeters >= 0
             && request.resource.data.distanceMeters <= restaurantRadius()));

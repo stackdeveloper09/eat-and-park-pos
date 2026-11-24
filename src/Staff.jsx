@@ -34,12 +34,13 @@ import {
   DEFAULT_SHIFTS,
   formatIndiaTime,
   indiaTimeInput,
-  indiaDateKey,
+  getTodayIST,
   indiaMonthKey,
 } from "./lib/staffShifts";
+import { autoCloseOpenRecords } from "./lib/attendanceAutoClose";
 import { ROLES } from "./lib/roles";
 
-const ATTENDANCE_STATUSES = ["Present", "Half Day", "Absent", "Paid Leave"];
+const ATTENDANCE_STATUSES = ["Present", "Half Day", "Late", "Absent", "Paid Leave"];
 const NOTIFICATION_RECIPIENT_ROLES = ["chef", "cashier", "waiter", "delivery", "staff"];
 const TABS = [
   { id: "staff", label: "Staff Management" },
@@ -52,7 +53,6 @@ const TABS = [
 ];
 
 const currentMonthKey = () => indiaMonthKey();
-const todayKey = () => indiaDateKey();
 
 const nextMonthKey = (monthKey) => {
   const [year, month] = monthKey.split("-").map(Number);
@@ -87,7 +87,8 @@ function canReceiveStaffNotification(member) {
 function normalizedAttendanceStatus(record) {
   if (record.action === "present") return "Present";
   const status = String(record.status || "").trim().toLowerCase();
-  if (record.checkOutMissed === true || status === "checkout_missed") return "checkout_missed";
+  if (status === "pending_approval") return "Pending approval";
+  if (status === "late") return "Late";
   if (status === "half day" || status === "half-day" || status === "half_day") return "Half Day";
   if (status === "paid leave" || status === "leave") return "Paid Leave";
   if (status === "absent") return "Absent";
@@ -139,7 +140,11 @@ function staffWelcomeWhatsAppUrl(member, name, phone) {
 
 export default function Staff({ C, isMobile }) {
   const [activeTab, setActiveTab] = useState("staff");
-  const [month, setMonth] = useState(currentMonthKey);
+  const [monthDraft, setMonth] = useState("");
+  const month = monthDraft || currentMonthKey();
+  const [attendanceToday, setAttendanceToday] = useState("");
+  const attendanceDateRef = useRef("");
+  const todayIST = attendanceToday || getTodayIST();
   const [members, setMembers] = useState([]);
   const [shifts, setShifts] = useState(DEFAULT_SHIFTS);
   const [shiftDrafts, setShiftDrafts] = useState(DEFAULT_SHIFTS);
@@ -153,14 +158,14 @@ export default function Staff({ C, isMobile }) {
   const [paymentMemberId, setPaymentMemberId] = useState("");
   const [paymentForm, setPaymentForm] = useState({
     amount: "",
-    date: todayKey(),
+    date: "",
     note: "",
     carryForward: false,
   });
   const [advanceForm, setAdvanceForm] = useState({
     staffId: "",
     amount: "",
-    date: todayKey(),
+    date: "",
     note: "",
   });
   const [advanceFilterStaff, setAdvanceFilterStaff] = useState("all");
@@ -187,6 +192,8 @@ export default function Staff({ C, isMobile }) {
   const [sendingNotification, setSendingNotification] = useState(false);
   const notificationSendLock = useRef(false);
   const [manualAttendance, setManualAttendance] = useState([]);
+  const [pendingApprovalAttendance, setPendingApprovalAttendance] = useState([]);
+  const [pendingAttendanceLoading, setPendingAttendanceLoading] = useState(true);
   const [gpsAttendance, setGpsAttendance] = useState([]);
   const [gpsAttendanceLoading, setGpsAttendanceLoading] = useState(true);
   const [manualAttendanceLoading, setManualAttendanceLoading] = useState(true);
@@ -216,10 +223,9 @@ export default function Staff({ C, isMobile }) {
   const [gpsError, setGpsError] = useState("");
   const [attendanceForm, setAttendanceForm] = useState({
     staffId: "",
-    date: todayKey(),
+    date: "",
     status: "Present",
     checkInTime: "",
-    checkOutTime: "",
   });
 
   const currentAdminRole = members.find((member) => member.id === auth.currentUser?.uid)?.role;
@@ -484,6 +490,99 @@ export default function Staff({ C, isMobile }) {
     };
   }, [month]);
 
+  useEffect(() => {
+    const refreshDate = () => {
+      const nextDate = getTodayIST();
+      const previousDate = attendanceDateRef.current;
+      attendanceDateRef.current = nextDate;
+      setAttendanceToday(nextDate);
+      if (previousDate && previousDate !== nextDate) {
+        setAttendanceForm((form) => form.date === previousDate ? { ...form, date: nextDate } : form);
+        setPaymentForm((form) => form.date === previousDate ? { ...form, date: nextDate } : form);
+        setAdvanceForm((form) => form.date === previousDate ? { ...form, date: nextDate } : form);
+      }
+    };
+    refreshDate();
+    const timer = window.setInterval(refreshDate, 30000);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") refreshDate();
+    };
+    window.addEventListener("focus", refreshDate);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refreshDate);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!monthDraft) setMonth(currentMonthKey());
+    if (!attendanceForm.date) {
+      setAttendanceForm((form) => ({ ...form, date: todayIST }));
+    }
+    if (!paymentForm.date) setPaymentForm((form) => ({ ...form, date: todayIST }));
+    if (!advanceForm.date) setAdvanceForm((form) => ({ ...form, date: todayIST }));
+  }, [advanceForm.date, attendanceForm.date, monthDraft, paymentForm.date, todayIST]);
+
+  useEffect(() => {
+    if (currentAdminMember?.active === false
+      || !["admin", "owner", "manager"].includes(String(currentAdminRole || "").toLowerCase())) {
+      setPendingApprovalAttendance([]);
+      setPendingAttendanceLoading(false);
+      return undefined;
+    }
+    setPendingAttendanceLoading(true);
+    return onSnapshot(
+      query(collection(db, "attendance"), where("status", "==", "pending_approval"), orderBy("date", "desc")),
+      (snapshot) => {
+        setPendingApprovalAttendance(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() })));
+        setPendingAttendanceLoading(false);
+      },
+      (error) => {
+        console.error("Pending attendance load failed:", error);
+        setActionError(`Pending approval list load nahi hui: ${getErrorMessage(error)}`);
+        setPendingAttendanceLoading(false);
+      },
+    );
+  }, [currentAdminMember?.active, currentAdminRole]);
+
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!uid
+      || currentAdminMember?.active === false
+      || !["admin", "owner", "manager"].includes(String(currentAdminRole || "").toLowerCase())) {
+      return undefined;
+    }
+    let active = true;
+    let running = false;
+    const runAutoClose = async () => {
+      if (running) return;
+      running = true;
+      try {
+        await autoCloseOpenRecords({ staffId: uid, role: currentAdminRole, shifts });
+      } catch (error) {
+        console.error("Admin attendance auto-checkout backup failed:", error);
+        if (active) setActionError(`Auto check-out sync nahi hua: ${getErrorMessage(error)}`);
+      } finally {
+        running = false;
+      }
+    };
+    void runAutoClose();
+    const timer = window.setInterval(() => void runAutoClose(), 60000);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") void runAutoClose();
+    };
+    window.addEventListener("focus", runAutoClose);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", runAutoClose);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [currentAdminMember?.active, currentAdminRole, shifts]);
+
   const activeMembers = useMemo(
     () => members.filter((member) => member.active !== false),
     [members],
@@ -501,13 +600,13 @@ export default function Staff({ C, isMobile }) {
         ...record,
         status,
         source: attendanceSource(record),
+        late: record.late === true || status === "Late" || Number(record.lateMinutes || 0) > 0,
       };
       const current = recordsByStaffDate.get(key);
       const sourcePriority = { gps: 0, manual: 1, leave: 2 };
       const currentIsCanonical = current?.id === `${staffId}_${record.date}`;
       const normalizedIsCanonical = normalized.id === `${staffId}_${record.date}`;
       if (!current
-        || (normalized.checkOutMissed === true && current.checkOutMissed !== true)
         || (normalized.source === current.source && normalizedIsCanonical && !currentIsCanonical)
         || sourcePriority[normalized.source] > sourcePriority[current.source]) {
         recordsByStaffDate.set(key, normalized);
@@ -521,12 +620,33 @@ export default function Staff({ C, isMobile }) {
     allAttendanceRecords.forEach((record) => {
       if (!record.date?.startsWith(`${month}-`)) return;
       const staffId = getStaffId(record);
-      const current = stats.get(staffId) || { presentDays: 0, paidLeaveDays: 0 };
-      if (record.status === "Paid Leave") current.paidLeaveDays += 1;
+      const current = stats.get(staffId) || {
+        presentDays: 0,
+        paidLeaveDays: 0,
+        lateDays: 0,
+        pendingApprovalDays: 0,
+      };
+      if (record.status === "Pending approval") current.pendingApprovalDays += 1;
+      else if (record.status === "Paid Leave") current.paidLeaveDays += 1;
       else current.presentDays += attendanceDayValue(record.status);
+      if (record.late) current.lateDays += 1;
       stats.set(staffId, current);
     });
     return stats;
+  }, [allAttendanceRecords, month]);
+
+  const attendanceMonthlySummary = useMemo(() => {
+    const summary = { present: 0, halfDay: 0, absent: 0, leave: 0, late: 0, pending: 0 };
+    allAttendanceRecords.forEach((record) => {
+      if (!record.date?.startsWith(`${month}-`)) return;
+      if (record.status === "Present") summary.present += 1;
+      else if (record.status === "Half Day") summary.halfDay += 1;
+      else if (record.status === "Absent") summary.absent += 1;
+      else if (record.status === "Paid Leave") summary.leave += 1;
+      else if (record.status === "Pending approval") summary.pending += 1;
+      if (record.late) summary.late += 1;
+    });
+    return summary;
   }, [allAttendanceRecords, month]);
 
   const approvedAdvanceTotals = useMemo(() => {
@@ -1088,7 +1208,7 @@ export default function Staff({ C, isMobile }) {
     setPaymentMemberId(row.member.id);
     setPaymentForm({
       amount: String(row.balanceDue),
-      date: todayKey(),
+      date: todayIST,
       note: "",
       carryForward: false,
     });
@@ -1211,36 +1331,25 @@ export default function Staff({ C, isMobile }) {
     date,
     status,
     inTime = attendanceForm.checkInTime,
-    outTime = attendanceForm.checkOutTime,
   ) => {
     setActionError("");
-    const parsedDate = new Date(`${date}T00:00:00Z`);
-    const validDate = /^\d{4}-\d{2}-\d{2}$/.test(date)
-      && !Number.isNaN(parsedDate.getTime())
-      && parsedDate.toISOString().slice(0, 10) === date;
-    if (!staffId || !validDate || date > todayKey() || !ATTENDANCE_STATUSES.includes(status)) {
+    if (!staffId || !isValidDateKey(date) || date > todayIST || !ATTENDANCE_STATUSES.includes(status)) {
       setActionError("Staff, aaj ya usse pehle ki valid date, aur attendance status select karein.");
       return;
     }
     setBusyId("attendance");
     try {
-      const [manualSnapshot, gpsSnapshot] = await Promise.all([
-        getDocs(query(collection(db, "attendance"), where("date", "==", date))),
-        getDocs(query(collection(db, "staffAttendance"), where("date", "==", date))),
-      ]);
-      const alreadyMarked = [...manualSnapshot.docs, ...gpsSnapshot.docs].find((entry) => {
-        const record = entry.data();
-        return getStaffId(record) === staffId && normalizedAttendanceStatus(record);
-      });
-      if (alreadyMarked) {
-        const record = alreadyMarked.data();
-        const existingStatus = normalizedAttendanceStatus(record) || "GPS attendance";
-        const confirmMessage = record.checkOutMissed === true || existingStatus === "checkout_missed"
-          ? "Checkout missed hai. Manual check-out time save karke attendance update karein?"
-          : `Already marked as ${existingStatus}, replace?`;
-        if (!window.confirm(confirmMessage)) return;
-      }
       const attendanceRef = doc(db, "attendance", `${staffId}_${date}`);
+      const [sameDaySnapshot, legacySnapshot] = await Promise.all([
+        getDocs(query(collection(db, "attendance"), where("staffId", "==", staffId), where("date", "==", date))),
+        getDocs(query(collection(db, "staffAttendance"), where("uid", "==", staffId), where("date", "==", date))),
+      ]);
+      const existingRecords = [...sameDaySnapshot.docs, ...legacySnapshot.docs];
+      const existingRecord = existingRecords.find((entry) => normalizedAttendanceStatus(entry.data()));
+      if (existingRecord) {
+        const existingStatus = normalizedAttendanceStatus(existingRecord.data()) || "GPS attendance";
+        if (!window.confirm(`Already marked as ${existingStatus}, replace?`)) return;
+      }
       const currentRecord = allAttendanceRecords.get(`${staffId}_${date}`);
       const member = members.find((entry) => entry.id === staffId);
       const shiftId = member?.shiftId || currentRecord?.shiftId || "";
@@ -1248,28 +1357,24 @@ export default function Staff({ C, isMobile }) {
       const checkInAt = inTime
         ? attendanceTimestamp(date, inTime)
         : currentRecord?.checkInAt || null;
-      const checkOutAt = outTime
-        ? attendanceTimestamp(date, outTime, checkInAt)
-        : currentRecord?.checkOutAt || null;
-      if (checkOutAt && !checkInAt) {
-        setActionError("Out time ke liye In time bhi enter karein.");
-        return;
-      }
+      const checkOutAt = currentRecord?.checkOutAt || null;
       const automatic = checkInAt && shift
         ? autoStatus(checkInAt, shift, checkOutAt)
         : null;
-      const savedStatus = currentRecord?.checkOutMissed === true
-        ? checkOutAt ? automatic?.status || "Present" : "checkout_missed"
-        : status;
       const attendanceData = {
         staffId,
         date,
-        status: savedStatus,
+        status,
         markedBy: "admin",
         source: "manual",
-        ...(currentRecord?.checkOutMissed === true && !checkOutAt ? { checkOutMissed: true } : {}),
         ...(checkInAt ? { checkInAt } : {}),
         ...(checkOutAt ? { checkOutAt } : {}),
+        ...(currentRecord?.autoCheckout ? { autoCheckout: true } : {}),
+        ...(currentRecord?.verified != null ? { verified: currentRecord.status === "Pending approval" ? true : currentRecord.verified } : {}),
+        ...(currentRecord?.verifyReason ? { verifyReason: currentRecord.verifyReason } : {}),
+        ...(currentRecord?.lastKnownCoords ? { lastKnownCoords: currentRecord.lastKnownCoords } : {}),
+        ...(currentRecord?.distanceMeters != null ? { distanceMeters: currentRecord.distanceMeters } : {}),
+        ...(currentRecord?.accuracyMeters != null ? { accuracyMeters: currentRecord.accuracyMeters } : {}),
         ...(shift ? {
           shiftId,
           shiftName: shift.name,
@@ -1282,9 +1387,8 @@ export default function Staff({ C, isMobile }) {
           earlyLeaveHours: Number(shift.earlyLeaveHours ?? 2),
         } : {}),
         ...(automatic ? {
-          late: automatic.late,
+          late: status === "Late" || automatic.late,
           lateMinutes: automatic.lateMinutes,
-          incomplete: automatic.incomplete,
           earlyLeave: automatic.earlyLeave,
           ...(checkOutAt ? { workedMinutes: calculateWorkedMinutes(checkInAt, checkOutAt, shift) } : {}),
         } : {}),
@@ -1298,24 +1402,40 @@ export default function Staff({ C, isMobile }) {
         read: false,
         createdAt: Date.now(),
       });
-      manualSnapshot.docs.forEach((entry) => {
-        if (entry.id !== attendanceRef.id && getStaffId(entry.data()) === staffId) {
-          batch.delete(entry.ref);
-        }
+      sameDaySnapshot.docs.forEach((entry) => {
+        if (entry.id !== attendanceRef.id) batch.delete(entry.ref);
       });
+      legacySnapshot.docs.forEach((entry) => batch.delete(entry.ref));
       await batch.commit();
       setMonth(date.slice(0, 7));
       setAttendanceForm((form) => ({
         ...form,
         staffId,
         date,
-        status: savedStatus,
+        status,
         checkInTime: checkInAt ? indiaTimeInput(checkInAt) : "",
-        checkOutTime: checkOutAt ? indiaTimeInput(checkOutAt) : "",
       }));
       setActionError("");
     } catch (error) {
       reportError("Attendance mark nahi hui", error);
+    } finally {
+      setBusyId("");
+    }
+  };
+
+  const reviewPendingAttendance = async (record, approve) => {
+    setActionError("");
+    setBusyId(`review-${record.id}`);
+    try {
+      await updateDoc(doc(db, "attendance", record.id), {
+        status: approve ? "present" : "absent",
+        markedBy: approve ? "admin_approved" : "admin",
+        verified: approve,
+        reviewedAt: serverTimestamp(),
+        reviewedBy: auth.currentUser.uid,
+      });
+    } catch (error) {
+      reportError("Pending attendance review save nahi hua", error);
     } finally {
       setBusyId("");
     }
@@ -1328,7 +1448,6 @@ export default function Staff({ C, isMobile }) {
       attendanceForm.date,
       attendanceForm.status,
       attendanceForm.checkInTime,
-      attendanceForm.checkOutTime,
     );
   };
 
@@ -2251,7 +2370,60 @@ export default function Staff({ C, isMobile }) {
             ))}
           </div>
 
-          <form onSubmit={handleMarkAttendance} style={{ ...cardStyle, display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(160px, 1fr) minmax(140px, 160px) minmax(130px, 150px) minmax(110px, 130px) minmax(110px, 130px) auto", gap: 10, alignItems: "end", marginBottom: 14 }}>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, minmax(0, 1fr))" : "repeat(6, minmax(0, 1fr))", gap: 8, marginBottom: 14 }}>
+            {[
+              ["Present", attendanceMonthlySummary.present],
+              ["Half", attendanceMonthlySummary.halfDay],
+              ["Absent", attendanceMonthlySummary.absent],
+              ["Leave", attendanceMonthlySummary.leave],
+              ["Late", attendanceMonthlySummary.late],
+              ["Pending", attendanceMonthlySummary.pending],
+            ].map(([label, count]) => (
+              <div key={label} style={{ ...cardStyle, padding: 10 }}>
+                <div style={{ color: C.gray, fontSize: 10 }}>{label} · {month}</div>
+                <strong style={{ display: "block", color: label === "Late" ? C.gold : C.ink, fontSize: 16, marginTop: 4 }}>{count}</strong>
+              </div>
+            ))}
+          </div>
+
+          <section style={{ ...cardStyle, marginBottom: 14 }}>
+            <h4 style={{ margin: "0 0 10px", color: C.ink }}>Pending approval</h4>
+            {pendingAttendanceLoading
+              ? <div style={{ color: C.gray, fontSize: 12 }}>Pending attendance load ho rahi hai...</div>
+              : pendingApprovalAttendance.length === 0
+                ? <div style={{ color: C.gray, fontSize: 12 }}>Koi attendance pending nahi hai.</div>
+                : <div style={{ display: "grid", gap: 8 }}>
+                  {pendingApprovalAttendance.map((record) => {
+                    const member = members.find((entry) => entry.id === getStaffId(record));
+                    const busy = busyId === `review-${record.id}`;
+                    const distance = record.distanceMeters ?? record.lastKnownCoords?.distanceMeters;
+                    const accuracy = record.accuracyMeters ?? record.lastKnownCoords?.accuracy;
+                    return (
+                      <article key={record.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", padding: 10, border: `1px solid ${C.line}`, borderRadius: 9 }}>
+                        <div style={{ color: C.ink, fontSize: 12 }}>
+                          <strong>{displayStaffName(member || { id: getStaffId(record) })}</strong>
+                          {" · "}{record.date} · {record.checkInAt ? formatIndiaTime(record.checkInAt) : "Time unavailable"}
+                          <div style={{ color: C.gray, marginTop: 3 }}>
+                            {Number.isFinite(Number(distance)) ? `Distance ${Math.round(Number(distance))}m` : "Distance unavailable"}
+                            {" · "}{Number.isFinite(Number(accuracy)) ? `Accuracy ±${Math.round(Number(accuracy))}m` : "Accuracy unavailable"}
+                            {" · "}{record.verifyReason || "GPS verification unavailable"}
+                          </div>
+                        </div>
+                        <div style={{ display: "flex", gap: 7 }}>
+                          <button type="button" disabled={busy} onClick={() => reviewPendingAttendance(record, true)} style={buttonStyle}>
+                            {busy ? "Saving..." : "Approve"}
+                          </button>
+                          <button type="button" disabled={busy} onClick={() => reviewPendingAttendance(record, false)} style={{ ...buttonStyle, background: C.red }}>
+                            Reject
+                          </button>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>}
+          </section>
+
+          <form onSubmit={handleMarkAttendance} style={{ ...cardStyle, display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(160px, 1fr) minmax(140px, 160px) minmax(130px, 150px) minmax(110px, 130px) auto", gap: 10, alignItems: "end", marginBottom: 14 }}>
             <label style={labelStyle}>
               Staff member
               <select required value={attendanceForm.staffId} onChange={(event) => setAttendanceForm((form) => ({ ...form, staffId: event.target.value }))} style={inputStyle}>
@@ -2261,7 +2433,7 @@ export default function Staff({ C, isMobile }) {
             </label>
             <label style={labelStyle}>
               Attendance date
-              <input required type="date" max={todayKey()} value={attendanceForm.date} onChange={(event) => setAttendanceForm((form) => ({ ...form, date: event.target.value }))} style={inputStyle} />
+              <input required type="date" max={todayIST} value={attendanceForm.date} onChange={(event) => setAttendanceForm((form) => ({ ...form, date: event.target.value }))} style={inputStyle} />
             </label>
             <label style={labelStyle}>
               Status
@@ -2272,10 +2444,6 @@ export default function Staff({ C, isMobile }) {
             <label style={labelStyle}>
               In time (optional)
               <input type="time" value={attendanceForm.checkInTime} onChange={(event) => setAttendanceForm((form) => ({ ...form, checkInTime: event.target.value }))} style={inputStyle} />
-            </label>
-            <label style={labelStyle}>
-              Out time (optional)
-              <input type="time" value={attendanceForm.checkOutTime} onChange={(event) => setAttendanceForm((form) => ({ ...form, checkOutTime: event.target.value }))} style={inputStyle} />
             </label>
             <button type="submit" disabled={busyId === "attendance" || !activeMembers.length} style={buttonStyle}>
               {busyId === "attendance" ? "Saving..." : "Save Attendance"}
@@ -2427,6 +2595,8 @@ export default function Staff({ C, isMobile }) {
                       const status = record?.status || "";
                       const color = status === "Present" ? C.green
                         : status === "Half Day" ? C.gold
+                          : status === "Late" ? C.gold
+                            : status === "Pending approval" ? "#FDBA74"
                           : status === "Absent" ? "#F87171"
                             : status === "Paid Leave" ? C.blue
                               : C.gray;
@@ -2434,63 +2604,30 @@ export default function Staff({ C, isMobile }) {
                         <button
                           key={date}
                           type="button"
-                          disabled={date > todayKey()}
+                          disabled={date > todayIST}
                           onClick={() => setAttendanceForm((form) => ({
                             ...form,
                             staffId: selectedMember.id,
                             date,
-                            status: record?.checkOutMissed ? "Present" : status || "Present",
+                            status: ATTENDANCE_STATUSES.includes(status) ? status : "Present",
                             checkInTime: record?.checkInAt ? indiaTimeInput(record.checkInAt) : "",
-                            checkOutTime: record?.checkOutAt ? indiaTimeInput(record.checkOutAt) : "",
                           }))}
                           title={status ? `${status} · ${record.source === "gps" ? "GPS" : record.source === "leave" ? "Leave" : "Manual"}` : "Not marked"}
-                          style={{ minWidth: 0, padding: "6px 2px", border: `1px solid ${date === attendanceForm.date ? C.gold : C.line}`, borderRadius: 7, background: C.bg, color: date > todayKey() ? C.gray : color, cursor: date > todayKey() ? "not-allowed" : "pointer", opacity: date > todayKey() ? 0.45 : 1 }}
+                          style={{ minWidth: 0, padding: "6px 2px", border: `1px solid ${date === attendanceForm.date ? C.gold : C.line}`, borderRadius: 7, background: C.bg, color: date > todayIST ? C.gray : color, cursor: date > todayIST ? "not-allowed" : "pointer", opacity: date > todayIST ? 0.45 : 1 }}
                         >
                           <span style={{ display: "block", fontSize: 12, fontWeight: 800 }}>{day}</span>
                           <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", fontSize: 8 }}>{status || "—"}</span>
-                          {record?.checkOutMissed && <span style={{ display: "block", color: "#FCA5A5", fontSize: 7, fontWeight: 800 }}>Checkout missed</span>}
                           {record && <span style={{ display: "block", fontSize: 7 }}>{record.source === "gps" ? "GPS" : "Manual"}</span>}
                           {record?.checkInAt && <span style={{ display: "block", fontSize: 7 }}>In {formatIndiaTime(record.checkInAt)}</span>}
                           {record?.checkOutAt && <span style={{ display: "block", fontSize: 7 }}>Out {formatIndiaTime(record.checkOutAt)}</span>}
                           {record?.shiftName && <span style={{ display: "block", fontSize: 7 }}>{record.shiftName}</span>}
-                          {record?.lateMinutes > 0 && <span style={{ display: "block", fontSize: 7, color: C.gold }}>Late {record.lateMinutes}m</span>}
-                          {record?.incomplete && <span style={{ display: "block", fontSize: 7, color: "#FCA5A5" }}>Incomplete</span>}
+                          {record?.late && <span style={{ display: "block", fontSize: 7, color: C.gold }}>Late {record.lateMinutes || 0}m</span>}
+                          {record?.autoCheckout && <span style={{ display: "block", fontSize: 7, color: C.green }}>Auto checkout</span>}
                           {record?.earlyLeave && <span style={{ display: "block", fontSize: 7, color: C.gold }}>Early leave</span>}
                         </button>
                       );
                     })}
                   </div>
-
-                  {selectedDateRecord?.checkOutMissed && (
-                    <div style={{ display: "flex", alignItems: "end", gap: 8, flexWrap: "wrap", marginTop: 10, padding: 10, border: "1px solid #7F1D1D", borderRadius: 9, background: "#2B171B" }}>
-                      <div style={{ flex: "1 1 180px", color: "#FCA5A5", fontSize: 12, fontWeight: 800 }}>
-                        Checkout missed · {selectedDateRecord.date}
-                      </div>
-                      <label style={{ ...labelStyle, minWidth: 150 }}>
-                        Manual check-out time
-                        <input
-                          type="time"
-                          value={attendanceForm.checkOutTime}
-                          onChange={(event) => setAttendanceForm((form) => ({ ...form, checkOutTime: event.target.value }))}
-                          style={inputStyle}
-                        />
-                      </label>
-                      <button
-                        type="button"
-                        disabled={busyId === "attendance" || !attendanceForm.checkOutTime}
-                        onClick={() => saveAttendance(
-                          selectedMember.id,
-                          attendanceForm.date,
-                          "Present",
-                          attendanceForm.checkInTime,
-                          attendanceForm.checkOutTime,
-                        )}
-                        style={buttonStyle}
-                      >
-                        {busyId === "attendance" ? "Saving..." : "Save check-out"}
-                      </button>
-                    </div>
-                  )}
 
                   <form
                     onSubmit={(event) => {
@@ -2505,14 +2642,15 @@ export default function Staff({ C, isMobile }) {
                         {ATTENDANCE_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
                       </select>
                     </label>
-                    <button type="submit" disabled={busyId === "attendance" || attendanceForm.date > todayKey()} style={buttonStyle}>
+                    <button type="submit" disabled={busyId === "attendance" || attendanceForm.date > todayIST} style={buttonStyle}>
                       {busyId === "attendance" ? "Saving..." : "Save status"}
                     </button>
                   </form>
                   {selectedDateRecord && (
                     <div style={{ marginTop: 6, color: C.gray, fontSize: 11 }}>
-                      Current: {selectedDateRecord.checkOutMissed ? "Checkout missed" : selectedDateRecord.status}
+                      Current: {selectedDateRecord.status}
                       {" · "}{selectedDateRecord.source === "gps" ? "GPS" : "Manual"}
+                      {selectedDateRecord.autoCheckout ? " · Auto checkout at 10:00 PM" : ""}
                     </div>
                   )}
 
