@@ -977,7 +977,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
         let lastError = null;
         let settled = false;
         let lowAccuracyAttempts = 0;
-        let firstRequestStarted = false;
+        let retryAttempts = 0;
         const finish = (callback, value) => {
           if (settled) return;
           settled = true;
@@ -1017,8 +1017,15 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
             finish(reject, error);
             return;
           }
-          if (!firstRequestStarted) {
-            firstRequestStarted = true;
+          if ((error?.code === 2 || error?.code === 3) && retryAttempts < 1
+            && performance.now() - startedAt < 15000) {
+            retryAttempts += 1;
+            navigator.geolocation.getCurrentPosition(
+              acceptPosition,
+              fail,
+              { enableHighAccuracy: false, maximumAge: 60000, timeout: 5000 },
+            );
+            return;
           }
           finish(reject, error);
         };

@@ -76,8 +76,7 @@ function getStaffId(record) {
 }
 
 function displayStaffName(member) {
-  return String(member?.name || member?.fullName || member?.displayName || member?.staffName || "").trim()
-    || String(member?.id || "").slice(0, 6);
+  return String(member?.name || member?.fullName || member?.displayName || member?.staffName || "").trim();
 }
 
 function staffPhone(member) {
@@ -85,9 +84,10 @@ function staffPhone(member) {
 }
 
 function staffMonthlySalary(member) {
-  const value = member?.monthlySalary ?? member?.salary ?? member?.monthlySalaryValue;
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric : 0;
+  const raw = member?.monthlySalary ?? member?.salary ?? member?.monthlySalaryValue;
+  if (raw === null || raw === undefined || raw === "") return "";
+  const numeric = Number(raw);
+  return Number.isFinite(numeric) ? numeric : "";
 }
 
 function staffShiftId(member, shifts = DEFAULT_SHIFTS) {
@@ -241,11 +241,13 @@ export default function Staff({ C, isMobile }) {
   const [manualAttendance, setManualAttendance] = useState([]);
   const [pendingApprovalAttendance, setPendingApprovalAttendance] = useState([]);
   const [pendingAttendanceLoading, setPendingAttendanceLoading] = useState(true);
+  const [pendingAttendanceError, setPendingAttendanceError] = useState("");
   const [gpsAttendance, setGpsAttendance] = useState([]);
   const [gpsAttendanceLoading, setGpsAttendanceLoading] = useState(true);
   const [manualAttendanceLoading, setManualAttendanceLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [actionError, setActionError] = useState("");
+  const [staffLoadError, setStaffLoadError] = useState("");
   const [busyId, setBusyId] = useState("");
   const [newStaff, setNewStaff] = useState({
     accountMode: "create",
@@ -352,10 +354,10 @@ export default function Staff({ C, isMobile }) {
         const firstActiveMember = staffList.find((member) => member.active !== false);
         return firstActiveMember ? { ...form, staffId: firstActiveMember.id } : form;
       });
-      setLoadError("");
+      setStaffLoadError("");
     }, (error) => {
       console.error("Staff list load failed:", error);
-      setLoadError(`Staff list load nahi hui: ${getErrorMessage(error)}`);
+      setStaffLoadError(`Staff list load nahi hui: ${getErrorMessage(error)}. Baaki dashboard data chalta rahega.`);
     });
     return unsubscribe;
   }, [shifts]);
@@ -580,18 +582,41 @@ export default function Staff({ C, isMobile }) {
       return undefined;
     }
     setPendingAttendanceLoading(true);
-    return onSnapshot(
+    setPendingAttendanceError("");
+
+    let fallbackUnsubscribe = null;
+    const unsubscribe = onSnapshot(
       query(collection(db, "attendance"), where("status", "==", "pending_approval"), orderBy("date", "desc")),
       (snapshot) => {
-        setPendingApprovalAttendance(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() })));
+        setPendingApprovalAttendance(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() }))
+          .sort((a, b) => String(b.date || "").localeCompare(String(a.date || ""))));
+        setPendingAttendanceError("");
         setPendingAttendanceLoading(false);
       },
       (error) => {
-        console.error("Pending attendance load failed:", error);
-        setActionError(`Pending approval list load nahi hui: ${getErrorMessage(error)}`);
-        setPendingAttendanceLoading(false);
+        console.warn("Pending attendance indexed query failed; trying client-sorted fallback:", error);
+        fallbackUnsubscribe = onSnapshot(
+          query(collection(db, "attendance"), where("status", "==", "pending_approval")),
+          (fallbackSnapshot) => {
+            setPendingApprovalAttendance(fallbackSnapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() }))
+              .sort((a, b) => String(b.date || "").localeCompare(String(a.date || ""))));
+            setPendingAttendanceError("Index deploy ho raha hai. Pending list temporary client sorting se load hui.");
+            setPendingAttendanceLoading(false);
+          },
+          (fallbackError) => {
+            console.error("Pending attendance fallback load failed:", fallbackError);
+            setPendingApprovalAttendance([]);
+            setPendingAttendanceError("Pending approval list abhi load nahi hui. Firestore rules ya network check karke dobara try karein.");
+            setPendingAttendanceLoading(false);
+          },
+        );
       },
     );
+
+    return () => {
+      unsubscribe();
+      fallbackUnsubscribe?.();
+    };
   }, [currentAdminMember?.active, currentAdminRole]);
 
   useEffect(() => {
@@ -1540,6 +1565,75 @@ export default function Staff({ C, isMobile }) {
     }
   };
 
+  const handleSaveStaffRow = async (member) => {
+    const draft = staffDrafts[member.id] || {};
+    const name = String(draft.name ?? displayStaffName(member) ?? "").trim();
+    const phone = String(draft.phone ?? staffPhone(member) ?? "").trim();
+    const role = String(draft.role ?? member.role ?? "staff").trim();
+    const shiftId = String(draft.shiftId ?? staffShiftId(member) ?? "").trim();
+    const monthlySalary = String(draft.monthlySalary ?? legacyPayroll[member.id]?.monthlySalary ?? staffMonthlySalary(member) ?? "").trim();
+    const skipGeofence = Boolean(draft.skipGeofence ?? member.skipGeofence === true);
+
+    const saveKey = `${member.id}-row`;
+    setStaffSaveStates((current) => ({ ...current, [saveKey]: { status: "saving", message: "" } }));
+
+    try {
+      if (!name) throw new Error("Naam daalo.");
+      if (!ROLES.some((entry) => entry.value === role)) throw new Error("Valid staff role select karein.");
+      if (shiftId && !shifts[shiftId]) throw new Error("Valid shift select karein.");
+
+      const normalizedPhone = phone ? normalizeStaffPhone(phone) : "";
+      if (phone && !normalizedPhone) throw new Error("Valid WhatsApp number enter karein.");
+
+      const salary = Number(monthlySalary);
+      if (monthlySalary === "" || !Number.isFinite(salary) || salary < 0) {
+        throw new Error("Valid non-negative monthly salary enter karein.");
+      }
+
+      const adminUid = auth.currentUser?.uid;
+      if (!adminUid) throw new Error("Admin session expire ho gaya. Dobara sign in karein.");
+
+      const updates = {
+        name,
+        phone: normalizedPhone,
+        role,
+        shiftId,
+        monthlySalary: salary,
+        active: member.active !== false,
+        skipGeofence,
+      };
+      const batch = writeBatch(db);
+      batch.update(doc(db, "staff", member.id), updates);
+      batch.set(doc(db, "staffPayroll", member.id), {
+        uid: member.id,
+        monthlySalary: salary,
+        updatedAt: Date.now(),
+        updatedBy: adminUid,
+      }, { merge: true });
+      await batch.commit();
+
+      setStaffDrafts((current) => ({
+        ...current,
+        [member.id]: {
+          ...draft,
+          name,
+          phone: normalizedPhone,
+          role,
+          shiftId,
+          monthlySalary: String(salary),
+          skipGeofence,
+        },
+      }));
+      setStaffSaveStates((current) => ({ ...current, [saveKey]: { status: "saved", message: "" } }));
+    } catch (error) {
+      setStaffSaveStates((current) => ({
+        ...current,
+        [saveKey]: { status: "error", message: getErrorMessage(error) },
+      }));
+      console.error(`Staff row save failed for ${member.id}:`, error);
+    }
+  };
+
   const handleToggleActive = async (member, active) => {
     const saveKey = `${member.id}-active`;
     setStaffSaveStates((current) => ({ ...current, [saveKey]: { status: "saving", message: "" } }));
@@ -1677,12 +1771,7 @@ export default function Staff({ C, isMobile }) {
         ))}
       </nav>
 
-      {loadError && (
-        <div role="alert" style={{ marginBottom: 12, padding: 12, color: "#FCA5A5", background: "#451A1A", borderRadius: 10, fontSize: 13 }}>
-          {loadError}
-        </div>
-      )}
-      {actionError && (
+      {actionError && activeTab !== "payroll" && (
         <div role="alert" style={{ marginBottom: 12, padding: 12, color: "#FCA5A5", background: "#451A1A", borderRadius: 10, fontSize: 13 }}>
           {actionError}
         </div>
@@ -1796,6 +1885,11 @@ export default function Staff({ C, isMobile }) {
 
           <section style={cardStyle}>
             <h3 style={{ margin: "0 0 12px", color: C.ink, fontSize: 16 }}>Existing staff ({members.length})</h3>
+            {staffLoadError && (
+              <div role="alert" style={{ marginBottom: 8, color: "#FCA5A5", fontSize: 12 }}>
+                {staffLoadError}
+              </div>
+            )}
             {members.length === 0
               ? <div style={{ color: C.gray, fontSize: 13 }}>No staff profiles found.</div>
               : (
@@ -1803,7 +1897,7 @@ export default function Staff({ C, isMobile }) {
                   <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1200, color: C.ink, fontSize: 13 }}>
                     <thead>
                       <tr style={{ color: C.gray, textAlign: "left" }}>
-                        {["Name", "WhatsApp number", "Shift", "Role", "Monthly salary", "Status", "Skip geofence", "Auth UID", "WhatsApp welcome"].map((heading) => (
+                        {["Name", "WhatsApp number", "Shift", "Role", "Monthly salary", "Status", "Skip geofence", "Auth UID", "Save", "WhatsApp welcome"].map((heading) => (
                           <th key={heading} style={{ padding: "9px 8px", borderBottom: `1px solid ${C.line}` }}>{heading}</th>
                         ))}
                       </tr>
@@ -1815,9 +1909,9 @@ export default function Staff({ C, isMobile }) {
                             <input
                               aria-label={`Name for ${member.id}`}
                               maxLength={80}
+                              placeholder="Naam daalo"
                               value={staffDrafts[member.id]?.name ?? displayStaffName(member) ?? ""}
                               onChange={(event) => setStaffDrafts((current) => ({ ...current, [member.id]: { ...current[member.id], name: event.target.value } }))}
-                              onBlur={() => handleSaveStaffField(member, "name")}
                               style={{ ...inputStyle, minWidth: 120, padding: "7px 8px" }}
                             />
                             {renderStaffSaveStatus(member, "name")}
@@ -1829,7 +1923,6 @@ export default function Staff({ C, isMobile }) {
                               autoComplete="tel"
                               value={staffDrafts[member.id]?.phone ?? staffPhone(member) ?? ""}
                               onChange={(event) => setStaffDrafts((current) => ({ ...current, [member.id]: { ...current[member.id], phone: event.target.value } }))}
-                              onBlur={() => handleSaveStaffField(member, "phone")}
                               placeholder="+91..."
                               style={{ ...inputStyle, minWidth: 145, padding: "7px 8px" }}
                             />
@@ -1840,7 +1933,6 @@ export default function Staff({ C, isMobile }) {
                               aria-label={`Shift for ${member.id}`}
                               value={staffDrafts[member.id]?.shiftId ?? staffShiftId(member) ?? ""}
                               onChange={(event) => setStaffDrafts((current) => ({ ...current, [member.id]: { ...current[member.id], shiftId: event.target.value } }))}
-                              onBlur={() => handleSaveStaffField(member, "shiftId")}
                               style={{ ...inputStyle, minWidth: 110, padding: "7px 8px" }}
                             >
                               <option value="">No shift</option>
@@ -1854,7 +1946,6 @@ export default function Staff({ C, isMobile }) {
                               aria-label={`Role for ${member.id}`}
                               value={staffDrafts[member.id]?.role ?? member.role ?? "staff"}
                               onChange={(event) => setStaffDrafts((current) => ({ ...current, [member.id]: { ...current[member.id], role: event.target.value } }))}
-                              onBlur={() => handleSaveStaffField(member, "role")}
                               style={{ ...inputStyle, minWidth: 110, padding: "7px 8px" }}
                             >
                               {ROLES.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}
@@ -1869,7 +1960,6 @@ export default function Staff({ C, isMobile }) {
                               step="0.01"
                               value={staffDrafts[member.id]?.monthlySalary ?? legacyPayroll[member.id]?.monthlySalary ?? (staffMonthlySalary(member) || "")}
                               onChange={(event) => setStaffDrafts((current) => ({ ...current, [member.id]: { ...current[member.id], monthlySalary: event.target.value } }))}
-                              onBlur={() => handleSaveStaffField(member, "monthlySalary")}
                               style={{ ...inputStyle, minWidth: 120, padding: "7px 8px" }}
                             />
                             {renderStaffSaveStatus(member, "monthlySalary")}
@@ -1891,13 +1981,31 @@ export default function Staff({ C, isMobile }) {
                                   ...current,
                                   [member.id]: { ...current[member.id], skipGeofence: event.target.checked },
                                 }))}
-                                onBlur={() => handleSaveStaffField(member, "skipGeofence")}
                               />
                               Skip geofence
                             </label>
                             {renderStaffSaveStatus(member, "skipGeofence")}
                           </td>
                           <td style={{ padding: "10px 8px", borderBottom: `1px solid ${C.line}`, fontSize: 11 }}>{member.id}</td>
+                          <td style={{ padding: "8px", borderBottom: `1px solid ${C.line}` }}>
+                            {(() => {
+                              const rowState = staffSaveStates[`${member.id}-row`];
+                              return (
+                                <div style={{ display: "grid", gap: 5, minWidth: 90 }}>
+                                  <button
+                                    type="button"
+                                    disabled={rowState?.status === "saving"}
+                                    onClick={() => void handleSaveStaffRow(member)}
+                                    style={{ ...buttonStyle, padding: "7px 9px", whiteSpace: "nowrap" }}
+                                  >
+                                    {rowState?.status === "saving" ? "Saving..." : "Save row"}
+                                  </button>
+                                  {rowState?.status === "saved" && <small style={{ color: C.green }}>Saved ✓</small>}
+                                  {rowState?.status === "error" && <small role="alert" style={{ color: "#FCA5A5" }}>{rowState.message}</small>}
+                                </div>
+                              );
+                            })()}
+                          </td>
                           <td style={{ padding: "8px", borderBottom: `1px solid ${C.line}` }}>
                             {staffWelcomeWhatsAppUrl(
                               member,
@@ -2426,6 +2534,11 @@ export default function Staff({ C, isMobile }) {
 
           <section style={{ ...cardStyle, marginBottom: 14 }}>
             <h4 style={{ margin: "0 0 10px", color: C.ink }}>Pending approval</h4>
+            {pendingAttendanceError && (
+              <div role="status" style={{ marginBottom: 8, color: C.gold, fontSize: 12 }}>
+                {pendingAttendanceError}
+              </div>
+            )}
             {pendingAttendanceLoading
               ? <div style={{ color: C.gray, fontSize: 12 }}>Pending attendance load ho rahi hai...</div>
               : pendingApprovalAttendance.length === 0
