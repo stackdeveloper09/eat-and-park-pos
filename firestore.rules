@@ -69,6 +69,9 @@ service cloud.firestore {
       let d = request.resource.data;
       let staffProfile = get(/databases/$(db)/documents/staff/$(request.auth.uid)).data;
       let accuracy = d.get('accuracyMeters', 0);
+      let serverTimeDoc = /databases/$(db)/documents/attendanceServerTime/$(request.auth.uid);
+      let serverTimeExists = exists(serverTimeDoc);
+      let serverTime = serverTimeExists ? get(serverTimeDoc).data.serverTime : request.time;
       return id == d.staffId + '_' + d.date
         && d.keys().hasOnly([
           'staffId', 'date', 'status', 'distanceMeters', 'accuracyMeters', 'source',
@@ -84,8 +87,9 @@ service cloud.firestore {
         && d.status in ['present', 'pending_approval']
         && d.markedBy == 'staff'
         && d.checkInAt is number
-        && d.checkInAt >= request.time.toMillis() - 60000
-        && d.checkInAt <= request.time.toMillis() + 60000
+        && serverTimeExists
+        && d.checkInAt >= serverTime.toMillis() - 120000
+        && d.checkInAt <= serverTime.toMillis() + 120000
         && !('checkOutAt' in d)
         && (!('verifyReason' in d) || (d.verifyReason is string && d.verifyReason.size() <= 200))
         && (!('lastKnownCoords' in d)

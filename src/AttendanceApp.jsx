@@ -91,12 +91,12 @@ const MAX_GEOFENCE_TOLERANCE_METERS = 100;
 const PENDING_APPROVAL_ACCURACY_METERS = 300;
 
 function geolocationErrorMessage(error) {
-  if (error?.code === 1) return "Location permission denied.";
-  if (error?.code === 2) return "GPS location unavailable.";
-  if (error?.code === 3) return "GPS request timeout.";
+  if (error?.code === 1) return "Location ON karo: Chrome/Safari me Location allow aur Precise/Exact location chalu karo.";
+  if (error?.code === 2) return "GPS location unavailable hai. Location ON karo aur GPS/network check karo.";
+  if (error?.code === 3) return "GPS timeout hua. Thodi der GPS open rakhkar dobara try karo.";
   if (error?.message === "secure-context") return "GPS ke liye HTTPS connection zaroori hai.";
-  if (error?.message === "geolocation-unavailable") return "Is browser mein geolocation available nahi hai.";
-  return error?.message || "Location nahi mil saki. GPS settings check karke dobara try karein.";
+  if (error?.message === "geolocation-unavailable") return "Is browser mein Location/GPS available nahi hai. Browser settings check karo.";
+  return error?.message || "Location nahi mil saki. Location ON karke dobara try karein.";
 }
 
 function buildPayslipPdf(items) {
@@ -198,6 +198,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
   const [attendanceError, setAttendanceError] = useState("");
   const [profileError, setProfileError] = useState("");
   const [notice, setNotice] = useState("");
+  const [attendanceWriteFailed, setAttendanceWriteFailed] = useState(false);
   const [optimisticAttendance, setOptimisticAttendance] = useState(null);
   const [checkingLocation, setCheckingLocation] = useState(false);
   const [gpsWarmupState, setGpsWarmupState] = useState("searching");
@@ -979,7 +980,10 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
 
   const waitForGpsPosition = async () => {
     const cached = bestGpsPositionRef.current;
-    if (cached && performance.now() - cached.receivedAt < 60000) return cached.position;
+    if (cached && performance.now() - cached.receivedAt < 60000
+      && Number(cached.accuracy) <= PENDING_APPROVAL_ACCURACY_METERS) {
+      return cached.position;
+    }
     if (typeof window !== "undefined" && !window.isSecureContext) {
       throw new Error("secure-context");
     }
@@ -995,20 +999,37 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
       return await new Promise((resolve, reject) => {
         let lastError = null;
         let settled = false;
+        let lowAccuracyAttempts = 0;
+        let firstRequestStarted = false;
         const finish = (callback, value) => {
           if (settled) return;
           settled = true;
-          window.clearTimeout(timeout);
+          window.clearTimeout(overallTimeout);
           gpsWaiterRef.current = null;
           callback(value);
         };
-        const acceptPosition = (position) => {
+        const rememberPosition = (position) => {
           const accuracy = Number(position.coords.accuracy);
           if (Number.isFinite(accuracy)
             && (!bestGpsPositionRef.current || accuracy < bestGpsPositionRef.current.accuracy)) {
             bestGpsPositionRef.current = { position, accuracy, receivedAt: performance.now() };
             setGpsAccuracy(accuracy);
             setGpsWarmupState("ready");
+          }
+          return accuracy;
+        };
+        const acceptPosition = (position) => {
+          const accuracy = rememberPosition(position);
+          if (Number.isFinite(accuracy) && accuracy > PENDING_APPROVAL_ACCURACY_METERS
+            && lowAccuracyAttempts < 1
+            && performance.now() - startedAt < 15000) {
+            lowAccuracyAttempts += 1;
+            navigator.geolocation.getCurrentPosition(
+              acceptPosition,
+              fail,
+              { enableHighAccuracy: false, maximumAge: 0, timeout: 5000 },
+            );
+            return;
           }
           finish(resolve, position);
         };
@@ -1017,11 +1038,16 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
           if (error?.code === 1) {
             setGpsPermissionDenied(true);
             finish(reject, error);
+            return;
           }
+          if (!firstRequestStarted) {
+            firstRequestStarted = true;
+          }
+          finish(reject, error);
         };
-        const timeout = window.setTimeout(
+        const overallTimeout = window.setTimeout(
           () => finish(reject, lastError || { code: 3 }),
-          10000,
+          15000,
         );
         gpsWaiterRef.current = { onPosition: acceptPosition, onError: fail };
         navigator.geolocation.getCurrentPosition(
@@ -1070,7 +1096,13 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
       ...(Number.isFinite(accuracy) ? { accuracyMeters: accuracy } : {}),
       ...(shiftId && shift ? { shiftId, shiftName: shift.name } : {}),
     };
-    await setDoc(doc(db, "attendance", `${staffUid}_${context.date}`), record);
+    try {
+      await setDoc(doc(db, "attendance", `${staffUid}_${context.date}`), record);
+    } catch (error) {
+      setAttendanceWriteFailed(true);
+      throw error;
+    }
+    setAttendanceWriteFailed(false);
     setOptimisticAttendance(record);
     setPendingAttendanceDraft(null);
     setGpsPermissionDenied(false);
@@ -1105,6 +1137,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
   const markAttendance = async () => {
     if (!staffUid || checkingLocation) return;
     setCheckingLocation(true);
+    setAttendanceWriteFailed(false);
     setAttendanceError("");
     setNotice("");
     setGpsPermissionDenied(false);
@@ -1744,7 +1777,16 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
             </div>
           )}
           {notice && <div className="attendance-success" role="status">{notice}</div>}
-          {attendanceError && !gpsPermissionDenied && <div className="attendance-error" role="alert">{attendanceError}</div>}
+          {attendanceError && !gpsPermissionDenied && (
+            <div className="attendance-error" role="alert">
+              {attendanceError}
+              {attendanceWriteFailed && (
+                <button type="button" onClick={() => void markAttendance()} style={{ marginLeft: 8 }}>
+                  Dobara try karo
+                </button>
+              )}
+            </div>
+          )}
         </section>}
 
         {activeSection === "profile" && <section style={{ ...panelStyle, marginTop: 16 }} aria-label="Staff profile">
