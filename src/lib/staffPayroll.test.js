@@ -7,6 +7,7 @@ import {
   dateRangeInclusive,
   daysInMonth,
   haversineDistanceMeters,
+  normalizeAttendanceRadiusMeters,
   isValidDateKey,
   RESTAURANT_LOCATION,
 } from "./staffPayroll";
@@ -20,6 +21,12 @@ describe("staff geofence", () => {
       RESTAURANT_LOCATION.longitude,
     )).toBe(0);
     expect(ATTENDANCE_RADIUS_METERS).toBe(150);
+  });
+
+  test("normalizes legacy 100 meter radius to 150 and preserves custom radius", () => {
+    expect(normalizeAttendanceRadiusMeters(100)).toBe(150);
+    expect(normalizeAttendanceRadiusMeters(180)).toBe(180);
+    expect(normalizeAttendanceRadiusMeters(null)).toBe(150);
   });
 
   test("calculates distance in meters and rejects invalid coordinates", () => {

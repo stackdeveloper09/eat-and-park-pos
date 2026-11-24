@@ -25,6 +25,7 @@ import {
   dateRangeInclusive,
   daysInMonth,
   isValidDateKey,
+  normalizeAttendanceRadiusMeters,
   RESTAURANT_LOCATION,
 } from "./lib/staffPayroll";
 import {
@@ -491,7 +492,7 @@ export default function Staff({ C, isMobile }) {
         setGpsForm({
           lat: String(settings.lat),
           lng: String(settings.lng),
-          radius: String(settings.radius),
+          radius: String(normalizeAttendanceRadiusMeters(settings.radius)),
         });
         setGpsSaved({ lat: settings.lat, lng: settings.lng });
       }
@@ -997,7 +998,7 @@ export default function Staff({ C, isMobile }) {
     setGpsError("");
     const lat = Number(gpsForm.lat);
     const lng = Number(gpsForm.lng);
-    const radius = Number(gpsForm.radius);
+    const radius = normalizeAttendanceRadiusMeters(gpsForm.radius);
     if (!Number.isFinite(lat) || lat < -90 || lat > 90
       || !Number.isFinite(lng) || lng < -180 || lng > 180
       || !Number.isFinite(radius) || radius <= 0 || radius > 10000) {

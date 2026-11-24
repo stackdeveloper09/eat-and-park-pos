@@ -21,6 +21,7 @@ import {
   daysInMonth,
   haversineDistanceMeters,
   isValidDateKey,
+  normalizeAttendanceRadiusMeters,
   RESTAURANT_LOCATION,
 } from "./lib/staffPayroll";
 import {
@@ -645,7 +646,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
     const settings = snapshot.data();
     const lat = Number.parseFloat(settings.lat);
     const lng = Number.parseFloat(settings.lng);
-    const radius = Number.parseFloat(settings.radius);
+    const radius = normalizeAttendanceRadiusMeters(settings.radius);
     const validSettings = Number.isFinite(lat)
       && lat >= -90 && lat <= 90
       && Number.isFinite(lng)
@@ -1141,7 +1142,7 @@ export default function AttendanceApp({ currentUser: currentUserProp } = {}) {
       };
       const restaurantLat = Number.parseFloat(settings.lat);
       const restaurantLng = Number.parseFloat(settings.lng);
-      const radiusMeters = Number.parseFloat(settings.radius);
+      const radiusMeters = normalizeAttendanceRadiusMeters(settings.radius);
       if (!Number.isFinite(restaurantLat) || restaurantLat < -90 || restaurantLat > 90
         || !Number.isFinite(restaurantLng) || restaurantLng < -180 || restaurantLng > 180
         || !Number.isFinite(radiusMeters) || radiusMeters <= 0 || radiusMeters > 10000) {

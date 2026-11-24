@@ -6,6 +6,14 @@ export const RESTAURANT_LOCATION = Object.freeze({
 export const ATTENDANCE_RADIUS_METERS = 150;
 const EARTH_RADIUS_METERS = 6_371_000;
 
+export function normalizeAttendanceRadiusMeters(value) {
+  const radius = Number(value);
+  if (!Number.isFinite(radius) || radius <= 0 || radius > 10000) {
+    return ATTENDANCE_RADIUS_METERS;
+  }
+  return radius === 100 ? ATTENDANCE_RADIUS_METERS : radius;
+}
+
 export function haversineDistanceMeters(latitude1, longitude1, latitude2, longitude2) {
   const coordinates = [latitude1, longitude1, latitude2, longitude2];
   if (!coordinates.every(Number.isFinite)
