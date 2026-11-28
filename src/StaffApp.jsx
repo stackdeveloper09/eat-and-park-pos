@@ -314,7 +314,7 @@ button:focus-visible, select:focus-visible { outline: 2px solid #B8860B; outline
 .ep-pos-root .ep-pos-order-header span { font-size: 12px; }
 .ep-pos-root .ep-pos-order-header { min-height: 42px; padding: 4px 9px; }
 .ep-pos-root .ep-pos-customer {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(104px, .8fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px;
   min-height: 48px;
   padding: 4px 8px;
@@ -323,6 +323,12 @@ button:focus-visible, select:focus-visible { outline: 2px solid #B8860B; outline
 .ep-pos-root .ep-pos-customer select { min-height: 36px; height: 36px; padding: 0 7px; color: #332f2a; font-size: 13px; }
 .ep-pos-root .ep-pos-customer label { grid-template-columns: minmax(0, 1fr); align-content: center; gap: 0; font-size: 10px; }
 .ep-pos-root .ep-pos-customer label select { height: 32px; min-height: 32px; }
+.ep-pos-root .ep-pos-guest-control { display: grid; align-content: center; gap: 2px; min-width: 0; color: #5b5146; font-size: 10px; font-weight: 800; }
+.ep-pos-root .ep-pos-guest-control > div { display: flex; align-items: center; justify-content: space-between; gap: 3px; min-height: 32px; }
+.ep-pos-root .ep-pos-guest-control button { width: 25px; height: 28px; border: 1px solid #e8dfd3; border-radius: 7px; background: #fff8ec; color: #252525; cursor: pointer; font-size: 15px; font-weight: 900; }
+.ep-pos-root .ep-pos-guest-control button:disabled { cursor: not-allowed; opacity: .5; }
+.ep-pos-root .ep-pos-guest-control input { width: 34px; min-width: 0; height: 28px; min-height: 28px; border: 1px solid #e8dfd3; border-radius: 6px; padding: 0 2px; background: #fff; color: #1f1f1f; font-size: 12px; font-weight: 900; text-align: center; }
+.ep-pos-root .ep-pos-guest-control input:disabled { opacity: .7; }
 .ep-pos-root .ep-pos-cart-row { min-height: 40px; grid-template-columns: minmax(0, 1fr) 78px 84px 30px; grid-template-areas: "info controls price remove"; align-items: center; gap: 4px; padding: 2px 5px; }
 .ep-pos-root .ep-pos-cart-row:not(.no-image) { grid-template-columns: 36px minmax(0, 1fr) 78px 84px 30px; grid-template-areas: "image info controls price remove"; }
 .ep-pos-root .ep-pos-cart-row.no-image .ep-pos-note-input { grid-column: 1 / -1; }
@@ -490,6 +496,18 @@ const timeAgo = (ts) => {
 };
 const TABLE_COUNT = 20;
 ;
+const DEFAULT_TABLES = Array.from({ length: TABLE_COUNT }, (_, index) => ({
+  id: index + 1,
+  name: `Table ${index + 1}`,
+  floor: null,
+}));
+const getOrderGuests = (order) => {
+  if (Number.isFinite(Number(order?.guests)) && Number(order?.guests) > 0) return Number(order.guests);
+  if (Number.isFinite(Number(order?.guestCount)) && Number(order?.guestCount) > 0) return Number(order.guestCount);
+  if (Number.isFinite(Number(order?.guestsCount)) && Number(order?.guestsCount) > 0) return Number(order.guestsCount);
+  if (Array.isArray(order?.guests) && order.guests.length > 0) return order.guests.length;
+  return null;
+};
 const isWalkInStr = (s) => /^walk-?in$/i.test(String(s || "").trim());
 const custLabel = (o) => {
   const c = (o && o.customer) || {};
@@ -1107,6 +1125,7 @@ function StaffAppInner() {
   const [orders, setOrders] = useState([]);
   const [dueOrders, setDueOrders] = useState([]);
   const [menu, setMenu] = useState([]);
+  const [tableLayout, setTableLayout] = useState(null);
   const [activeTab, setActiveTab] = useState("tables");
   const [selectedTable, setSelectedTable] = useState(null);
   const [cart, setCart] = useState({});
@@ -1299,6 +1318,12 @@ function StaffAppInner() {
     setMenu([]);
   }
 }, (err) => { console.error("menu listener:", err); });
+    const unsubTableLayout = onSnapshot(doc(db, "settings", "tableLayout"), (snap) => {
+      setTableLayout(snap.exists() ? snap.data() : null);
+    }, (err) => {
+      console.error("table layout listener:", err);
+      toast(`Table layout load nahi hua: ${getErrorMessage(err)}`, "error");
+    });
     const startRange = new Date(); startRange.setDate(startRange.getDate() - 30); startRange.setHours(0,0,0,0);
     const unsubOrders = onSnapshot(query(collection(db, "orders"), where("createdAt", ">=", startRange.getTime())), (snap) => {
       const newOrders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -1318,7 +1343,7 @@ function StaffAppInner() {
         }
       }
     );
-    return () => { unsubMenu(); unsubOrders(); unsubDue(); };
+    return () => { unsubMenu(); unsubTableLayout(); unsubOrders(); unsubDue(); };
   }, [passwordChangeRequired, user]);
 
   useEffect(() => {
@@ -1563,6 +1588,17 @@ function StaffAppInner() {
 
 {activeTab === "tables" && (
           <TablesView C={C} isMobile={isMobile} orders={orders}
+            isOwner={isOwner} tableLayout={tableLayout}
+            onSaveLayout={async (layout) => {
+              const nextLayout = { ...layout, updatedAt: Date.now(), updatedBy: auth.currentUser?.uid || "" };
+              await setDoc(doc(db, "settings", "tableLayout"), nextLayout, { merge: true });
+              setTableLayout(nextLayout);
+            }}
+            onGuestChange={async (order, guests) => {
+              if (!order?.id || !Number.isInteger(guests) || guests < 1) return;
+              await updateDoc(doc(db, "orders", order.id), { guests });
+              setOrders(previous => previous.map(item => item.id === order.id ? { ...item, guests } : item));
+            }}
             onTableClick={(t) => { haptic(); setSelectedTable(t); setCart((p) => (estimatePending ? p : {})); setEstimatePending(false); setBillOrder(null); setAddMoreMode(false); }}
             onEditBill={(order) => { haptic(); setBillOrder(order); setSelectedTable(order.table); setCart({}); setAddMoreMode(false); }}
             onAddMore={(order) => { haptic(); setBillOrder(order); setSelectedTable(order.table); setCart({}); setAddMoreMode(true); }}
@@ -1571,7 +1607,8 @@ function StaffAppInner() {
             onMove={(order) => setTableMove(order)}
             onFeedback={(order) => setFeedbackOrder(order)}
             search={searchTable} setSearch={setSearchTable}
-            todayRevenue={todayRevenue} unpaidCount={unpaidOrderCount} />
+            todayRevenue={todayRevenue}
+            tableOptions={Array.isArray(tableLayout?.tables) && tableLayout.tables.length ? tableLayout.tables : DEFAULT_TABLES} />
         )}
         
 {activeTab === "bookings" && (
@@ -1702,11 +1739,20 @@ function StaffAppInner() {
       {feedbackOrder && <FeedbackModal C={C} isMobile={isMobile} order={feedbackOrder} onClose={() => setFeedbackOrder(null)} />}
       {tableMerge && <TableMergeModal C={C} isMobile={isMobile} primaryOrder={tableMerge} allOrders={orders} onClose={() => setTableMerge(null)} />}
       {splitBillOrder && <SplitBillModal C={C} isMobile={isMobile} order={splitBillOrder} onClose={() => setSplitBillOrder(null)} />}
-      {tableMove && <TableMoveModal C={C} isMobile={isMobile} order={tableMove} allOrders={orders} onClose={() => setTableMove(null)} />}
+      {tableMove && <TableMoveModal C={C} isMobile={isMobile} order={tableMove} allOrders={orders}
+        tableOptions={Array.isArray(tableLayout?.tables) && tableLayout.tables.length ? tableLayout.tables : DEFAULT_TABLES}
+        onClose={() => setTableMove(null)} />}
       <ConnectionBadge C={C} />
 
       {selectedTable && (
-        <BillingView C={C} isMobile={isMobile} table={selectedTable} menu={menu} orders={orders} setOrders={setOrders} cart={cart} setCart={setCart} waiterName={waiterName} existingOrder={billOrder} isOwner={isOwner} addMoreMode={addMoreMode} onShowEstimate={() => setShowEstimate(true)}
+        <BillingView C={C} isMobile={isMobile} table={selectedTable} menu={menu} orders={orders} setOrders={setOrders} cart={cart} setCart={setCart} waiterName={waiterName} existingOrder={billOrder} isOwner={isOwner} addMoreMode={addMoreMode}
+          tableOptions={Array.isArray(tableLayout?.tables) && tableLayout.tables.length ? tableLayout.tables : DEFAULT_TABLES}
+          onGuestChange={async (order, guests) => {
+            if (!order?.id || !Number.isInteger(guests) || guests < 1) return;
+            await updateDoc(doc(db, "orders", order.id), { guests });
+            setOrders(previous => previous.map(item => item.id === order.id ? { ...item, guests } : item));
+          }}
+          onShowEstimate={() => setShowEstimate(true)}
           onBack={() => { setSelectedTable(null); setCart({}); setEstimatePending(false); setBillOrder(null); setAddMoreMode(false); }}
           onSwitchAdd={() => { setCart({}); setAddMoreMode(true); }} onSplit={(o) => setSplitBillOrder(o)} onPaidSuccess={() => { haptic(60); setConfetti(true); setTimeout(() => setConfetti(false), 1800); }} />
       )}
@@ -1813,22 +1859,37 @@ function ParcelView({ C, isMobile, orders, onNew, onBill, onAdd, onOpenOrder }) 
   );
 }
 
-function TablesView({ C, isMobile, orders, onTableClick, onEditBill, onAddMore, onMerge, onSplit, onMove, onFeedback, search, setSearch, todayRevenue, unpaidCount }) {
+function TablesView({ C, isMobile, orders, onTableClick, onEditBill, onAddMore, onMerge, onSplit, onMove, onFeedback, search, setSearch, todayRevenue, isOwner, tableLayout, tableOptions, onSaveLayout, onGuestChange }) {
+  const toast = useToast();
   const [tick, setTick] = useState(0);
   const [selectedTable, setSelectedTable] = useState(null);
   const [selectedFloor, setSelectedFloor] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [editingLayout, setEditingLayout] = useState(false);
+  const [draftTables, setDraftTables] = useState([]);
+  const [draftFloors, setDraftFloors] = useState([]);
+  const [newFloor, setNewFloor] = useState("");
+  const [layoutError, setLayoutError] = useState("");
+  const [savingLayout, setSavingLayout] = useState(false);
   useEffect(() => { const iv = setInterval(() => setTick((x) => x + 1), 30000); return () => clearInterval(iv); }, []);
 
   const metrics = useMemo(() => getOrderMetrics(orders), [orders, tick]);
+  const dineInMetrics = useMemo(() => getOrderMetrics(orders.filter(isOpenDineIn)), [orders, tick]);
   const tableData = useMemo(() => {
-    const map = {};
-    for (let i = 1; i <= TABLE_COUNT; i++) map[i] = { table: i, order: null, floor: null };
+    const map = new Map(tableOptions.map(config => [Number(config.id), {
+      ...config,
+      table: Number(config.id),
+      order: null,
+      floor: config.floor || null,
+    }]).filter(([id]) => Number.isFinite(id) && id > 0));
     orders.filter(isOpenDineIn).forEach(order => {
       const table = Number(order.table);
-      if (map[table]) map[table] = { ...map[table], order, floor: order.floor ?? null };
+      if (map.has(table)) {
+        const config = map.get(table);
+        map.set(table, { ...config, order, floor: config.floor || order.floor || null });
+      }
     });
-    return Object.values(map).map(table => {
+    return Array.from(map.values()).map(table => {
       const ageMin = table.order ? metrics.durationMinutes(table.order) : 0;
       const heatColor = !table.order ? C.line
         : ageMin < 15 ? "#10B981"
@@ -1842,18 +1903,21 @@ function TablesView({ C, isMobile, orders, onTableClick, onEditBill, onAddMore, 
         heatColor,
       };
     });
-  }, [orders, metrics, C.line]);
+  }, [orders, metrics, C.line, tableOptions]);
 
-  const floorOptions = [...new Set(tableData
+  const floorOptions = [...new Set([
+    ...(Array.isArray(tableLayout?.floors) ? tableLayout.floors : []),
+    ...tableData
     .map(table => table.floor)
     .filter(floor => floor !== null && floor !== undefined && String(floor).trim() !== "")
-    .map(String))];
+    .map(String),
+  ].filter(floor => String(floor).trim() !== "").map(String))];
   const statusCounts = tableData.reduce((counts, table) => {
     counts[table.status] = (counts[table.status] || 0) + 1;
     return counts;
-  }, { available: 0, occupied: 0, reserved: 0, cleaning: 0 });
+  }, { available: 0, occupied: 0 });
   const filteredTables = tableData.filter(table => {
-    const matchesSearch = !search.trim() || String(table.table).includes(search.trim());
+    const matchesSearch = !search.trim() || String(table.table).includes(search.trim()) || String(table.name || "").toLowerCase().includes(search.trim().toLowerCase());
     const matchesFloor = selectedFloor === "all" || String(table.floor) === selectedFloor;
     const matchesStatus = statusFilter === "all" || table.status === statusFilter;
     return matchesSearch && matchesFloor && matchesStatus;
@@ -1872,8 +1936,7 @@ function TablesView({ C, isMobile, orders, onTableClick, onEditBill, onAddMore, 
     }
   }, [filteredTables, selectedTable]);
 
-  const guests = currentOrder?.guestCount ?? currentOrder?.guestsCount ??
-    (Array.isArray(currentOrder?.guests) ? currentOrder.guests.length : null);
+  const guests = getOrderGuests(currentOrder);
   const seats = currentOrder?.seats ?? currentOrder?.seatCount ?? currentTable?.seats;
   const customerName = currentOrder ? custLabel(currentOrder) : "";
   const customerPhone = currentOrder?.customer?.phone || currentOrder?.phone || "";
@@ -1885,9 +1948,107 @@ function TablesView({ C, isMobile, orders, onTableClick, onEditBill, onAddMore, 
   const seatedAt = currentOrder ? toMillis(currentOrder.createdAt) : 0;
   const seatedTime = seatedAt ? new Date(seatedAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "—";
 
-  const cardAction = (label, className, onClick) => (
-    <button type="button" className={`ep-floor-action ${className}`} onClick={onClick}>{label}</button>
-  );
+  const beginLayoutEdit = (autoArrange = false) => {
+    const floors = floorOptions.length ? [...floorOptions] : ["Ground Floor"];
+    setDraftFloors(floors);
+    setDraftTables(tableData.map(table => ({
+      id: table.table,
+      name: table.name || `Table ${table.table}`,
+      seats: table.seats ?? "",
+      shape: table.shape === "rectangle" ? "rectangle" : "round",
+      floor: table.floor || floors[0],
+    })).sort((a, b) => autoArrange ? a.id - b.id : 0));
+    setLayoutError("");
+    setEditingLayout(true);
+  };
+  const addLayoutTable = () => {
+    const id = Math.max(0, ...draftTables.map(table => Number(table.id) || 0)) + 1;
+    setDraftTables(previous => [...previous, { id, name: `Table ${id}`, seats: 4, shape: "round", floor: draftFloors[0] || "Ground Floor" }]);
+  };
+  const moveLayoutTable = (index, direction) => {
+    setDraftTables(previous => {
+      const next = [...previous];
+      const target = index + direction;
+      if (target < 0 || target >= next.length) return previous;
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  };
+  const renameLayoutFloor = (oldName, nextName) => {
+    setDraftFloors(previous => previous.map(floor => floor === oldName ? nextName : floor));
+    setDraftTables(previous => previous.map(table => table.floor === oldName ? { ...table, floor: nextName } : table));
+  };
+  const saveLayout = async () => {
+    if (savingLayout) return;
+    const floors = draftFloors.map(floor => String(floor).trim()).filter(Boolean);
+    if (!floors.length || !draftTables.length) {
+      setLayoutError("At least one floor and one table are required.");
+      return;
+    }
+    if (new Set(floors.map(floor => floor.toLowerCase())).size !== floors.length) {
+      setLayoutError("Floor names must be unique.");
+      return;
+    }
+    const normalized = draftTables.map(table => {
+      const seats = Number(table.seats);
+      return {
+        id: Number(table.id),
+        name: String(table.name || "").trim() || `Table ${table.id}`,
+        ...(Number.isInteger(seats) && seats > 0 ? { seats } : {}),
+        shape: table.shape === "rectangle" ? "rectangle" : "round",
+        floor: floors.includes(String(table.floor).trim()) ? String(table.floor).trim() : floors[0],
+      };
+    });
+    if (normalized.some(table => !Number.isInteger(table.id) || table.id < 1) ||
+      new Set(normalized.map(table => table.id)).size !== normalized.length ||
+      draftTables.some(table => String(table.seats).trim() && (!Number.isInteger(Number(table.seats)) || Number(table.seats) < 1))) {
+      setLayoutError("Table IDs must be unique and seat counts must be positive whole numbers.");
+      return;
+    }
+    setSavingLayout(true);
+    setLayoutError("");
+    try {
+      await onSaveLayout({ floors, tables: normalized });
+      setEditingLayout(false);
+      setSelectedFloor("all");
+      toast("Table layout saved", "success");
+    } catch (error) {
+      setLayoutError(getErrorMessage(error));
+      toast(`Layout save nahi hua: ${getErrorMessage(error)}`, "error");
+    } finally {
+      setSavingLayout(false);
+    }
+  };
+  const deleteLayoutTable = (table) => {
+    const hasUnpaidOrder = orders.some(order =>
+      order.orderType === "dine_in" &&
+      Number(order.table) === Number(table.id) &&
+      !order.paid &&
+      !PAID_STATUSES.some(status => String(status).toLowerCase() === String(order.paymentStatus || "").toLowerCase()) &&
+      order.status !== "cancelled"
+    );
+    if (hasUnpaidOrder) {
+      setLayoutError(`${table.name} cannot be removed while it has an unpaid order.`);
+      return;
+    }
+    if (draftTables.length <= 1) {
+      setLayoutError("At least one table must remain in the layout.");
+      return;
+    }
+    if (!window.confirm(`Remove ${table.name} from the layout?`)) return;
+    setDraftTables(previous => previous.filter(item => item.id !== table.id));
+    setLayoutError("");
+  };
+  const openTable = (table) => {
+    setSelectedTable(table.table);
+    if (table.order) onEditBill(table.order);
+    else onTableClick(table.table);
+  };
+  const adjustGuests = (delta) => {
+    if (!currentOrder) return;
+    const next = Math.max(1, (guests || 1) + delta);
+    onGuestChange(currentOrder, next).catch(error => toast(`Guests update nahi hue: ${getErrorMessage(error)}`, "error"));
+  };
 
   return (
     <section className="ep-floor">
@@ -1916,7 +2077,7 @@ function TablesView({ C, isMobile, orders, onTableClick, onEditBill, onAddMore, 
 
       <nav className="ep-floor__chips ep-floor__status-filters" aria-label="Table status">
         <Chip active={statusFilter === "all"} onClick={() => setStatusFilter("all")}>All ({tableData.length})</Chip>
-        {["available", "occupied", "reserved", "cleaning"].map(status => (
+        {["available", "occupied"].map(status => (
           <Chip key={status} active={statusFilter === status} onClick={() => setStatusFilter(status)}>
             <span className={`ep-floor__status-dot ep-floor__status-dot--${status}`} />
             {status[0].toUpperCase() + status.slice(1)} ({statusCounts[status]})
@@ -1926,7 +2087,7 @@ function TablesView({ C, isMobile, orders, onTableClick, onEditBill, onAddMore, 
 
       <div className="ep-floor__metrics">
         <KpiCard label="Revenue today" value={<AnimatedNumber value={todayRevenue} />} icon="₹" />
-        <KpiCard label="Unpaid orders" value={<AnimatedNumber value={unpaidCount} format={false} />} icon="⌁" />
+        <KpiCard label="Unpaid dine-in orders" value={<AnimatedNumber value={dineInMetrics.activeCount} format={false} />} icon="⌁" />
         <KpiCard label="Occupied tables" value={`${statusCounts.occupied}/${tableData.length}`} icon="▦" />
       </div>
 
@@ -1937,43 +2098,104 @@ function TablesView({ C, isMobile, orders, onTableClick, onEditBill, onAddMore, 
               <h3>{selectedFloor === "all" ? "Dining Area" : selectedFloor}</h3>
               <p>{filteredTables.length} tables · Select a table to view details</p>
             </div>
-            {floorOptions.length === 0 && <span className="ep-floor__auto-layout">Auto layout</span>}
+            <div className="ep-floor__layout-actions">
+              {isOwner && !editingLayout ? (
+                <>
+                  <button type="button" className="ep-floor__auto-layout" onClick={() => beginLayoutEdit(true)}>Auto layout</button>
+                  <button type="button" className="ep-floor__edit-layout" onClick={() => beginLayoutEdit(false)}>Edit layout</button>
+                </>
+              ) : floorOptions.length === 0 && <span className="ep-floor__auto-layout">Auto layout</span>}
+            </div>
           </div>
+          {editingLayout && isOwner && (
+            <div className="ep-floor-layout-editor">
+              <div className="ep-floor-layout-editor__heading">
+                <strong>Edit restaurant layout</strong>
+                <span>Changes are saved to this restaurant's table layout.</span>
+              </div>
+              <div className="ep-floor-layout-editor__floors">
+                {draftFloors.map((floor, index) => (
+                  <label key={`${index}-${floor}`}>
+                    <span>Floor {index + 1}</span>
+                    <input value={floor} maxLength={40} onChange={event => renameLayoutFloor(floor, event.target.value)} aria-label={`Floor ${index + 1} name`} />
+                  </label>
+                ))}
+                <div className="ep-floor-layout-editor__add-floor">
+                  <input value={newFloor} maxLength={40} onChange={event => setNewFloor(event.target.value)} placeholder="New floor name" aria-label="New floor name" />
+                  <button type="button" onClick={() => {
+                    const name = newFloor.trim();
+                    if (name && !draftFloors.some(floor => floor.toLowerCase() === name.toLowerCase())) {
+                      setDraftFloors(previous => [...previous, name]);
+                      setNewFloor("");
+                    }
+                  }}>Add floor</button>
+                </div>
+              </div>
+              <div className="ep-floor-layout-editor__table-list">
+                {draftTables.map((table, index) => (
+                  <div className="ep-floor-layout-editor__table" key={table.id}>
+                    <label><span>Name</span><input value={table.name} maxLength={40} onChange={event => setDraftTables(previous => previous.map(item => item.id === table.id ? { ...item, name: event.target.value } : item))} /></label>
+                    <label><span>Seats</span><input type="number" min="1" step="1" value={table.seats} onChange={event => setDraftTables(previous => previous.map(item => item.id === table.id ? { ...item, seats: event.target.value } : item))} /></label>
+                    <label><span>Shape</span><select value={table.shape} onChange={event => setDraftTables(previous => previous.map(item => item.id === table.id ? { ...item, shape: event.target.value } : item))}><option value="round">Round</option><option value="rectangle">Rectangle</option></select></label>
+                    <label><span>Floor</span><select value={table.floor} onChange={event => setDraftTables(previous => previous.map(item => item.id === table.id ? { ...item, floor: event.target.value } : item))}>{draftFloors.map(floor => <option key={floor} value={floor}>{floor}</option>)}</select></label>
+                    <div className="ep-floor-layout-editor__order">
+                      <button type="button" aria-label={`Move ${table.name} up`} disabled={index === 0} onClick={() => moveLayoutTable(index, -1)}>↑</button>
+                      <button type="button" aria-label={`Move ${table.name} down`} disabled={index === draftTables.length - 1} onClick={() => moveLayoutTable(index, 1)}>↓</button>
+                      <button type="button" className="is-remove" onClick={() => deleteLayoutTable(table)}>Remove</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="ep-floor-layout-editor__footer">
+                <button type="button" onClick={addLayoutTable}>+ Add table</button>
+                <span role="alert">{layoutError}</span>
+                <div>
+                  <button type="button" onClick={() => { setEditingLayout(false); setLayoutError(""); }}>Cancel</button>
+                  <button type="button" className="is-save" disabled={savingLayout} onClick={saveLayout}>{savingLayout ? "Saving..." : "Save layout"}</button>
+                </div>
+              </div>
+            </div>
+          )}
           <div className="ep-floor__table-grid">
             {filteredTables.map(table => {
-              const tableGuests = table.order?.guestCount ?? table.order?.guestsCount ??
-                (Array.isArray(table.order?.guests) ? table.order.guests.length : null);
+              const tableGuests = getOrderGuests(table.order);
               const tableSeats = table.order?.seats ?? table.order?.seatCount ?? table.seats;
               return (
                 <article
                   key={table.table}
-                  className={`ep-floor-table ep-floor-table--${table.status}${selectedTable === table.table ? " is-selected" : ""}`}
+                  role="group"
+                  tabIndex={0}
+                  aria-label={`${table.name || `Table ${table.table}`}, ${table.status}`}
+                  className={`ep-floor-table ep-floor-table--${table.status}${table.shape === "round" ? " is-round" : ""}${selectedTable === table.table ? " is-selected" : ""}${editingLayout ? " is-layout-editing" : ""}`}
+                  onClick={event => {
+                    if (!editingLayout && !event.target.closest("button")) openTable(table);
+                  }}
+                  onKeyDown={event => {
+                    if (!editingLayout && event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
+                      event.preventDefault();
+                      openTable(table);
+                    }
+                  }}
                 >
-                  <button type="button" className="ep-floor-table__select" onClick={() => setSelectedTable(table.table)} aria-pressed={selectedTable === table.table}>
+                  <div className="ep-floor-table__select">
                     <div className="ep-floor-table__top">
-                      <strong>T{table.table}</strong>
+                      <strong>{table.name || `Table ${table.table}`}</strong>
                       <StatusBadge status={table.status} kind="table" />
                     </div>
-                    <span className="ep-floor-table__seats">{tableSeats != null ? `${tableSeats} seats` : "Seats —"}</span>
+                    {tableSeats != null && <span className="ep-floor-table__seats">{tableSeats} seats</span>}
                     {table.order ? (
                       <span className="ep-floor-table__occupancy">
                         <i className="ep-floor__heat-dot" style={{ backgroundColor: table.heatColor }} />
-                        {tableGuests ?? "—"} guests · {table.ageMin}m
+                        {[tableGuests != null ? `${tableGuests} guests` : "", `${table.ageMin}m`].filter(Boolean).join(" · ")}
                       </span>
                     ) : <span className="ep-floor-table__occupancy">Available now</span>}
-                  </button>
-                  {table.order ? (
+                  </div>
+                  {table.order && !editingLayout ? (
                     <div className="ep-floor-table__actions">
-                      <IconButton className="ep-floor-kot-button" title="Print KOT" aria-label="Print KOT" onClick={() => printKOT(table.order)}>KOT</IconButton>
-                      {cardAction("+ Add", "", () => onAddMore(table.order))}
-                      {cardAction("Edit", "", () => onEditBill(table.order))}
-                      {cardAction("Move", "", () => onMove(table.order))}
-                      {cardAction("WA", "", () => whatsappBill(table.order))}
-                      {cardAction("Bill", "", () => printBill(table.order))}
+                      <IconButton className="ep-floor-kot-button" title="Print KOT" aria-label="Print KOT" onClick={event => { event.stopPropagation(); printKOT(table.order); }}>KOT</IconButton>
+                      <button type="button" className="ep-floor-action" onClick={event => { event.stopPropagation(); printBill(table.order); }}>Bill</button>
                     </div>
-                  ) : (
-                    <button type="button" className="ep-floor-table__new-order" onClick={() => onTableClick(table.table)}>New Order</button>
-                  )}
+                  ) : null}
                 </article>
               );
             })}
@@ -1987,13 +2209,22 @@ function TablesView({ C, isMobile, orders, onTableClick, onEditBill, onAddMore, 
               <div className="ep-floor__detail-heading">
                 <div>
                   <p className="ep-floor__eyebrow">Selected table</p>
-                  <h3>Table T{currentTable.table}</h3>
+                  <h3>{currentTable.name || `Table ${currentTable.table}`}</h3>
                 </div>
                 <StatusBadge status={currentTable.status} kind="table" />
               </div>
               <dl className="ep-floor__facts">
-                <div><dt>Guests</dt><dd>{guests ?? "—"}</dd></div>
-                <div><dt>Seats</dt><dd>{seats ?? "—"}</dd></div>
+                {currentOrder && (
+                  <div className="ep-floor__guest-control">
+                    <dt>Guests</dt>
+                    <dd>
+                      <button type="button" aria-label="Decrease guests" disabled={(guests || 1) <= 1} onClick={() => adjustGuests(-1)}>−</button>
+                      <strong>{guests || 1}</strong>
+                      <button type="button" aria-label="Increase guests" onClick={() => adjustGuests(1)}>+</button>
+                    </dd>
+                  </div>
+                )}
+                {seats != null && <div><dt>Seats</dt><dd>{seats}</dd></div>}
                 <div><dt>Waiter</dt><dd>{currentOrder?.waiter || "—"}</dd></div>
                 <div><dt>Seated since</dt><dd>{currentOrder ? seatedTime : "—"}</dd></div>
                 <div><dt>Duration</dt><dd>{currentOrder ? `${metrics.durationMinutes(currentOrder)}m` : "—"}</dd></div>
@@ -2030,11 +2261,21 @@ function TablesView({ C, isMobile, orders, onTableClick, onEditBill, onAddMore, 
                 ) : <p className="ep-floor__no-items">No active order for this table.</p>}
               </div>
 
-              <div className="ep-floor__detail-actions">
-                <PrimaryButton onClick={() => currentOrder ? onEditBill(currentOrder) : onTableClick(currentTable.table)}>
-                  {currentOrder ? "Open Order" : "Open Table"}
-                </PrimaryButton>
-                {currentOrder && <SecondaryButton onClick={() => onSplit(currentOrder)}>Split</SecondaryButton>}
+                <div className="ep-floor__detail-actions">
+                  <PrimaryButton onClick={() => currentOrder ? onEditBill(currentOrder) : onTableClick(currentTable.table)}>
+                    {currentOrder ? "Open Order" : "New Order"}
+                  </PrimaryButton>
+                  {currentOrder && (
+                    <>
+                      <SecondaryButton onClick={() => onAddMore(currentOrder)}>Add Items</SecondaryButton>
+                      <SecondaryButton onClick={() => printKOT(currentOrder)}>KOT</SecondaryButton>
+                      <SecondaryButton onClick={() => printBill(currentOrder)}>Bill</SecondaryButton>
+                      <SecondaryButton onClick={() => whatsappBill(currentOrder)}>WhatsApp</SecondaryButton>
+                      <SecondaryButton onClick={() => onMove(currentOrder)}>Move</SecondaryButton>
+                      <SecondaryButton onClick={() => onSplit(currentOrder)}>Split</SecondaryButton>
+                      {onMerge && <SecondaryButton onClick={() => onMerge(currentOrder)}>Merge</SecondaryButton>}
+                    </>
+                  )}
               </div>
             </>
           ) : (
@@ -3069,12 +3310,12 @@ function TableMergeModal({ C, isMobile, primaryOrder, allOrders, onClose }) {
   );
 }
 
-function TableMoveModal({ C, isMobile, order, allOrders, onClose }) {
+function TableMoveModal({ C, isMobile, order, allOrders, tableOptions, onClose }) {
   const toast = useToast();
   const [to, setTo] = useState(null);
   const [busy, setBusy] = useState(false);
   const occupied = new Set(allOrders.filter(isOpenDineIn).map(o => Number(o.table)));
-  const free = Array.from({ length: TABLE_COUNT }, (_, i) => i + 1).filter(n => !occupied.has(n));
+  const free = tableOptions.filter(table => !occupied.has(Number(table.id)));
   const move = async () => {
     if (!to || busy) return;
     setBusy(true);
@@ -3098,8 +3339,8 @@ function TableMoveModal({ C, isMobile, order, allOrders, onClose }) {
       <div style={{ fontSize: 12, color: C.gray, marginBottom: 14 }}>Table {order.table} ka order kis khali table par bhejna hai?</div>
       {free.length === 0 && <div style={{ padding: 20, textAlign: "center", color: C.gray }}>Koi table khali nahi</div>}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
-        {free.map(n => (
-          <button key={n} onClick={() => setTo(n)} style={{ padding: "14px 0", borderRadius: 10, border: `2px solid ${to === n ? C.gold : C.line}`, background: to === n ? C.redLight : "transparent", color: to === n ? C.gold : C.ink, fontWeight: 900, fontSize: 16, cursor: "pointer", fontFamily: "monospace" }}>{n}</button>
+        {free.filter(table => Number(table.id) !== Number(order.table)).map(table => (
+          <button key={table.id} onClick={() => setTo(Number(table.id))} style={{ padding: "14px 6px", borderRadius: 10, border: `2px solid ${to === Number(table.id) ? C.gold : C.line}`, background: to === Number(table.id) ? C.redLight : "transparent", color: to === Number(table.id) ? C.gold : C.ink, fontWeight: 900, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>{table.name || `Table ${table.id}`}</button>
         ))}
       </div>
       <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
@@ -3222,7 +3463,7 @@ function getMenuCategoryIcon(category) {
   return "🍲";
 }
 
-function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCart, waiterName, existingOrder, addMoreMode, onBack, isOwner, onPaidSuccess, onSwitchAdd, onSplit, onShowEstimate }) {
+function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCart, waiterName, existingOrder, addMoreMode, onBack, isOwner, onPaidSuccess, onSwitchAdd, onSplit, onShowEstimate, tableOptions, onGuestChange }) {
   const toast = useToast();
   const haptic = useHaptic();
   const [search, setSearch] = useState("");
@@ -3233,10 +3474,20 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
   const [orderMode, setOrderMode] = useState(() => table === "parcel" ? (existingOrder && isDeliveryOrder(existingOrder) ? "delivery" : "takeaway") : "dine_in");
   const [tableNumber, setTableNumber] = useState(() => table === "parcel" ? (Number(existingOrder?.table) || 1) : Number(table));
   const [selectedWaiter, setSelectedWaiter] = useState(() => existingOrder?.waiter || waiterName || "Staff");
+  const [guestCount, setGuestCount] = useState(() => getOrderGuests(existingOrder) || 1);
+  const [guestInput, setGuestInput] = useState(String(getOrderGuests(existingOrder) || 1));
   const [itemNotes, setItemNotes] = useState({});
   const [noteOpenId, setNoteOpenId] = useState(null);
   const activeTable = orderMode === "dine_in" ? tableNumber : "parcel";
   const orderModeDisabled = Boolean(existingOrder || addMoreMode);
+  const guestEditDisabled = Boolean(existingOrder && (
+    existingOrder.paid ||
+    PAID_STATUSES.some(status => String(status).toLowerCase() === String(existingOrder.paymentStatus || "").toLowerCase()) ||
+    existingOrder.status === "cancelled"
+  ));
+  const visibleTableOptions = tableOptions.some(option => Number(option.id) === tableNumber)
+    ? tableOptions
+    : [...tableOptions, { id: tableNumber, name: `Table ${tableNumber}` }];
   const waiterOptions = useMemo(() => Array.from(new Set([
     waiterName,
     existingOrder?.waiter,
@@ -3249,6 +3500,8 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
     setOrderMode(initialMode);
     setTableNumber(table === "parcel" ? (Number(existingOrder?.table) || 1) : Number(table));
     setSelectedWaiter(existingOrder?.waiter || waiterName || "Staff");
+    setGuestCount(getOrderGuests(existingOrder) || 1);
+    setGuestInput(String(getOrderGuests(existingOrder) || 1));
   }, [table, existingOrder?.id, existingOrder?.fulfillmentMode, existingOrder?.customer?.address, existingOrder?.waiter, waiterName]);
   useEffect(() => {
     const nextNotes = {};
@@ -3288,6 +3541,14 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
   const [custName, setCustName] = useState("");
   const [custPhone, setCustPhone] = useState("");
   const [custAddress, setCustAddress] = useState("");
+  const changeGuestCount = (value) => {
+    const next = Math.max(1, Math.floor(Number(value) || 1));
+    setGuestCount(next);
+    setGuestInput(String(next));
+    if (existingOrder && !guestEditDisabled && onGuestChange) {
+      onGuestChange(existingOrder, next).catch(error => toast(`Guests update nahi hue: ${getErrorMessage(error)}`, "error"));
+    }
+  };
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [newName, setNewName] = useState("");
   const [newPrice, setNewPrice] = useState("");
@@ -3627,6 +3888,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
         id: orderId,
         table: isDineIn ? activeTable : "",
         orderType: isDineIn ? "dine_in" : "parcel",
+        ...(isDineIn ? { guests: guestCount } : {}),
         ...(isDineIn ? {} : { fulfillmentMode: orderMode }),
         customer: {
           name: custName || "Walk-in",
@@ -3829,7 +4091,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
                 <label className="ep-pos-table-picker">
                   <span>Table</span>
                   <select value={tableNumber} disabled={orderModeDisabled} onChange={event => setTableNumber(Number(event.target.value))} aria-label="Table number">
-                    {Array.from({ length: TABLE_COUNT }, (_, index) => index + 1).map(number => <option key={number} value={number}>T{number}</option>)}
+                    {visibleTableOptions.map(option => <option key={option.id} value={Number(option.id)}>{option.name || `Table ${option.id}`}</option>)}
                   </select>
                 </label>
               )}
@@ -3965,6 +4227,19 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
                 {waiterOptions.map(name => <option key={name} value={name}>{name}</option>)}
               </select>
             </label>
+            {orderMode === "dine_in" && (
+              <div className="ep-pos-guest-control">
+                <span>Guests</span>
+                <div>
+                  <button type="button" aria-label="Decrease guests" disabled={guestCount <= 1 || guestEditDisabled} onClick={() => changeGuestCount(guestCount - 1)}>−</button>
+                  <input aria-label="Guest count" type="number" min="1" step="1" value={guestInput} disabled={guestEditDisabled} onChange={event => setGuestInput(event.target.value)} onBlur={() => {
+                    if (!Number.isInteger(Number(guestInput)) || Number(guestInput) < 1) setGuestInput(String(guestCount));
+                    else changeGuestCount(guestInput);
+                  }} />
+                  <button type="button" aria-label="Increase guests" disabled={guestEditDisabled} onClick={() => changeGuestCount(guestCount + 1)}>+</button>
+                </div>
+              </div>
+            )}
           </div>
           {orderMode === "delivery" && <div className="ep-pos-address"><input aria-label="Delivery address" placeholder="Delivery address" value={custAddress} onChange={e => setCustAddress(e.target.value)} /></div>}
           <div className="ep-order-items ep-pos-order-items">
