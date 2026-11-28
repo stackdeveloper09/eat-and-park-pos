@@ -175,135 +175,190 @@ button:focus-visible, select:focus-visible { outline: 2px solid #B8860B; outline
 .ep-pos-root .ep-pos-topbar { min-height: 60px; }
 .ep-pos-root .ep-pos-topbar__title strong { font-size: 19px; }
 .ep-pos-root .ep-pos-topbar__total { font-variant-numeric: tabular-nums; font-weight: 800; }
+.ep-pos-root .ep-pos-filter-row {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 5px;
+  padding: 4px 0;
+  background: #fff8ec;
+}
+.ep-pos-root .ep-pos-menu-tools { gap: 6px; }
 .ep-pos-root .ep-pos-menu-grid {
-  grid-template-columns: repeat(auto-fill, minmax(136px, 1fr)) !important;
-  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)) !important;
+  gap: 8px;
 }
 .ep-pos-root .ep-pos-menu-card {
   position: relative;
   display: flex;
   min-width: 0;
-  min-height: 146px;
-  border: 1px solid #e8dfd3;
-  border-radius: 14px;
+  height: 72px;
+  min-height: 68px;
+  overflow: hidden;
+  border: 1.5px solid #d9c9b0;
+  border-radius: 11px;
   background: #fff;
-  box-shadow: 0 3px 10px rgba(49,37,22,.05);
+  box-shadow: 0 2px 6px rgba(49,37,22,.05);
+  cursor: pointer;
+  transition: background .12s ease, border-color .12s ease, transform .12s ease, box-shadow .12s ease;
 }
 .ep-pos-root .ep-pos-menu-card.is-selected {
   border-color: #f28a24;
   background: #fff8ed;
-  box-shadow: 0 0 0 1px rgba(242,138,36,.2);
+  box-shadow: 0 0 0 1px rgba(242,138,36,.2), 0 2px 6px rgba(49,37,22,.05);
 }
+.ep-pos-root .ep-pos-menu-card:hover { border-color: #ec8b28; box-shadow: 0 4px 10px rgba(49,37,22,.1); }
+.ep-pos-root .ep-pos-menu-card:active { transform: scale(.985); }
 .ep-pos-root .ep-pos-menu-card__content {
   display: grid;
-  grid-template-rows: 1fr auto;
+  grid-template-rows: minmax(0, 1fr) auto;
   align-content: stretch;
-  gap: 8px;
+  gap: 2px;
   width: 100%;
   min-width: 0;
-  min-height: 144px;
-  padding: 34px 10px 10px;
+  min-height: 0;
+  padding: 5px 6px;
 }
 .ep-pos-root .ep-pos-menu-card__name {
-  display: block;
-  overflow: visible;
+  display: -webkit-box;
+  overflow: hidden;
   padding: 0;
-  color: #332f2a;
-  font-size: 16px;
-  font-weight: 600;
-  line-height: 1.28;
+  padding-left: 12px;
+  padding-right: 24px;
+  color: #1f1f1f;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.15;
   text-align: left;
-  text-overflow: clip;
+  text-overflow: ellipsis;
   white-space: normal;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
-.ep-pos-root .ep-pos-menu-card__bottom { display: flex; align-items: flex-end; justify-content: space-between; gap: 5px; }
+.ep-pos-root .ep-pos-menu-card__bottom { display: flex; align-items: center; justify-content: space-between; gap: 4px; min-width: 0; }
 .ep-pos-root .ep-pos-menu-card__price {
-  color: #c75a12;
+  color: #a54700;
   font-family: "Poppins", Inter, sans-serif;
-  font-size: 17px;
+  font-size: 14px;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.ep-pos-root .ep-pos-diet-dot { top: 9px; left: 10px; width: 12px; height: 12px; }
-.ep-pos-root .ep-pos-favourite {
+.ep-pos-root .ep-pos-diet-dot { top: 7px; left: 7px; width: 9px; height: 9px; border-width: 1px; }
+.ep-pos-root .ep-pos-menu-card__qty-badge {
+  position: absolute;
   top: 4px;
-  right: 5px;
-  width: 30px;
-  height: 30px;
-  min-height: 30px !important;
-  font-size: 16px;
+  right: 34px;
+  z-index: 3;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 4px;
+  border-radius: 10px;
+  background: #f97316;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 20px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
-.ep-pos-root .ep-pos-stepper { width: 104px; height: 44px; flex: 0 0 104px; }
-.ep-pos-root .ep-pos-stepper button { width: 34px; min-height: 44px; height: 44px; }
-.ep-pos-root .ep-pos-stepper span { width: 34px; font-size: 15px !important; font-weight: 800; font-variant-numeric: tabular-nums; }
+.ep-pos-root .ep-pos-favourite {
+  top: 1px;
+  right: 1px;
+  z-index: 4;
+  width: 26px;
+  height: 26px;
+  min-height: 26px !important;
+  font-size: 14px;
+}
+.ep-pos-root .ep-pos-menu-card__stepper { width: 78px; height: 26px; flex: 0 0 78px; }
+.ep-pos-root .ep-pos-stepper { width: 78px; height: 28px; flex: 0 0 78px; }
+.ep-pos-root .ep-pos-stepper button { width: 24px; min-width: 24px; min-height: 26px !important; height: 26px; font-size: 15px; }
+.ep-pos-root .ep-pos-stepper span,
+.ep-pos-root .ep-pos-stepper input { width: 28px; min-height: 26px; height: 26px; font-size: 12px !important; font-weight: 800; font-variant-numeric: tabular-nums; }
 .ep-pos-root .ep-pos-mode-row,
 .ep-pos-root .ep-pos-filter-row { flex-wrap: wrap; gap: 8px; }
 .ep-pos-root .ep-pos-mode-chips .ep-ds-chip,
 .ep-pos-root .ep-pos-diet-chips .ep-ds-chip,
 .ep-pos-root .ep-pos-category-card,
 .ep-pos-root .ep-pos-estimate-button,
-.ep-pos-root .ep-pos-fav-button { min-height: 44px; font-size: 14px; }
+.ep-pos-root .ep-pos-fav-button { min-height: 38px; font-size: 13px; }
 .ep-pos-root .ep-pos-category-card { color: #332f2a; }
-.ep-pos-root .ep-pos-search { min-height: 44px; width: min(100%, 340px); }
-.ep-pos-root .ep-pos-search input { font-size: 15px; }
-.ep-pos-root .ep-pos-order-panel { flex-basis: 432px; }
+.ep-pos-root .ep-pos-search { min-height: 44px; width: 100%; }
+.ep-pos-root .ep-pos-search input { font-size: 16px; }
+.ep-pos-root .ep-pos-order-panel { height: 100%; min-height: 0; flex-basis: 432px; display: flex; flex-direction: column; overflow: hidden; }
 .ep-pos-root .ep-pos-order-header strong { font-size: 17px; }
 .ep-pos-root .ep-pos-order-header span { font-size: 12px; }
+.ep-pos-root .ep-pos-order-header { min-height: 42px; padding: 4px 9px; }
 .ep-pos-root .ep-pos-customer {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(104px, .8fr);
-  gap: 8px;
-  min-height: 66px;
-  padding: 8px 10px;
+  gap: 6px;
+  min-height: 48px;
+  padding: 4px 8px;
 }
 .ep-pos-root .ep-pos-customer input,
-.ep-pos-root .ep-pos-customer select { min-height: 44px; height: 44px; padding: 0 9px; color: #332f2a; font-size: 14px; }
-.ep-pos-root .ep-pos-customer label { grid-template-columns: minmax(0, 1fr); align-content: center; gap: 2px; font-size: 11px; }
-.ep-pos-root .ep-pos-customer label select { height: 36px; min-height: 36px; }
-.ep-pos-root .ep-pos-cart-row { min-height: 54px; grid-template-columns: minmax(0, 1fr) auto 44px; grid-template-areas: "info controls remove"; gap: 6px; padding: 4px 8px; }
-.ep-pos-root .ep-pos-cart-row:not(.no-image) { grid-template-columns: 42px minmax(0, 1fr) auto 44px; grid-template-areas: "image info controls remove"; }
+.ep-pos-root .ep-pos-customer select { min-height: 36px; height: 36px; padding: 0 7px; color: #332f2a; font-size: 13px; }
+.ep-pos-root .ep-pos-customer label { grid-template-columns: minmax(0, 1fr); align-content: center; gap: 0; font-size: 10px; }
+.ep-pos-root .ep-pos-customer label select { height: 32px; min-height: 32px; }
+.ep-pos-root .ep-pos-cart-row { min-height: 40px; grid-template-columns: minmax(0, 1fr) 78px 84px 30px; grid-template-areas: "info controls price remove"; align-items: center; gap: 4px; padding: 2px 5px; }
+.ep-pos-root .ep-pos-cart-row:not(.no-image) { grid-template-columns: 36px minmax(0, 1fr) 78px 84px 30px; grid-template-areas: "image info controls price remove"; }
 .ep-pos-root .ep-pos-cart-row.no-image .ep-pos-note-input { grid-column: 1 / -1; }
-.ep-pos-root .ep-pos-cart-name { font-size: 14px; }
-.ep-pos-root .ep-pos-cart-controls .ep-pos-stepper { width: 92px; height: 40px; }
-.ep-pos-root .ep-pos-cart-controls .ep-pos-stepper button { width: 30px; min-height: 40px; height: 40px; }
-.ep-pos-root .ep-pos-cart-controls > strong { font-size: 13px; font-variant-numeric: tabular-nums; }
-.ep-pos-root .ep-pos-remove-item { width: 40px; height: 40px; min-height: 40px; font-size: 21px; }
-.ep-pos-root .ep-pos-rate,
-.ep-pos-root .ep-pos-note-toggle { min-height: 24px; font-size: 11px; }
+.ep-pos-root .ep-pos-cart-info { display: flex; align-items: center; min-width: 0; }
+.ep-pos-root .ep-pos-cart-name { display: flex; align-items: center; gap: 4px; min-width: 0; font-size: 13px; white-space: nowrap; text-overflow: ellipsis; }
+.ep-pos-root .ep-pos-cart-name { overflow: hidden; }
+.ep-pos-root .ep-pos-note-toggle { flex: 0 0 24px; min-height: 24px; width: 24px; padding: 0; border: 0; background: transparent; color: #a64b0b; font-size: 15px; }
+.ep-pos-root .ep-pos-cart-controls .ep-pos-stepper { width: 78px; height: 28px; }
+.ep-pos-root .ep-pos-cart-controls .ep-pos-stepper button { width: 24px; min-height: 26px !important; height: 26px; }
+.ep-pos-root .ep-pos-cart-controls .ep-pos-stepper input { height: 26px !important; }
+.ep-pos-root .ep-pos-cart-price { grid-area: price; display: flex; align-items: center; justify-content: flex-end; gap: 2px; min-width: 0; }
+.ep-pos-root .ep-pos-cart-price > strong { overflow: hidden; color: #332f2a; font-size: 12px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ep-pos-root .ep-pos-rate { flex: 0 0 20px; width: 20px; min-height: 24px; padding: 0; border: 0; background: transparent; color: #a64b0b; font-size: 12px; }
+.ep-pos-root .ep-pos-remove-item { width: 28px; height: 28px; min-height: 28px !important; font-size: 17px; }
 .ep-pos-root .ep-order-extras {
-  flex: 0 0 112px;
-  grid-template-rows: repeat(3, minmax(32px, auto));
-  gap: 2px;
-  padding: 5px 10px;
+  flex: 0 0 42px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: 34px;
+  gap: 6px;
+  padding: 4px 8px;
   border-color: #eee6dc;
   background: #fff;
 }
 .ep-pos-root .ep-pos-detail-trigger {
   justify-content: space-between;
+  min-width: 0;
   min-height: 34px;
-  padding: 0 10px;
+  padding: 0 7px;
   border: 1px solid #e8dfd3;
   border-radius: 8px;
   background: #fff;
   color: #332f2a;
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
 }
-.ep-pos-root .ep-pos-detail-trigger strong { color: #a64b0b; font-size: 13px; font-weight: 700; }
-.ep-pos-root .ep-pos-detail-trigger strong span { margin-left: 5px; font-size: 18px; }
-.ep-pos-root .ep-order-extras > label { min-height: 32px; color: #514638 !important; font-size: 12px !important; }
-.ep-pos-root .ep-order-extras > label input { min-height: 32px; height: 32px !important; font-size: 14px !important; }
-.ep-pos-root .ep-pos-order-footer { gap: 6px; padding: 7px 10px !important; background: #fff !important; }
-.ep-pos-root .ep-pos-payment-summary { gap: 5px; }
-.ep-pos-root .ep-pos-payment-summary__lines { display: grid; gap: 2px; color: #514638; font-size: 13px; }
-.ep-pos-root .ep-pos-payment-summary__lines span { display: flex; justify-content: space-between; gap: 10px; white-space: normal; }
+.ep-pos-root .ep-pos-detail-trigger strong { overflow: hidden; color: #a64b0b; font-size: 11px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.ep-pos-root .ep-pos-detail-trigger strong span { margin-left: 2px; font-size: 15px; }
+.ep-pos-root .ep-pos-order-footer { gap: 4px; padding: 4px 8px !important; background: #fff !important; }
+.ep-pos-root .ep-pos-payment-summary { gap: 4px; }
+.ep-pos-root .ep-pos-payment-summary__lines { display: flex; flex-wrap: wrap; gap: 2px 7px; color: #514638; font-size: 12px; line-height: 1.2; }
+.ep-pos-root .ep-pos-payment-summary__lines span { white-space: nowrap; }
 .ep-pos-root .ep-pos-payment-summary__lines strong,
 .ep-pos-root .ep-pos-amount-bar strong { font-variant-numeric: tabular-nums; font-weight: 800; }
-.ep-pos-root .ep-pos-amount-bar { min-height: 48px; font-size: 15px; }
-.ep-pos-root .ep-pos-amount-bar strong { font-size: 20px; }
-.ep-pos-root .ep-pos-place-order { min-height: 48px; font-size: 16px; }
+.ep-pos-root .ep-pos-amount-bar {
+  min-height: 44px;
+  padding: 0 10px;
+  border: 1px solid #edc69f;
+  border-radius: 9px;
+  background: #fff3e5 !important;
+  color: #8f420d;
+  font-size: 14px;
+}
+.ep-pos-root .ep-pos-amount-bar strong { color: #8f420d; font-size: 18px; }
+.ep-pos-root .ep-pos-place-order,
+.ep-pos-root .ep-pos-collect-pay { min-height: 48px; font-size: 15px; }
 .ep-pos-root .ep-pos-place-order:disabled {
   opacity: 1 !important;
   background: #e9e4dc !important;
@@ -311,7 +366,9 @@ button:focus-visible, select:focus-visible { outline: 2px solid #B8860B; outline
   box-shadow: none !important;
   cursor: not-allowed;
 }
+.ep-pos-root .ep-pos-collect-pay:disabled { opacity: 1 !important; background: #e9e4dc !important; color: #514638 !important; box-shadow: none !important; }
 .ep-pos-root .ep-payment-bar { padding: 7px 10px; border-color: #eee6dc; background: #fff; }
+.ep-pos-root .ep-pos-payment-label { color: #332f2a !important; font-size: 14px !important; }
 .ep-pos-root .ep-payment-options button { min-height: 44px; border-radius: 9px; font-size: 14px; }
 .ep-pos-root .ep-pos-order-actions button { min-height: 44px; font-size: 12px; }
 .ep-pos-root .ep-pos-detail-overlay {
@@ -358,25 +415,27 @@ button:focus-visible, select:focus-visible { outline: 2px solid #B8860B; outline
   .ep-pos-root .ep-pos-menu-grid { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
 }
 @media (max-width: 768px) {
-  .ep-pos-root .ep-pos-menu-grid { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+  .ep-pos-root .ep-pos-menu-grid { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; }
   .ep-pos-root .ep-pos-order-panel { flex-basis: auto; }
-  .ep-pos-root .ep-pos-filter-row { align-items: stretch; flex-direction: column; }
+  .ep-pos-root .ep-pos-filter-row { align-items: stretch; grid-template-columns: minmax(0, 1fr); }
   .ep-pos-root .ep-pos-search { width: 100%; }
   .ep-pos-root .ep-pos-diet-chips { width: 100%; flex-wrap: wrap; }
   .ep-pos-root .ep-pos-diet-chips .ep-ds-chip { min-height: 44px; font-size: 13px; }
+  .ep-pos-root .ep-pos-cart-row { grid-template-columns: minmax(0, 1fr) 78px 84px 30px; }
+  .ep-pos-root .ep-payment-bar > div { flex-wrap: wrap; }
 }
 @media (max-width: 600px) {
   .ep-pos-root .ep-pos-menu-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px; }
   .ep-pos-root .ep-pos-menu-card__content { padding-right: 7px; padding-left: 7px; }
   .ep-pos-root .ep-pos-menu-card__price { font-size: 15px; }
-  .ep-pos-root .ep-pos-stepper { width: 88px; flex-basis: 88px; }
-  .ep-pos-root .ep-pos-stepper button { width: 30px; }
+  .ep-pos-root .ep-pos-stepper { width: 78px; flex-basis: 78px; }
+  .ep-pos-root .ep-pos-stepper button { width: 24px; }
   .ep-pos-root .ep-pos-customer { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ep-pos-root .ep-pos-customer label { grid-column: 1 / -1; grid-template-columns: 52px minmax(0, 1fr); align-items: center; }
   .ep-pos-root .ep-pos-customer label select { min-height: 44px; height: 44px; }
   .ep-pos-root .ep-pos-detail-overlay { align-items: flex-end; padding: 0; }
   .ep-pos-root .ep-pos-detail-dialog { width: 100%; max-height: 92dvh; padding: 20px 18px calc(20px + env(safe-area-inset-bottom)); border-radius: 20px 20px 0 0; }
-  .ep-pos-root .ep-pos-order-footer { max-height: 45vh; overflow-y: auto; }
+  .ep-pos-root .ep-pos-order-footer { max-height: none; overflow: visible; }
   .ep-pos-root .ep-payment-options { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
   .ep-pos-root .ep-payment-options button { padding: 4px 2px; font-size: 13px; }
 }
@@ -3689,7 +3748,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
       )}
 
       {/* Menu and order columns fill the space below the orange header; each column owns its own scroll area. */}
-      <div className="ep-billing-layout ep-pos-layout" style={{ flexDirection: isMobile ? "column" : "row", overflow: isMobile ? "hidden" : "hidden", padding: isMobile ? 8 : 6, paddingBottom: isMobile ? 72 : 6 }}>
+      <div className="ep-billing-layout ep-pos-layout" style={{ flexDirection: isMobile ? "column" : "row", overflow: "hidden", padding: isMobile ? 8 : 6, paddingBottom: isMobile && mobileBillingTab === "menu" ? 72 : isMobile ? 8 : 6 }}>
         <div className="ep-billing-menu-column ep-pos-menu-column" style={{ display: isMobile && mobileBillingTab === "order" ? "none" : "flex", height: isMobile ? "100%" : "100%", flex: isMobile ? "1 1 auto" : "1 1 auto" }}>
           {isMobile && mobileBillingTab === "payment" && (
             <div style={{ flex: "0 0 auto", display: "grid", gap: 10 }}>
@@ -3714,23 +3773,33 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
               )}
             </div>
           )}
-          {!(isMobile && mobileBillingTab === "payment") && (
-            <div className="ep-pos-menu-tools">
-              <SecondaryButton className="ep-pos-estimate-button" onClick={onShowEstimate}>📋 Estimate</SecondaryButton>
-              {favItems.length > 0 && !search.trim() && (
-                <button className={`ep-pos-fav-button${showFav ? " is-active" : ""}`} onClick={() => { haptic(); setShowFav((v) => { const n = !v; try { localStorage.setItem("staff_fav_open", n ? "1" : "0"); } catch (e) {} return n; }); }}>⭐ Favourites ({favItems.length}) {showFav ? "▲" : "▼"}</button>
-              )}
-            </div>
-          )}
-          {!(isMobile && mobileBillingTab === "payment") && showFav && favItems.length > 0 && !search.trim() && (
-            <div className="ep-pos-favourites">
-              {favItems.map(m => (
-                <button key={"fav" + m.id} onClick={() => setQty(m.id, (cart[m.id] || 0) + 1)}>{pinnedIds.includes(m.id) ? "📌" : "⭐"} {m.name}{cart[m.id] ? " ×" + cart[m.id] : ""}</button>
-              ))}
-            </div>
-          )}
           {isMobile && mobileBillingTab === "payment" ? null : (
             <>
+              <div className="ep-pos-filter-row">
+                <label className="ep-pos-search">
+                  <span aria-hidden="true">⌕</span>
+                  <input placeholder="Search dishes..." value={search} onChange={event => setSearch(event.target.value)} aria-label="Search dishes" />
+                  {search && <button type="button" aria-label="Clear search" onClick={() => setSearch("")}>×</button>}
+                </label>
+                <div className="ep-pos-diet-chips" aria-label="Dietary filter">
+                  {[["all", "All"], ["veg", "Veg"], ["non-veg", "Non Veg"], ["egg", "Egg"]].map(([value, label]) => (
+                    <Chip key={value} active={dietFilter === value} onClick={() => setDietFilter(value)}>{label}</Chip>
+                  ))}
+                </div>
+              </div>
+              <div className="ep-pos-menu-tools">
+                <SecondaryButton className="ep-pos-estimate-button" onClick={onShowEstimate}>📋 Estimate</SecondaryButton>
+                {favItems.length > 0 && !search.trim() && (
+                  <button className={`ep-pos-fav-button${showFav ? " is-active" : ""}`} onClick={() => { haptic(); setShowFav((v) => { const n = !v; try { localStorage.setItem("staff_fav_open", n ? "1" : "0"); } catch (e) {} return n; }); }}>⭐ Favourites ({favItems.length}) {showFav ? "▲" : "▼"}</button>
+                )}
+              </div>
+              {showFav && favItems.length > 0 && !search.trim() && (
+                <div className="ep-pos-favourites">
+                  {favItems.map(m => (
+                    <button key={"fav" + m.id} onClick={() => setQty(m.id, (cart[m.id] || 0) + 1)}>{pinnedIds.includes(m.id) ? "📌" : "⭐"} {m.name}{cart[m.id] ? " ×" + cart[m.id] : ""}</button>
+                  ))}
+                </div>
+              )}
               <div className="ep-category-chips ep-pos-category-row">
                 {categories.map(c => (
                   <Chip key={c} active={category === c} className="ep-pos-category-card" onClick={() => { haptic(); setCategory(c); }}>
@@ -3740,24 +3809,12 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
                   </Chip>
                 ))}
               </div>
-              <div className="ep-pos-filter-row">
-                <div className="ep-pos-diet-chips" aria-label="Dietary filter">
-                  {[["all", "All"], ["veg", "Veg"], ["non-veg", "Non Veg"], ["egg", "Egg"]].map(([value, label]) => (
-                    <Chip key={value} active={dietFilter === value} onClick={() => setDietFilter(value)}>{label}</Chip>
-                  ))}
-                </div>
-                <label className="ep-pos-search">
-                  <span aria-hidden="true">⌕</span>
-                  <input placeholder="Search dishes..." value={search} onChange={event => setSearch(event.target.value)} aria-label="Search dishes" />
-                  {search && <button type="button" aria-label="Clear search" onClick={() => setSearch("")}>×</button>}
-                </label>
-              </div>
-              <div className="ep-menu-grid ep-pos-menu-grid" style={{ gridTemplateColumns: isMobile ? "repeat(2, minmax(0, 1fr))" : undefined }}>
+              <div className="ep-menu-grid ep-pos-menu-grid">
                 {filtered.map(m => {
                   const q = cart[m.id] || 0;
                   const dietType = getMenuDietType(m);
                   return (
-                    <article key={m.id} className={`ep-pos-menu-card${q > 0 ? " is-selected" : ""}`}>
+                    <article key={m.id} role="button" tabIndex={0} aria-label={`Add ${m.name} to order`} className={`ep-pos-menu-card${q > 0 ? " is-selected" : ""}`} onClick={() => setQty(m.id, q + 1)} onKeyDown={event => { if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); setQty(m.id, q + 1); } }}>
                       {SHOW_MENU_IMAGES && (
                         <div className="ep-pos-menu-card__image">
                           <span aria-hidden="true">🍽️</span>
@@ -3765,16 +3822,19 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
                         </div>
                       )}
                       <i className={`ep-pos-diet-dot ep-pos-diet-dot--${dietType}`} aria-label={dietType} title={dietType} />
-                      {isOwner && <button type="button" className={`ep-pos-favourite${pinnedIds.includes(m.id) ? " is-pinned" : ""}`} title="Favourite pin" aria-label={`Pin ${m.name}`} onClick={() => togglePin(m.id)}>{pinnedIds.includes(m.id) ? "★" : "☆"}</button>}
+                      {q > 0 && <span className="ep-pos-menu-card__qty-badge" aria-label={`Quantity ${q}`}>{q}</span>}
+                      {isOwner && <button type="button" className={`ep-pos-favourite${pinnedIds.includes(m.id) ? " is-pinned" : ""}`} title="Favourite pin" aria-label={`Pin ${m.name}`} onClick={event => { event.stopPropagation(); togglePin(m.id); }}>{pinnedIds.includes(m.id) ? "★" : "☆"}</button>}
                       <div className="ep-pos-menu-card__content">
-                        <button type="button" className="ep-pos-menu-card__name" onClick={() => setQty(m.id, q + 1)}>{m.name}</button>
+                        <span className="ep-pos-menu-card__name">{m.name}</span>
                         <div className="ep-pos-menu-card__bottom">
                           <strong className="ep-pos-menu-card__price">{inr(m.price)}</strong>
-                          <div className="ep-pos-stepper" aria-label={`Quantity for ${m.name}`}>
-                            <button type="button" onClick={() => setQty(m.id, q - 1)} aria-label={`Decrease ${m.name}`}>−</button>
-                            <span>{q}</span>
-                            <button type="button" onClick={() => setQty(m.id, q + 1)} aria-label={`Increase ${m.name}`}>+</button>
-                          </div>
+                          {q > 0 && (
+                            <div className="ep-pos-stepper ep-pos-menu-card__stepper" aria-label={`Quantity for ${m.name}`}>
+                              <button type="button" onClick={event => { event.stopPropagation(); setQty(m.id, q - 1); }} aria-label={`Decrease ${m.name}`}>−</button>
+                              <span>{q}</span>
+                              <button type="button" onClick={event => { event.stopPropagation(); setQty(m.id, q + 1); }} aria-label={`Increase ${m.name}`}>+</button>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </article>
@@ -3809,7 +3869,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
               )}
               <div className="ep-payment-bar">
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <strong style={{ flex: "0 0 auto", color: C.ink, fontSize: 13 }}>Payment</strong>
+                  <strong className="ep-pos-payment-label" style={{ flex: "0 0 auto", color: "#332f2a", fontSize: 13 }}>Payment</strong>
                   <div className="ep-payment-options" aria-label="Payment method">
                     {[["cash", "Cash"], ["upi", "UPI"], ["card", "Card"], ["split", "Split"], ["due", "Due/Part"]].map(([id, label]) => (
                       <button key={id} type="button" aria-pressed={payMode === id} onClick={() => { if (id === "split" && payMode !== "split") setSplitCash(String(totalAmount)); if (id === "due") { setSplitCash("0"); setPartialOnline("0"); } if (id === "cash") setCashReceived(""); setPayMode(id); }} style={{ borderRadius: 9, border: `1px solid ${payMode === id ? "#e88732" : "#e8dfd3"}`, background: payMode === id ? "#fff0df" : "#f7f7f5", color: payMode === id ? "#a64b0b" : "#332f2a", fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>{label}</button>
@@ -3872,9 +3932,8 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
                     <div className="ep-pos-cart-name">
                       {m.name}{m.portion ? " (" + m.portion + ")" : ""}
                       {isNew && <span className="ep-pos-new-item">NEW</span>}
+                      <button type="button" className="ep-pos-note-toggle" aria-label={`${itemNotes[id] ? "Edit" : "Add"} note for ${m.name}`} title={itemNotes[id] || "Add note"} onClick={() => setNoteOpenId(noteOpenId === id ? null : id)}>{itemNotes[id] ? "✎" : "＋"}</button>
                     </div>
-                    <button type="button" className="ep-pos-rate" onClick={() => editRate(id, rates[id] ?? m.price, m.name)}>✎ {inr(rates[id] ?? m.price)} each</button>
-                    <button type="button" className="ep-pos-note-toggle" onClick={() => setNoteOpenId(noteOpenId === id ? null : id)}>{itemNotes[id] ? "Edit Note" : "Add Note"}{itemNotes[id] ? " · " + itemNotes[id] : ""}</button>
                   </div>
                   <div className="ep-pos-cart-controls">
                     <div className="ep-pos-stepper">
@@ -3882,6 +3941,9 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
                       <QtyInput value={q} onCommit={value => setQty(id, value)} style={{ flex: 1, width: "100%", minWidth: 24, textAlign: "center", fontWeight: 900, fontSize: 13, color: C.ink, border: "none", background: "transparent", outline: "none", fontFamily: "monospace" }} />
                       <button type="button" onClick={() => setQty(id, q + 1)} aria-label={`Increase ${m.name}`}>+</button>
                     </div>
+                  </div>
+                  <div className="ep-pos-cart-price">
+                    <button type="button" className="ep-pos-rate" aria-label={`Edit price for ${m.name}`} title={`Unit price ${inr(rates[id] ?? m.price)}`} onClick={() => editRate(id, rates[id] ?? m.price, m.name)}>✎</button>
                     <strong>{inr((rates[id] ?? m.price) * (Number(q) || 0))}</strong>
                   </div>
                   <button type="button" className="ep-pos-remove-item" aria-label={`Remove ${m.name}`} onClick={() => setQty(id, 0)}>×</button>
@@ -3892,7 +3954,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
           </div>
           {/* Fixed extras replace the old accordion: no overlay and no panel scroll. */}
           {!addMoreMode && (
-            <div className="ep-order-extras">
+            <div className="ep-order-extras ep-pos-billing-rates">
               <button type="button" className="ep-order-extras-row ep-pos-detail-trigger" onClick={() => { setDiscountDraft(String(discount || 0)); setBillingDetail("discount"); }}>
                 <span>Discount</span>
                 <strong>{discount ? `${discount}% · -${inr(discAmt)}` : "None"} <span aria-hidden="true">›</span></strong>
@@ -3901,24 +3963,20 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
                 <span>GST</span>
                 <strong>{gstRate ? `${gstRate}% · +${inr(gstAmt)}` : "No GST"} <span aria-hidden="true">›</span></strong>
               </button>
-              <label className="ep-order-extras-row" style={{ color: C.gray, fontSize: 11, fontWeight: 800 }}>
-                <span style={{ flex: 1 }}>Cash discount</span>
-                <input aria-label="Cash discount" type="number" min={0} max={grossSub - discAmt + gstAmt} value={cashDiscount || ""} onChange={e => setCashDiscount(Math.min(grossSub - discAmt + gstAmt, Math.max(0, Number(e.target.value) || 0)))} placeholder="₹" style={{ width: 82, height: 26, boxSizing: "border-box", padding: "3px 8px", border: `1px solid ${C.line}`, borderRadius: 6, fontSize: 12, background: C.card, color: C.ink, fontWeight: 700, outline: "none" }} />
-              </label>
             </div>
           )}
 
           {/* Footer stays fixed; actions for existing bills remain available. */}
-          <div className="ep-order-footer ep-pos-order-footer" style={{ flex: existingOrder && !addMoreMode ? "0 0 auto" : "0 0 44px", flexDirection: existingOrder && !addMoreMode ? "column" : "row", alignItems: existingOrder && !addMoreMode ? "stretch" : "center", padding: "2px 8px", background: C.light, borderTop: `1px solid ${C.line}`, boxShadow: "0 -6px 14px rgba(0,0,0,0.16)" }}>
+          <div className="ep-order-footer ep-pos-order-footer" style={{ flex: "0 0 auto", flexDirection: "column", alignItems: "stretch", padding: "2px 8px", background: C.light, borderTop: `1px solid ${C.line}`, boxShadow: "0 -6px 14px rgba(0,0,0,0.16)" }}>
             <div className="ep-pos-payment-summary">
               <div className="ep-pos-payment-summary__lines">
-                <span>Subtotal <strong>{inr(grossSub)}</strong></span>
-                <span>Discount <strong>-{inr(discAmt)}</strong></span>
-                <span>GST <strong>+{inr(gstAmt)}</strong></span>
-                {cashDiscount > 0 && <span>Cash discount <strong>-{inr(cashDiscount)}</strong></span>}
+                <span>Subtotal {inr(grossSub)}</span>
+                <span>Discount -{inr(discAmt)}</span>
+                <span>GST +{inr(gstAmt)}</span>
+                {cashDiscount > 0 && <span>Cash disc -{inr(cashDiscount)}</span>}
                 {addMoreMode && <span>Running {inr(existingSubtotal)} · New +{inr(cartSubtotal)}</span>}
               </div>
-              <div className="ep-pos-amount-bar"><span>Amount to be Paid</span><strong>{inr(addMoreMode ? grossSub : totalAmount)}</strong></div>
+              <div className="ep-pos-amount-bar"><span>Amount to be paid</span><strong>{inr(addMoreMode ? grossSub : totalAmount)}</strong></div>
             </div>
             {(!existingOrder || addMoreMode) && (
               <PrimaryButton className="ep-pos-place-order" onClick={handlePlaceOrder} disabled={cartItems.length === 0 || placing}>
@@ -3939,7 +3997,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
                     <button onClick={onSwitchAdd} disabled={placing}>+ Add items</button>
                   )}
                 </div>
-                {!existingOrder.paid && <button onClick={handlePaidPrint} disabled={placing || (payMode === "cash" && cashReceived !== "" && (!Number.isFinite(Number(cashReceived)) || Number(cashReceived) < totalAmount))} style={{ width: "100%", marginTop: 8, padding: "12px 10px", border: "none", borderRadius: 9, background: `linear-gradient(135deg, ${C.green} 0%, #15803D 100%)`, color: "#fff", fontWeight: 900, fontSize: 14, cursor: placing || (payMode === "cash" && cashReceived !== "" && Number(cashReceived) < totalAmount) ? "not-allowed" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, boxShadow: `0 5px 14px ${C.green}35` }}>{placing ? <Spinner /> : (payMode === "due" ? "Record as due" : `Collect ${inr(totalAmount)} & print`)}</button>}
+                {!existingOrder.paid && <button className="ep-pos-collect-pay" onClick={handlePaidPrint} disabled={placing || (payMode === "cash" && cashReceived !== "" && (!Number.isFinite(Number(cashReceived)) || Number(cashReceived) < totalAmount))} style={{ width: "100%", marginTop: 8, padding: "12px 10px", border: "none", borderRadius: 9, background: "#f97316", color: "#fff", fontWeight: 900, fontSize: 14, cursor: placing || (payMode === "cash" && cashReceived !== "" && Number(cashReceived) < totalAmount) ? "not-allowed" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, boxShadow: "0 5px 14px rgba(249,115,22,.24)" }}>{placing ? <Spinner /> : (payMode === "due" ? "Record as due" : `Collect ${inr(totalAmount)} & print`)}</button>}
                 {isOwner && !existingOrder.paid && (
                   <button className="ep-pos-cancel-order" onClick={() => setCancelOpen(true)}>Cancel order</button>
                 )}
@@ -3966,6 +4024,10 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
                 <label className="ep-pos-detail-field">
                   <span>Custom %</span>
                   <input type="number" min={0} max={100} disabled={!isOwner} value={discountDraft} onChange={event => setDiscountDraft(event.target.value)} />
+                </label>
+                <label className="ep-pos-detail-field ep-pos-cash-discount-field">
+                  <span>Cash discount</span>
+                  <input aria-label="Cash discount" type="number" min={0} max={grossSub - discAmt + gstAmt} value={cashDiscount || ""} onChange={e => setCashDiscount(Math.min(grossSub - discAmt + gstAmt, Math.max(0, Number(e.target.value) || 0)))} placeholder="₹" />
                 </label>
                 <div className="ep-pos-detail-preview">
                   <div><span>Subtotal</span><strong>{inr(grossSub)}</strong></div>
