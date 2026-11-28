@@ -1,6 +1,7 @@
 import { describe, test, expect } from "vitest";
 import {
   isActiveOrder, isOpenDineIn, isOpenParcel, isDue, paidOrders, paidRevenue, buildPaidPatch, isDeliveryOrder, nextKitchenStatus, OPEN_WINDOW_MS,
+  getOrderMetrics,
 } from "./orderRules.js";
 
 const now = () => Date.now();
@@ -93,6 +94,29 @@ describe("order rules", () => {
   });
   test("finalTotal na ho to 0 maana jaye", () => {
     expect(paidRevenue([mk({ paid: true, finalTotal: undefined })])).toBe(0);
+  });
+  test("shared metrics revenue, active orders aur duration ko consistent rakhta hai", () => {
+    const now = 60 * 60 * 1000;
+    const list = [
+      mk({ id: "active", createdAt: now - 24 * 60 * 1000 }),
+      mk({ id: "paid", paid: true, createdAt: now - 60 * 60 * 1000, finalTotal: 250 }),
+      mk({ id: "cancelled", paid: true, status: "cancelled", finalTotal: 500 }),
+      mk({ id: "due", paymentStatus: "due" }),
+    ];
+
+    const metrics = getOrderMetrics(list, now);
+
+    expect(metrics.revenue).toBe(250);
+    expect(metrics.paidCount).toBe(1);
+    expect(metrics.activeOrders.map((order) => order.id)).toEqual(["active"]);
+    expect(metrics.activeCount).toBe(1);
+    expect(metrics.durationMinutes(list[0])).toBe(24);
+  });
+  test("shared duration metric clamps future and missing timestamps", () => {
+    const metrics = getOrderMetrics([], 1000);
+
+    expect(metrics.durationMinutes({ createdAt: 2000 })).toBe(0);
+    expect(metrics.durationMinutes({})).toBe(0);
   });
   test("buildPaidPatch: sahi fields likhta hai", () => {
     const p = buildPaidPatch(mk({}), "upi", "Ramesh");

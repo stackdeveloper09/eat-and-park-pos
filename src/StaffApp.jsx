@@ -7,7 +7,8 @@ import StaffPayroll from "./Staff";
 import StaffPasswordChange from "./StaffPasswordChange";
 import { ADMIN_ROLES, normalizeRole } from "./lib/roles";
 import { assertEditable, resolveVendorId } from "./lib/guards";
-import { PAID_STATUSES, OPEN_WINDOW_MS, isOpenParcel, isOpenDineIn, isActiveOrder, paidOrders, paidRevenue, buildPaidPatch, isDeliveryOrder, nextKitchenStatus } from "./lib/orderRules";
+import { PAID_STATUSES, OPEN_WINDOW_MS, isOpenParcel, isOpenDineIn, isActiveOrder, paidOrders, paidRevenue, getOrderMetrics, buildPaidPatch, isDeliveryOrder, nextKitchenStatus } from "./lib/orderRules";
+import { Chip, StatusBadge, TypeBadge, PrimaryButton, SecondaryButton, IconButton, KpiCard } from "./DesignSystem";
 import { paymentBreakdown, partialPayment, splitPayment } from "./lib/billing";
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged, setPersistence, browserLocalPersistence } from "firebase/auth";
 import {
@@ -17,6 +18,16 @@ import {
 const csvCellSafe = (c) => {
   const s = String(c ?? "");
   return /^[=+\-@\t\r]/.test(s) ? "'" + s : s;
+};
+const exportOrdersCsv = (orders, rangeLabel) => {
+  const rows = [["Bill","Date","Type","Table","Waiter","Items","Subtotal","Discount","GST","Total","Payment","Paid"]];
+  orders.forEach(o => rows.push([(o.id || "").slice(1,9).toUpperCase(), new Date(o.createdAt).toLocaleString("en-IN"), o.orderType || "", o.table || "", o.waiter || "", (o.items || []).map(it => `${it.qty}x ${it.name}`).join("; "), o.subtotal || 0, o.billDiscount || 0, o.gstAmount || 0, o.finalTotal || 0, o.payment || "", o.paid ? "Yes" : "No"]));
+  const csv = rows.map(r => r.map(c => `"${String(csvCellSafe(c)).replace(/"/g, '""')}"`).join(",")).join("\n");
+  const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `orders-${rangeLabel.replace(/\W+/g, "_")}.csv`;
+  a.click();
 };
 // ============ SAFE HELPERS ============
 function getErrorMessage(error) {
@@ -1105,9 +1116,10 @@ function StaffAppInner() {
     );
   }
 
-  const activeOrders = orders.filter(isActiveOrder);
+  const allOrderMetrics = getOrderMetrics(orders);
+  const activeOrders = allOrderMetrics.activeOrders;
   const startOfToday = new Date(); startOfToday.setHours(0,0,0,0);
-  const todayRevenue = paidRevenue(orders.filter(o => o.createdAt >= startOfToday.getTime()));
+  const todayRevenue = getOrderMetrics(orders.filter(o => o.createdAt >= startOfToday.getTime())).revenue;
 
   return (
     <div className="ep-shell" style={{ minHeight: "100dvh", background: C.bg, fontFamily: "system-ui, sans-serif", display: "flex", flexDirection: "row", color: C.ink }}>
@@ -1172,7 +1184,7 @@ function StaffAppInner() {
 
       {/* TABS */}
       <div className="ep-tabs" style={{ display: "flex", background: C.card, borderBottom: `1px solid ${C.line}`, padding: isMobile ? "0 8px" : "0 16px", gap: 4, overflowX: "auto", alignItems: "center" }}>
-        <button onClick={() => { haptic(); setShowEstimate(true); }} style={{ padding: isMobile ? "12px 12px" : "15px 20px", border: "none", background: "transparent", color: C.green, fontWeight: 900, fontSize: isMobile ? 12 : 13, cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0, borderBottom: `3px solid ${C.green}` }}>📋 Estimate{estItems.length ? ` (${estItems.length})` : ""}</button>
+        <button className="ep-pos-estimate-tab" onClick={() => { haptic(); setShowEstimate(true); }} style={{ padding: isMobile ? "12px 12px" : "15px 20px", border: "none", background: "transparent", color: C.green, fontWeight: 900, fontSize: isMobile ? 12 : 13, cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0, borderBottom: `3px solid ${C.green}` }}>📋 Estimate{estItems.length ? ` (${estItems.length})` : ""}</button>
         {[
           { id: "tables", label: `🍽️ Tables` }, { id: "parcel", label: `🛍️ Parcel${parcelCount ? ` (${parcelCount})` : ""}` },
           { id: "orders", label: `📋 Orders${newCount ? ` (${newCount})` : ""}` }, { id: "kot", label: `🍳 Kitchen${newCount ? ` (${newCount})` : ""}` },
@@ -1244,7 +1256,7 @@ function StaffAppInner() {
 )}
 
 {activeTab === "orders" && (
-          <OrdersView C={C} isMobile={isMobile} orders={orders} menu={menu} waiterName={waiterName} isOwner={isOwner} onAddMore={(order) => { setBillOrder(order); setSelectedTable(order.table || "parcel"); setCart({}); setAddMoreMode(true); }} onEditBill={(order) => { setBillOrder(order); setSelectedTable(order.table || "parcel"); setCart({}); setAddMoreMode(false); }} filter={ordersFilter} setFilter={setOrdersFilter} rangeStart={ordersRange?.start} rangeEnd={ordersRange?.end} setOrders={setOrders} onPaidSuccess={() => { setConfetti(true); setTimeout(() => setConfetti(false), 1800); }} />
+          <OrdersView C={C} isMobile={isMobile} orders={orders} menu={menu} waiterName={waiterName} isOwner={isOwner} onAddMore={(order) => { setBillOrder(order); setSelectedTable(order.table || "parcel"); setCart({}); setAddMoreMode(true); }} onEditBill={(order) => { setBillOrder(order); setSelectedTable(order.table || "parcel"); setCart({}); setAddMoreMode(false); }} filter={ordersFilter} setFilter={setOrdersFilter} rangeStart={ordersRange?.start} rangeEnd={ordersRange?.end} setOrdersRange={setOrdersRange} setOrders={setOrders} onPaidSuccess={() => { setConfetti(true); setTimeout(() => setConfetti(false), 1800); }} />
         )}
         {activeTab === "parcel" && (
           <ParcelView C={C} isMobile={isMobile} orders={orders}
@@ -1345,7 +1357,7 @@ function StaffAppInner() {
       <ConnectionBadge C={C} />
 
       {selectedTable && (
-        <BillingView C={C} isMobile={isMobile} table={selectedTable} menu={menu} orders={orders} setOrders={setOrders} cart={cart} setCart={setCart} waiterName={waiterName} existingOrder={billOrder} isOwner={isOwner} addMoreMode={addMoreMode}
+        <BillingView C={C} isMobile={isMobile} table={selectedTable} menu={menu} orders={orders} setOrders={setOrders} cart={cart} setCart={setCart} waiterName={waiterName} existingOrder={billOrder} isOwner={isOwner} addMoreMode={addMoreMode} onShowEstimate={() => setShowEstimate(true)}
           onBack={() => { setSelectedTable(null); setCart({}); setEstimatePending(false); setBillOrder(null); setAddMoreMode(false); }}
           onSwitchAdd={() => { setCart({}); setAddMoreMode(true); }} onSplit={(o) => setSplitBillOrder(o)} onPaidSuccess={() => { haptic(60); setConfetti(true); setTimeout(() => setConfetti(false), 1800); }} />
       )}
@@ -1449,101 +1461,249 @@ function ParcelView({ C, isMobile, orders, onNew, onBill, onAdd }) {
 }
 
 function TablesView({ C, isMobile, orders, onTableClick, onEditBill, onAddMore, onMerge, onSplit, onMove, onFeedback, search, setSearch, todayRevenue, activeOrders }) {
-  const [, setTick] = useState(0);
+  const [tick, setTick] = useState(0);
+  const [selectedTable, setSelectedTable] = useState(null);
+  const [selectedFloor, setSelectedFloor] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
   useEffect(() => { const iv = setInterval(() => setTick((x) => x + 1), 30000); return () => clearInterval(iv); }, []);
+
+  const metrics = useMemo(() => getOrderMetrics(orders), [orders, tick]);
   const tableData = useMemo(() => {
     const map = {};
-    for (let i = 1; i <= TABLE_COUNT; i++) map[i] = { table: i, order: null };
-    orders.filter(isOpenDineIn).forEach(o => {
-      const t = Number(o.table);
-      if (map[t]) map[t].order = o;
+    for (let i = 1; i <= TABLE_COUNT; i++) map[i] = { table: i, order: null, floor: null };
+    orders.filter(isOpenDineIn).forEach(order => {
+      const table = Number(order.table);
+      if (map[table]) map[table] = { ...map[table], order, floor: order.floor ?? null };
     });
-    // FEATURE-HEATMAP: compute age for each table
-    return Object.values(map).map(t => {
-      if (!t.order) return { ...t, ageMin: 0, heatColor: C.line, heatBg: C.card };
-      const ageMin = (Date.now() - (t.order.createdAt || Date.now())) / 60000;
-      let heatColor, heatBg;
-      if (ageMin < 15) { heatColor = "#10B981"; heatBg = C.card; }
-      else if (ageMin < 30) { heatColor = "#F59E0B"; heatBg = C.amberLight; }
-      else if (ageMin < 45) { heatColor = "#F97316"; heatBg = C.amberLight; }
-      else { heatColor = "#EF4444"; heatBg = C.redLight; }
-      return { ...t, ageMin, heatColor, heatBg };
+    return Object.values(map).map(table => {
+      const ageMin = table.order ? metrics.durationMinutes(table.order) : 0;
+      const heatColor = !table.order ? C.line
+        : ageMin < 15 ? "#10B981"
+        : ageMin < 30 ? "#F59E0B"
+        : ageMin < 45 ? "#F97316"
+        : "#EF4444";
+      return {
+        ...table,
+        status: table.order ? "occupied" : "available",
+        ageMin,
+        heatColor,
+      };
     });
-  }, [orders, C.card, C.line, C.amberLight, C.redLight]);
+  }, [orders, metrics, C.line]);
 
-  const filteredTables = search.trim() ? tableData.filter(t => String(t.table).includes(search.trim())) : tableData;
+  const floorOptions = [...new Set(tableData
+    .map(table => table.floor)
+    .filter(floor => floor !== null && floor !== undefined && String(floor).trim() !== "")
+    .map(String))];
+  const statusCounts = tableData.reduce((counts, table) => {
+    counts[table.status] = (counts[table.status] || 0) + 1;
+    return counts;
+  }, { available: 0, occupied: 0, reserved: 0, cleaning: 0 });
+  const filteredTables = tableData.filter(table => {
+    const matchesSearch = !search.trim() || String(table.table).includes(search.trim());
+    const matchesFloor = selectedFloor === "all" || String(table.floor) === selectedFloor;
+    const matchesStatus = statusFilter === "all" || table.status === statusFilter;
+    return matchesSearch && matchesFloor && matchesStatus;
+  });
+  const currentTable = tableData.find(table => table.table === selectedTable) || null;
+  const currentOrder = currentTable?.order || null;
+
+  useEffect(() => {
+    if (!filteredTables.length) {
+      if (selectedTable !== null) setSelectedTable(null);
+      return;
+    }
+    if (!filteredTables.some(table => table.table === selectedTable)) {
+      const nextTable = filteredTables.find(table => table.order) || filteredTables[0];
+      setSelectedTable(nextTable.table);
+    }
+  }, [filteredTables, selectedTable]);
+
+  const guests = currentOrder?.guestCount ?? currentOrder?.guestsCount ??
+    (Array.isArray(currentOrder?.guests) ? currentOrder.guests.length : null);
+  const seats = currentOrder?.seats ?? currentOrder?.seatCount ?? currentTable?.seats;
+  const customerName = currentOrder ? custLabel(currentOrder) : "";
+  const customerPhone = currentOrder?.customer?.phone || currentOrder?.phone || "";
+  const items = currentOrder?.items || [];
+  const itemSubtotal = items.reduce((sum, item) => sum + (Number(item.price) || 0) * (Number(item.qty) || 0), 0);
+  const subtotal = Number(currentOrder?.subtotal) || itemSubtotal;
+  const tax = Number(currentOrder?.gstAmount) || 0;
+  const total = Number(currentOrder?.finalTotal) || subtotal + tax;
+  const seatedAt = currentOrder ? toMillis(currentOrder.createdAt) : 0;
+  const seatedTime = seatedAt ? new Date(seatedAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "—";
+
+  const cardAction = (label, className, onClick) => (
+    <button type="button" className={`ep-floor-action ${className}`} onClick={onClick}>{label}</button>
+  );
 
   return (
-    <div>
-      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(auto-fit, minmax(160px, 1fr))", gap: 10, marginBottom: 16 }}>
-        <div className="ep-stat-card" style={{ background: `linear-gradient(135deg, ${C.green}11 0%, ${C.green}05 100%)`, border: `1px solid ${C.green}33`, borderRadius: 12, padding: isMobile ? 12 : 16 }}>
-          <div style={{ fontSize: 10, color: C.gray, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.5 }}>Revenue</div>
-          <div style={{ fontSize: isMobile ? 16 : 22, fontWeight: 900, color: C.green, marginTop: 4, fontFamily: "monospace", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}><AnimatedNumber value={todayRevenue} /></div>
-        </div>
-        <div className="ep-stat-card" style={{ background: `linear-gradient(135deg, ${C.red}11 0%, ${C.red}05 100%)`, border: `1px solid ${C.red}33`, borderRadius: 12, padding: isMobile ? 12 : 16 }}>
-          <div style={{ fontSize: 10, color: C.gray, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.5 }}>Active</div>
-          <div style={{ fontSize: isMobile ? 16 : 22, fontWeight: 900, color: C.red, marginTop: 4 }}><AnimatedNumber value={activeOrders} format={false} /></div>
-        </div>
-        <div className="ep-stat-card" style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: isMobile ? 12 : 16, gridColumn: isMobile ? "span 2" : undefined }}>
-          <div style={{ fontSize: 10, color: C.gray, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.5 }}>Occupied</div>
-          <div style={{ fontSize: isMobile ? 16 : 22, fontWeight: 900, color: C.ink, marginTop: 4 }}>{tableData.filter(t => t.order).length}/{tableData.length}</div>
-        </div>
-      </div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, gap: 8, flexWrap: "wrap" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}><h2 style={{ margin: 0, fontSize: isMobile ? 18 : 22, fontWeight: 800, color: C.ink }}>Tables</h2><button onClick={() => onTableClick("parcel")} style={{ padding: "7px 12px", border: "none", borderRadius: 8, background: C.red, color: "#fff", fontWeight: 800, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>🛍️ Parcel</button></div>
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search table..." style={{ padding: "9px 14px", border: `1px solid ${C.line}`, borderRadius: 8, fontSize: 13, outline: "none", width: isMobile ? "100%" : 180, background: C.card, color: C.ink }} />
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(160px, 1fr))", gap: isMobile ? 10 : 12 }}>
-        {filteredTables.map(t => (
-          <div key={t.table} className="ep-table-card" style={{
-            background: t.heatBg,
-            border: `2px solid ${t.heatColor}`,
-            borderRadius: 12, padding: isMobile ? 10 : 14,
-            minHeight: isMobile ? 120 : 130,
-            display: "flex", flexDirection: "column", justifyContent: "space-between",
-            transition: "all 0.2s cubic-bezier(0.16, 1, 0.3, 1)",
-            animation: t.order ? "pulseRing 2.5s infinite" : "none",
-          }}>
-            <button onClick={() => onTableClick(t.table)} style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", textAlign: "left", fontFamily: "inherit", color: C.ink }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                <div style={{ fontSize: isMobile ? 24 : 28, fontWeight: 900, color: t.order ? C.red : C.ink, lineHeight: 1, fontFamily: "monospace" }}>{t.table}</div>
-                <span style={{ fontSize: isMobile ? 14 : 20 }}>{t.order ? "🔴" : "🟢"}</span>
-              </div>
-              {t.order ? (
-                <div style={{ marginTop: 6 }}>
-                  <div style={{ fontSize: isMobile ? 10 : 11, color: (Date.now() - (t.order.createdAt || 0)) > 3600000 ? C.amber : C.gray, fontWeight: 700 }}>{(Date.now() - (t.order.createdAt || 0)) > 3600000 ? "⏱ " : ""}#{t.order.id?.slice(1,5).toUpperCase()} - {timeAgo(t.order.createdAt)}</div>
-                  <div style={{ fontSize: isMobile ? 10 : 11, color: C.gray, marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.order.items?.length || 0} items - {inr(t.order.finalTotal || 0)}</div>
-                  {custLabel(t.order) && <div style={{ fontSize: isMobile ? 10 : 11, color: C.ink, fontWeight: 700, marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>👤 {custLabel(t.order)}</div>}
-                </div>
-              ) : <div style={{ fontSize: isMobile ? 10 : 11, color: C.gray, fontWeight: 700, textTransform: "uppercase", marginTop: 6 }}>Available</div>}
-            </button>
-            {t.order ? (
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, marginTop: 8 }}>
-                <button onClick={() => onAddMore(t.order)} style={{ padding: '6px', border: 'none', borderRadius: 6, background: C.green, color: '#fff', fontWeight: 800, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>+Add</button>
-<button onClick={() => onEditBill(t.order)} style={{ padding: '6px', border: 'none', borderRadius: 6, background: C.red, color: '#fff', fontWeight: 800, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>Edit</button>
-<button onClick={() => printKOT(t.order)} style={{ padding: '6px', border: 'none', borderRadius: 6, background: C.blue, color: '#fff', fontWeight: 800, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>KOT</button>
-<button onClick={() => onMove(t.order)} style={{ padding: '6px', border: 'none', borderRadius: 6, background: '#8b5cf6', color: '#fff', fontWeight: 800, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>Move</button>
-<button onClick={() => whatsappBill(t.order)} style={{ padding: '6px', border: 'none', borderRadius: 6, background: '#25D366', color: '#fff', fontWeight: 800, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>WA</button>
-<button onClick={() => printBill(t.order)} style={{ padding: '6px', border: 'none', borderRadius: 6, background: C.amber, color: '#fff', fontWeight: 800, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>Bill</button>
-              </div>
-            ) : (
-              <button onClick={() => onTableClick(t.table)} style={{ marginTop: 8, padding: isMobile ? "9px 4px" : "7px 4px", border: "none", borderRadius: 6, background: C.gold, color: "#fff", fontWeight: 800, fontSize: isMobile ? 11 : 10, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>New Order</button>
-            )}
+    <section className="ep-floor">
+      <header className="ep-floor__header">
+        <div className="ep-floor__heading">
+          <div>
+            <p className="ep-floor__eyebrow">Restaurant layout</p>
+            <h2>Floor Management</h2>
           </div>
+          <PrimaryButton onClick={() => onTableClick("parcel")}>🛍️ Parcel</PrimaryButton>
+        </div>
+        <label className="ep-floor__search">
+          <span aria-hidden="true">⌕</span>
+          <input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search table..." aria-label="Search table" />
+        </label>
+      </header>
+
+      {floorOptions.length > 0 && (
+        <nav className="ep-floor__chips" aria-label="Floors">
+          <Chip active={selectedFloor === "all"} onClick={() => setSelectedFloor("all")}>All Floors</Chip>
+          {floorOptions.map(floor => (
+            <Chip key={floor} active={selectedFloor === floor} onClick={() => setSelectedFloor(floor)}>{floor}</Chip>
+          ))}
+        </nav>
+      )}
+
+      <nav className="ep-floor__chips ep-floor__status-filters" aria-label="Table status">
+        <Chip active={statusFilter === "all"} onClick={() => setStatusFilter("all")}>All ({tableData.length})</Chip>
+        {["available", "occupied", "reserved", "cleaning"].map(status => (
+          <Chip key={status} active={statusFilter === status} onClick={() => setStatusFilter(status)}>
+            <span className={`ep-floor__status-dot ep-floor__status-dot--${status}`} />
+            {status[0].toUpperCase() + status.slice(1)} ({statusCounts[status]})
+          </Chip>
         ))}
+      </nav>
+
+      <div className="ep-floor__metrics">
+        <KpiCard label="Revenue today" value={<AnimatedNumber value={todayRevenue} />} icon="₹" />
+        <KpiCard label="Active orders" value={<AnimatedNumber value={activeOrders} format={false} />} icon="⌁" />
+        <KpiCard label="Occupied tables" value={`${statusCounts.occupied}/${tableData.length}`} icon="▦" />
       </div>
-    </div>
+
+      <div className="ep-floor__layout">
+        <section className="ep-floor__map" aria-label="Floor table map">
+          <div className="ep-floor__map-heading">
+            <div>
+              <h3>{selectedFloor === "all" ? "Dining Area" : selectedFloor}</h3>
+              <p>{filteredTables.length} tables · Select a table to view details</p>
+            </div>
+            {floorOptions.length === 0 && <span className="ep-floor__auto-layout">Auto layout</span>}
+          </div>
+          <div className="ep-floor__table-grid">
+            {filteredTables.map(table => {
+              const tableGuests = table.order?.guestCount ?? table.order?.guestsCount ??
+                (Array.isArray(table.order?.guests) ? table.order.guests.length : null);
+              const tableSeats = table.order?.seats ?? table.order?.seatCount ?? table.seats;
+              return (
+                <article
+                  key={table.table}
+                  className={`ep-floor-table ep-floor-table--${table.status}${selectedTable === table.table ? " is-selected" : ""}`}
+                >
+                  <button type="button" className="ep-floor-table__select" onClick={() => setSelectedTable(table.table)} aria-pressed={selectedTable === table.table}>
+                    <div className="ep-floor-table__top">
+                      <strong>T{table.table}</strong>
+                      <StatusBadge status={table.status} kind="table" />
+                    </div>
+                    <span className="ep-floor-table__seats">{tableSeats != null ? `${tableSeats} seats` : "Seats —"}</span>
+                    {table.order ? (
+                      <span className="ep-floor-table__occupancy">
+                        <i className="ep-floor__heat-dot" style={{ backgroundColor: table.heatColor }} />
+                        {tableGuests ?? "—"} guests · {table.ageMin}m
+                      </span>
+                    ) : <span className="ep-floor-table__occupancy">Available now</span>}
+                  </button>
+                  {table.order ? (
+                    <div className="ep-floor-table__actions">
+                      <IconButton className="ep-floor-kot-button" title="Print KOT" aria-label="Print KOT" onClick={() => printKOT(table.order)}>KOT</IconButton>
+                      {cardAction("+ Add", "", () => onAddMore(table.order))}
+                      {cardAction("Edit", "", () => onEditBill(table.order))}
+                      {cardAction("Move", "", () => onMove(table.order))}
+                      {cardAction("WA", "", () => whatsappBill(table.order))}
+                      {cardAction("Bill", "", () => printBill(table.order))}
+                    </div>
+                  ) : (
+                    <button type="button" className="ep-floor-table__new-order" onClick={() => onTableClick(table.table)}>New Order</button>
+                  )}
+                </article>
+              );
+            })}
+            {filteredTables.length === 0 && <p className="ep-floor__empty">No tables match these filters.</p>}
+          </div>
+        </section>
+
+        <aside className="ep-floor__detail">
+          {currentTable ? (
+            <>
+              <div className="ep-floor__detail-heading">
+                <div>
+                  <p className="ep-floor__eyebrow">Selected table</p>
+                  <h3>Table T{currentTable.table}</h3>
+                </div>
+                <StatusBadge status={currentTable.status} kind="table" />
+              </div>
+              <dl className="ep-floor__facts">
+                <div><dt>Guests</dt><dd>{guests ?? "—"}</dd></div>
+                <div><dt>Seats</dt><dd>{seats ?? "—"}</dd></div>
+                <div><dt>Waiter</dt><dd>{currentOrder?.waiter || "—"}</dd></div>
+                <div><dt>Seated since</dt><dd>{currentOrder ? seatedTime : "—"}</dd></div>
+                <div><dt>Duration</dt><dd>{currentOrder ? `${metrics.durationMinutes(currentOrder)}m` : "—"}</dd></div>
+                <div><dt>Order ID</dt><dd>{currentOrder?.id ? `#${currentOrder.id.slice(1, 9).toUpperCase()}` : "—"}</dd></div>
+              </dl>
+              {currentOrder && (customerName || customerPhone) && (
+                <div className="ep-floor__customer">
+                  <span>Customer</span>
+                  <strong>{customerName || "Walk-in"}</strong>
+                  {customerPhone && <span>{customerPhone}</span>}
+                </div>
+              )}
+
+              <div className="ep-floor__order">
+                <h4>Current Order</h4>
+                {currentOrder ? (
+                  <>
+                    <div className="ep-floor__items">
+                      {items.length > 0 ? items.map((item, index) => {
+                        const quantity = Number(item.qty) || 0;
+                        const price = (Number(item.price) || 0) * quantity;
+                        return (
+                          <div className="ep-floor__item" key={`${item.name || "item"}-${index}`}>
+                            <span><strong>{item.name || "Item"}</strong><small>Qty {quantity}</small></span>
+                            <strong>{inr(price)}</strong>
+                          </div>
+                        );
+                      }) : <p className="ep-floor__no-items">No items in this order.</p>}
+                    </div>
+                    <div className="ep-floor__total-row"><span>Sub Total</span><strong>{inr(subtotal)}</strong></div>
+                    <div className="ep-floor__total-row"><span>Tax</span><strong>{inr(tax)}</strong></div>
+                    <div className="ep-floor__amount"><span>Amount to be Paid</span><strong>{inr(total)}</strong></div>
+                  </>
+                ) : <p className="ep-floor__no-items">No active order for this table.</p>}
+              </div>
+
+              <div className="ep-floor__detail-actions">
+                <PrimaryButton onClick={() => currentOrder ? onEditBill(currentOrder) : onTableClick(currentTable.table)}>
+                  {currentOrder ? "Open Order" : "Open Table"}
+                </PrimaryButton>
+                {currentOrder && <SecondaryButton onClick={() => onSplit(currentOrder)}>Split</SecondaryButton>}
+              </div>
+            </>
+          ) : (
+            <div className="ep-floor__detail-empty">Select a table to see its details.</div>
+          )}
+        </aside>
+      </div>
+    </section>
   );
 }
 
 // ===========================================================================
 // ORDERS VIEW (with optimistic update + toast)
 // ===========================================================================
-function OrdersView({ C, isMobile, orders, menu, waiterName, isOwner, filter, setFilter, rangeStart, rangeEnd, setOrders, onPaidSuccess, onAddMore, onEditBill }) {
+function OrdersView({ C, isMobile, orders, menu, waiterName, isOwner, filter, setFilter, rangeStart, rangeEnd, setOrdersRange, setOrders, onPaidSuccess, onAddMore, onEditBill }) {
   const toast = useToast();
   const haptic = useHaptic();
   const defaultStart = useMemo(() => { const d = new Date(); d.setHours(0,0,0,0); return d.getTime(); }, []);
   const [openId, setOpenId] = useState(null);
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [searchText, setSearchText] = useState("");
+  const [page, setPage] = useState(1);
   const payLockRef = useRef(false);
   const [payFor, setPayFor] = useState(null);
   const [splitCash, setSplitCash] = useState("");
@@ -1558,13 +1718,54 @@ function OrdersView({ C, isMobile, orders, menu, waiterName, isOwner, filter, se
     if (filter === "cancelled") return o.status === "cancelled";
     return o.status !== "cancelled";
   });
-  const filtered =
+  const rangeMetrics = getOrderMetrics(rangeAll);
+  const statusFiltered =
     filter === "all" ? rangeAll
-    : filter === "active" ? rangeAll.filter(isActiveOrder)
+    : filter === "active" ? rangeMetrics.activeOrders
     : filter === "paid" ? rangeAll.filter(o => o.paid)
     : filter === "served" ? rangeAll.filter(o => o.status === "served")
     : filter === "cancelled" ? rangeAll
     : rangeAll.filter(o => o.status === filter);
+  const searchNeedle = searchText.trim().toLowerCase();
+  const filtered = statusFiltered.filter(order => {
+    const isParcel = order.orderType === "parcel";
+    const matchesType = typeFilter === "all"
+      || (typeFilter === "dine_in" && order.orderType === "dine_in")
+      || (typeFilter === "takeaway" && isParcel && !isDeliveryOrder(order))
+      || (typeFilter === "delivery" && isDeliveryOrder(order))
+      || (typeFilter === "table" && order.orderType === "dine_in" && Boolean(order.table));
+    if (!matchesType) return false;
+    if (!searchNeedle) return true;
+    const searchData = [
+      order.id,
+      custLabel(order),
+      order.customer?.phone,
+      order.waiter,
+      order.table,
+      ...(order.items || []).map(item => item.name),
+    ].join(" ").toLowerCase();
+    return searchData.includes(searchNeedle);
+  });
+  const metricOrders = orders.filter(order => order.createdAt >= start && order.createdAt < end);
+  const metrics = getOrderMetrics(metricOrders);
+  const totalOrders = metricOrders.filter(order => order.status !== "cancelled").length;
+  const completedOrders = metricOrders.filter(order => order.status === "served").length;
+  const dateValue = (() => {
+    const date = new Date(start);
+    const pad = value => String(value).padStart(2, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  })();
+  const todayDate = new Date();
+  todayDate.setHours(0, 0, 0, 0);
+  const isToday = start === todayDate.getTime();
+  const rangeLabel = isToday ? "Today" : new Date(start).toLocaleDateString("en-IN");
+  const pageSize = 11;
+  const pageCount = Math.ceil(filtered.length / pageSize);
+  const currentPage = Math.min(page, Math.max(1, pageCount));
+  const pageOrders = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const firstPageNumber = Math.max(1, Math.min(currentPage - 2, pageCount - 4));
+  const pageNumbers = Array.from({ length: Math.min(5, pageCount) }, (_, index) => firstPageNumber + index);
+  useEffect(() => { setPage(1); }, [filter, typeFilter, searchText, start, end]);
 
   const advanceOrder = async (order) => {
     const next = nextKitchenStatus(order);
@@ -1653,11 +1854,35 @@ function OrdersView({ C, isMobile, orders, menu, waiterName, isOwner, filter, se
   };
 
   const filterLabel = filter === "cancelled" ? "Cancelled" : filter.charAt(0).toUpperCase() + filter.slice(1);
+  const exportCsv = () => exportOrdersCsv(filtered, rangeLabel);
 
   return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 12 }}>
-        <h2 style={{ margin: 0, fontSize: isMobile ? 18 : 22, fontWeight: 800, color: C.ink }}>{filterLabel} Orders ({filtered.length})</h2>
+    <section className="ep-orders">
+      <header className="ep-orders__header">
+        <div className="ep-orders__title">
+          <p>ORDER MANAGEMENT</p>
+          <h2>All Orders</h2>
+          <span>{filterLabel} · {filtered.length} orders</span>
+        </div>
+        <div className="ep-orders__controls">
+          <label className="ep-orders__search">
+            <span aria-hidden="true">⌕</span>
+            <input value={searchText} onChange={event => setSearchText(event.target.value)} placeholder="Search orders..." aria-label="Search orders" />
+          </label>
+          <div className="ep-orders__date-control">
+            <label>
+              <span aria-hidden="true">📅</span>
+              <input aria-label="Filter by date" type="date" value={dateValue} onChange={event => {
+                if (!event.target.value) return;
+                const selectedDate = new Date(`${event.target.value}T00:00:00`);
+                const selectedStart = selectedDate.getTime();
+                setOrdersRange({ start: selectedStart, end: selectedStart + 86400000 });
+              }} />
+            </label>
+            <Chip active={isToday} onClick={() => setOrdersRange(null)}>Today</Chip>
+          </div>
+          <SecondaryButton className="ep-orders__export" onClick={exportCsv}>↓ Export</SecondaryButton>
+        </div>
         {payFor && (
           <ModalShell C={C} open onClose={() => { setPayFor(null); setSplitCash(""); }} isMobile={isMobile} title="Payment mode" icon="💰" maxWidth={340}>
             <div style={{ fontSize: 13, color: C.gray, marginBottom: 14 }}>{payFor.orderType === "parcel" ? "Parcel" : "Table " + payFor.table} - {inr(payFor.finalTotal || 0)}</div>
@@ -1689,41 +1914,110 @@ function OrdersView({ C, isMobile, orders, menu, waiterName, isOwner, filter, se
             </div>
           </ModalShell>
         )}
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          {["all", "active", ...STATUS_FLOW, "paid", "cancelled"].map(f => (
-            <button key={f} className="ep-pill" onClick={() => { haptic(); setFilter(f); }} style={{ padding: isMobile ? "6px 10px" : "7px 14px", borderRadius: 20, border: "1px solid " + (filter === f ? C.gold : C.line), background: filter === f ? C.gold : C.card, color: filter === f ? "#fff" : C.gray, fontWeight: 700, fontSize: isMobile ? 11 : 12, cursor: "pointer", textTransform: "capitalize", fontFamily: "inherit" }}>{f}</button>
-          ))}
-        </div>
+        </header>
+      <nav className="ep-orders__type-filters" aria-label="Order type">
+        {[["all", "All Orders"], ["dine_in", "Dine In"], ["takeaway", "Take Away"], ["delivery", "Delivery"], ["table", "Table"]].map(([value, label]) => (
+          <Chip key={value} active={typeFilter === value} onClick={() => { haptic(); setTypeFilter(value); }}>{label}</Chip>
+        ))}
+      </nav>
+      <nav className="ep-orders__status-filters" aria-label="Order status">
+        <span>Status</span>
+        {["all", "active", ...STATUS_FLOW, "paid", "cancelled"].map(value => {
+          const label = value === "all" ? "All" : value === "active" ? "Active" : value === "paid" ? "Paid" : value === "cancelled" ? "Cancelled" : STATUS[value]?.label || value;
+          return <Chip key={value} active={filter === value} onClick={() => { haptic(); setFilter(value); }}>{label}</Chip>;
+        })}
+      </nav>
+      <div className="ep-orders__metrics">
+        <KpiCard className="ep-orders__metric" label="Total Orders" value={<AnimatedNumber value={totalOrders} format={false} />} icon="📋" />
+        <KpiCard className="ep-orders__metric" label="Pending" value={<AnimatedNumber value={metrics.activeCount} format={false} />} icon="⏳" />
+        <KpiCard className="ep-orders__metric" label="Completed" value={<AnimatedNumber value={completedOrders} format={false} />} icon="✅" />
+        <KpiCard className="ep-orders__metric" label="Revenue" value={<AnimatedNumber value={metrics.revenue} />} icon="₹" />
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: isMobile || filter === "all" ? "1fr" : "repeat(auto-fill, minmax(340px, 1fr))", gap: filter === "all" ? 8 : 12 }}>
-        {filtered.map(o => {
+      <div className="ep-orders__table-wrap">
+        <table className="ep-orders__table">
+          <thead>
+            <tr>
+              <th>Order ID</th><th>Customer</th><th>Type</th><th>Items</th><th>Time</th><th>Payment</th><th>Amount</th><th>Status</th><th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pageOrders.map(order => {
+              const isParcel = order.orderType === "parcel";
+              const orderType = !isParcel ? "dine-in" : isDeliveryOrder(order) ? "delivery" : "take-away";
+              const badgeStatus = order.status === "new" ? "pending"
+                : order.status === "served" ? "completed"
+                : order.status === "out_for_delivery" ? "ready" : order.status;
+              const name = custLabel(order) || "Walk-in";
+              const createdAt = toMillis(order.createdAt);
+              return (
+                <React.Fragment key={order.id}>
+                  <tr>
+                    <td><strong className="ep-orders__id">#{order.id?.slice(1, 9).toUpperCase()}</strong></td>
+                    <td>
+                      <div className="ep-orders__customer">
+                        <span>{name.trim().charAt(0).toUpperCase() || "G"}</span>
+                        <strong>{name}</strong>
+                      </div>
+                    </td>
+                    <td><TypeBadge type={orderType} /></td>
+                    <td>{(order.items || []).length}</td>
+                    <td>{createdAt ? new Date(createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "—"}</td>
+                    <td><span className={`ep-orders__payment${order.paid ? " is-paid" : ""}`}>{order.payment ? order.payment.toUpperCase() : order.paid ? "PAID" : "PENDING"}</span></td>
+                    <td><strong className="ep-orders__amount">{inr(order.finalTotal || 0)}</strong></td>
+                    <td><StatusBadge status={badgeStatus} /></td>
+                    <td>
+                      <div className="ep-orders__row-actions">
+                        <IconButton title="View order" aria-label={`View order ${order.id}`} onClick={() => { haptic(); setOpenId(openId === order.id ? null : order.id); }}>👁</IconButton>
+                        <IconButton title="Print KOT" aria-label={`Print KOT for ${order.id}`} disabled={order.status === "cancelled"} onClick={() => printKOT(order)}>🖨</IconButton>
+                      </div>
+                    </td>
+                  </tr>
+                  {openId === order.id && (
+                    <tr className="ep-orders__expanded-row">
+                      <td colSpan={9}>
+                        <div className="ep-orders__expanded-summary">
+                          <span><strong>Waiter:</strong> {order.waiter || "—"}</span>
+                          <span><strong>Duration:</strong> {rangeMetrics.durationMinutes(order)}m</span>
+                          <span><strong>Customer:</strong> {custLabel(order) || "Walk-in"}</span>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              );
+            })}
+            {filtered.length === 0 && <tr><td className="ep-orders__empty" colSpan={9}>No orders match these filters.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      <footer className="ep-orders__pagination">
+        <span>Showing {filtered.length ? (currentPage - 1) * pageSize + 1 : 0} to {Math.min(currentPage * pageSize, filtered.length)} of {filtered.length} orders</span>
+        <div>
+          <button type="button" disabled={currentPage <= 1} onClick={() => setPage(currentPage - 1)}>Previous</button>
+          {pageNumbers.map(pageNumber => <button key={pageNumber} type="button" className={currentPage === pageNumber ? "is-current" : ""} onClick={() => setPage(pageNumber)}>{pageNumber}</button>)}
+          <button type="button" disabled={currentPage >= pageCount} onClick={() => setPage(currentPage + 1)}>Next</button>
+        </div>
+      </footer>
+      <div className="ep-orders__details">
+        {pageOrders.map(o => {
           const st = STATUS[o.status] || STATUS.new;
           const stColor = C[st.color] || C.gray;
           const stBg = C[st.color + "Light"] || C.light;
           const isCancelled = o.status === "cancelled";
-          const isOpen = filter !== "all" || openId === o.id;
-          if (!isOpen && !isCancelled) return (
-            <button key={o.id} onClick={() => { haptic(); setOpenId(o.id); }} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: isMobile ? "9px 10px" : "10px 14px", background: C.card, border: "1px solid " + C.line, borderRadius: 10, cursor: "pointer", fontFamily: "inherit", textAlign: "left", color: C.ink }}>
-              <span style={{ fontWeight: 800, fontSize: 13, whiteSpace: "nowrap" }}>{o.orderType === "parcel" ? "Parcel" : "T" + o.table}</span>
-              <span style={{ fontSize: 11, color: C.gray, whiteSpace: "nowrap" }}>#{o.id?.slice(1,5).toUpperCase()} - {timeAgo(o.createdAt)}</span>
-              <span style={{ background: stBg, color: stColor, padding: "2px 8px", borderRadius: 10, fontSize: 10, fontWeight: 800, whiteSpace: "nowrap" }}>{st.label}</span>
-              {o.paid && <span style={{ background: C.greenLight, color: C.green, padding: "2px 8px", borderRadius: 10, fontSize: 10, fontWeight: 800 }}>PAID</span>}
-              <span style={{ marginLeft: "auto", fontWeight: 900, color: C.goldText, fontFamily: "monospace", fontSize: 13, whiteSpace: "nowrap" }}>{inr(o.finalTotal || 0)}</span>
-              <span style={{ color: C.gray, fontSize: 10 }}>▼</span>
-            </button>
-          );
+          const isOpen = openId === o.id;
+          if (!isOpen) return null;
           return (
             <div key={o.id} className="ep-order-card" style={{ background: isCancelled ? C.redLight : C.card, border: "1px solid " + (isCancelled ? C.red : C.line), borderRadius: 12, padding: isMobile ? 12 : 16, boxShadow: "0 2px 8px rgba(0,0,0,0.04)", animation: "fadeIn 0.25s", opacity: isCancelled ? 0.9 : 1 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, gap: 8 }}>
                 <div style={{ fontWeight: 800, fontSize: isMobile ? 14 : 15, color: C.ink }}>{o.orderType === "parcel" ? "Parcel" : "Table " + o.table}</div>
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   <span style={{ background: stBg, color: stColor, padding: "4px 10px", borderRadius: 20, fontSize: 11, fontWeight: 800, whiteSpace: "nowrap" }}>{st.label}</span>
-                  {filter === "all" && !isCancelled && <button onClick={() => setOpenId(null)} style={{ border: "1px solid " + C.line, background: C.cardAlt, color: C.gray, borderRadius: 8, padding: "3px 9px", fontSize: 11, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>▲</button>}
+                  <button onClick={() => setOpenId(null)} aria-label="Close order details" style={{ border: "1px solid " + C.line, background: C.cardAlt, color: C.gray, borderRadius: 8, padding: "3px 9px", fontSize: 11, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>▲</button>
                 </div>
               </div>
               <div style={{ fontSize: 12, color: C.gray, marginBottom: 10, display: "flex", gap: 12, flexWrap: "wrap" }}>
 <span>#{o.id?.slice(1, 5).toUpperCase()}</span>
-<span>{timeAgo(o.createdAt)} ago</span>
+<span>{rangeMetrics.durationMinutes(o)}m ago</span>
 {o.waiter && <span>{o.waiter}</span>}
 {custLabel(o) && (
   <span style={{ color: C.ink, fontWeight: 800 }}>👤 {custLabel(o)}</span>
@@ -1771,9 +2065,8 @@ function OrdersView({ C, isMobile, orders, menu, waiterName, isOwner, filter, se
             </div>
           );
         })}
-        {filtered.length === 0 && <div style={{ gridColumn: "1 / -1", textAlign: "center", padding: 60, color: C.gray }}><div style={{ fontSize: 48, marginBottom: 8 }}>😌</div><div style={{ fontSize: 14, fontWeight: 700 }}>Koi order nahi</div></div>}
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -1895,10 +2188,11 @@ function DashboardView({ C, isMobile, orders, dueOrders, menu, lowItems = [], on
     return orders;
   }, [orders, range, customDate]);
 
-  const todayRevenue = paidRevenue(filtered);
+  const metrics = getOrderMetrics(filtered);
+  const todayRevenue = metrics.revenue;
   const todayTotal = filtered.filter(o => o.status !== "cancelled").length;
-  const paidCount = paidOrders(filtered).length;
-  const activeOrders = filtered.filter(isActiveOrder).length;
+  const paidCount = metrics.paidCount;
+  const activeOrders = metrics.activeCount;
   const avgOrder = paidCount ? Math.round(todayRevenue / paidCount) : 0;
   const statusCounts = { new: 0, preparing: 0, ready: 0, served: 0 };
   filtered.forEach(o => { if (statusCounts[o.status] !== undefined) statusCounts[o.status]++; });
@@ -2013,7 +2307,7 @@ function DashboardView({ C, isMobile, orders, dueOrders, menu, lowItems = [], on
                       <span style={{ background: bg, color, padding: "2px 8px", borderRadius: 10, fontSize: 10, fontWeight: 800 }}>{st.label}</span>
                       {o.paid && <span style={{ background: C.greenLight, color: C.green, padding: "2px 8px", borderRadius: 10, fontSize: 10, fontWeight: 800 }}>PAID</span>}
                     </div>
-                    <div style={{ fontSize: 11, color: C.gray, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>#{o.id.slice(1,5).toUpperCase()} - {timeAgo(o.createdAt)} ago - {(o.items || []).length} items</div>
+                    <div style={{ fontSize: 11, color: C.gray, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>#{o.id.slice(1,5).toUpperCase()} - {metrics.durationMinutes(o)}m ago - {(o.items || []).length} items</div>
                   </div>
                 </div>
                 <div style={{ textAlign: "right", flexShrink: 0 }}>
@@ -2034,7 +2328,7 @@ function DashboardView({ C, isMobile, orders, dueOrders, menu, lowItems = [], on
 function printKOT(order) {
   // CSP-SAFE-PRINTKOT
   try {
-    const itemsHtml = (order.items || []).map(it => `<tr><td style="text-align:left;font-size:14px">${it.qty} x ${esc(it.name)}${it.portion ? ` (${esc(it.portion)})` : ""}</td></tr>`).join("");
+    const itemsHtml = (order.items || []).map(it => `<tr><td style="text-align:left;font-size:14px">${it.qty} x ${esc(it.name)}${it.portion ? ` (${esc(it.portion)})` : ""}${it.note ? `<div style="font-size:11px;font-weight:600">Note: ${esc(it.note)}</div>` : ""}</td></tr>`).join("");
     const now = new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
     const iframe = document.createElement("iframe");
     iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;";
@@ -2350,13 +2644,65 @@ function QtyInput({ value, onCommit, style }) {
   );
 }
 
-function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCart, waiterName, existingOrder, addMoreMode, onBack, isOwner, onPaidSuccess, onSwitchAdd, onSplit }) {
+function getMenuDietType(item) {
+  const declared = String(item.dietType || item.foodType || item.vegType || "").trim().toLowerCase();
+  if (item.isVeg === true || item.veg === true) return "veg";
+  if (item.isVeg === false || item.veg === false || /non[\s-]?veg/.test(declared)) return "non-veg";
+  if (/\begg\b|\banda\b/.test(declared)) return "egg";
+  if (/\bveg(etarian)?\b/.test(declared)) return "veg";
+  const name = `${item.name || ""} ${item.category || ""}`.toLowerCase();
+  if (/\b(chicken|mutton|lamb|fish|prawn|shrimp|seafood|meat|keema|beef|pork)\b/.test(name)) return "non-veg";
+  if (/\begg\b|\banda\b/.test(name)) return "egg";
+  return "veg";
+}
+
+function getMenuCategoryIcon(category) {
+  const name = String(category || "").toLowerCase();
+  if (name === "all") return "🍽️";
+  if (/drink|beverage|juice|shake|tea|coffee/.test(name)) return "🥤";
+  if (/dessert|sweet|ice.?cream/.test(name)) return "🍰";
+  if (/starter|snack|appet/.test(name)) return "🥟";
+  if (/rice|biryani/.test(name)) return "🍚";
+  if (/bread|roti|naan/.test(name)) return "🫓";
+  return "🍲";
+}
+
+function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCart, waiterName, existingOrder, addMoreMode, onBack, isOwner, onPaidSuccess, onSwitchAdd, onSplit, onShowEstimate }) {
   const toast = useToast();
   const haptic = useHaptic();
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 150);
   const [category, setCategory] = useState("All");
+  const [dietFilter, setDietFilter] = useState("all");
   const [mobileBillingTab, setMobileBillingTab] = useState("menu");
+  const [orderMode, setOrderMode] = useState(() => table === "parcel" ? (existingOrder && isDeliveryOrder(existingOrder) ? "delivery" : "takeaway") : "dine_in");
+  const [tableNumber, setTableNumber] = useState(() => table === "parcel" ? (Number(existingOrder?.table) || 1) : Number(table));
+  const [selectedWaiter, setSelectedWaiter] = useState(() => existingOrder?.waiter || waiterName || "Staff");
+  const [itemNotes, setItemNotes] = useState({});
+  const [noteOpenId, setNoteOpenId] = useState(null);
+  const activeTable = orderMode === "dine_in" ? tableNumber : "parcel";
+  const orderModeDisabled = Boolean(existingOrder || addMoreMode);
+  const waiterOptions = useMemo(() => Array.from(new Set([
+    waiterName,
+    existingOrder?.waiter,
+    ...orders.map(order => order.waiter),
+  ].map(name => String(name || "").trim()).filter(Boolean))), [waiterName, existingOrder?.waiter, orders]);
+  const orderModeLabel = orderMode === "dine_in" ? `Dine In · Table ${tableNumber}`
+    : orderMode === "delivery" ? "Delivery" : "Take Away";
+  useEffect(() => {
+    const initialMode = table === "parcel" ? (existingOrder && isDeliveryOrder(existingOrder) ? "delivery" : "takeaway") : "dine_in";
+    setOrderMode(initialMode);
+    setTableNumber(table === "parcel" ? (Number(existingOrder?.table) || 1) : Number(table));
+    setSelectedWaiter(existingOrder?.waiter || waiterName || "Staff");
+  }, [table, existingOrder?.id, existingOrder?.fulfillmentMode, existingOrder?.customer?.address, existingOrder?.waiter, waiterName]);
+  useEffect(() => {
+    const nextNotes = {};
+    (existingOrder?.items || []).forEach(item => {
+      if (item.note) nextNotes[item.itemId] = item.note;
+    });
+    setItemNotes(nextNotes);
+    setNoteOpenId(null);
+  }, [existingOrder?.id]);
   const [showFav, setShowFav] = useState(() => { try { return localStorage.getItem("staff_fav_open") === "1"; } catch (e) { return false; } });
   const [pinnedIds, setPinnedIds] = useState([]);
   useEffect(() => {
@@ -2524,8 +2870,19 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
     const seenFav = new Set();
     return menu.filter((m) => m.available !== false && (cnt[m.id] || pinnedIds.includes(m.id))).sort((a, b) => { const pa = pinnedIds.indexOf(a.id), pb = pinnedIds.indexOf(b.id); if (pa >= 0 || pb >= 0) return pa < 0 ? 1 : pb < 0 ? -1 : pa - pb; return cnt[b.id] - cnt[a.id]; }).filter((m) => { const k = String(m.name || "").trim().toLowerCase(); if (seenFav.has(k)) return false; seenFav.add(k); return true; }).slice(0, 12 + pinnedIds.length);
   }, [orders, menu, pinnedIds]);
-  const categories = useMemo(() => ["All", ...Array.from(new Set(menu.map(m => m.category)))], [menu]);
-  const filtered = useMemo(() => menu.filter(m => m.available !== false && (category === "All" || m.category === category) && (!debouncedSearch.trim() || (m.name.toLowerCase().includes(debouncedSearch.toLowerCase()) || String(m.category || "").toLowerCase().includes(debouncedSearch.toLowerCase())))), [menu, category, debouncedSearch]);
+  const categories = useMemo(() => ["All", ...Array.from(new Set(menu.map(m => m.category).filter(Boolean)))], [menu]);
+  const categoryCounts = useMemo(() => menu.reduce((counts, item) => {
+    if (item.available === false) return counts;
+    counts.All = (counts.All || 0) + 1;
+    if (item.category) counts[item.category] = (counts[item.category] || 0) + 1;
+    return counts;
+  }, { All: 0 }), [menu]);
+  const filtered = useMemo(() => menu.filter(m =>
+    m.available !== false &&
+    (category === "All" || m.category === category) &&
+    (dietFilter === "all" || getMenuDietType(m) === dietFilter) &&
+    (!debouncedSearch.trim() || (String(m.name || "").toLowerCase().includes(debouncedSearch.toLowerCase()) || String(m.category || "").toLowerCase().includes(debouncedSearch.toLowerCase())))
+  ), [menu, category, dietFilter, debouncedSearch]);
 
   /*P2*/ const cartItems = Object.entries(cart).filter(([id, q]) => q > 0 && (menu.some((x) => x.id === id) || existingItems.some((e) => e.itemId === id)));
   const resolveItem = (id) => { const m = menu.find(x => x.id === id); const ex = existingItems.find(e => e.itemId === id); if (ex && !addMoreMode) return ex; return m || ex || null; };
@@ -2546,9 +2903,11 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
   const cashSuggestions = [...new Set([totalAmount, Math.ceil(totalAmount / 100) * 100, Math.ceil(totalAmount / 500) * 500])];
 
   useEffect(() => {
-    const running = orders.filter(o => Number(o.table) === Number(table) && isOpenDineIn(o));
+    const running = orderMode === "dine_in"
+      ? orders.filter(o => Number(o.table) === Number(activeTable) && isOpenDineIn(o))
+      : [];
     setRunningOrders(running);
-  }, [orders, table]);
+  }, [orders, orderMode, activeTable]);
 
   const setQty = (id, q) => {
     haptic(5);
@@ -2585,8 +2944,9 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
       const portion = ex?.portion ?? m?.portion ?? "";
       const category = ex?.category ?? m?.category ?? "Anya";
       const prev = oldQty[id] || 0;
-      finalItems.push({ itemId: id, name, category, portion, price, qty: q, kotNumber: ex?.kotNumber || nextKotNo });
-      if (q > prev) newKotItems.push({ itemId: id, name, category, portion, price, qty: q - prev, kotNumber: nextKotNo });
+      const note = itemNotes[id] ?? ex?.note ?? "";
+      finalItems.push({ itemId: id, name, category, portion, price, qty: q, kotNumber: ex?.kotNumber || nextKotNo, ...(note ? { note } : {}) });
+      if (q > prev) newKotItems.push({ itemId: id, name, category, portion, price, qty: q - prev, kotNumber: nextKotNo, ...(note ? { note } : {}) });
     });
     if (finalItems.length === 0) throw new Error("Bill me kam se kam 1 item hona chahiye");
 
@@ -2619,7 +2979,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
       const oref = doc(db, "orders", existingOrder.id);
       const osnap = await tx.get(oref);
       assertEditable(osnap.exists() ? osnap.data() : null, existingOrder);
-      tx.update(oref, { items: finalItems, subtotal: sub, billDiscountPct: discount, billDiscount: d, gstRate, gstAmount: g, finalTotal, payment: payMode, cashDiscount: Number(cashDiscount || 0), paymentSplit: payMode === "split" ? splitPayment(finalTotal, splitCash === "" ? finalTotal : splitCash) : null, customer: { ...(existingOrder.customer || {}), name: custName || "Walk-in", phone: custPhone || "", address: custAddress || "" }, billEditedAt: Date.now(), ...extra });
+      tx.update(oref, { items: finalItems, subtotal: sub, billDiscountPct: discount, billDiscount: d, gstRate, gstAmount: g, finalTotal, payment: payMode, cashDiscount: Number(cashDiscount || 0), paymentSplit: payMode === "split" ? splitPayment(finalTotal, splitCash === "" ? finalTotal : splitCash) : null, customer: { ...(existingOrder.customer || {}), name: custName || "Walk-in", phone: custPhone || "", address: custAddress || "" }, waiter: selectedWaiter || waiterName || "Staff", billEditedAt: Date.now(), ...extra });
     });
     if (newKotItems.length) printKOT({ ...existingOrder, items: newKotItems, kots: [] });
     /*P8*/ if (removedItems.length) printKOT({ ...existingOrder, items: removedItems.map((i) => ({ ...i, name: "CANCEL >> " + i.name })), kots: [] });
@@ -2628,9 +2988,9 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
 
   const handlePlaceOrder = async () => {
     if (cartItems.length === 0 || lockRef.current) return;
-    if (!existingOrder && !addMoreMode && table !== "parcel") {
-      const busy = orders.some(o => isOpenDineIn(o) && Number(o.table) === Number(table));
-      if (busy) { toast("Table " + table + " par order chalu hai - 'Add to Running' use karo", "warning"); return; }
+    if (!existingOrder && !addMoreMode && activeTable !== "parcel") {
+      const busy = orders.some(o => isOpenDineIn(o) && Number(o.table) === Number(activeTable));
+      if (busy) { toast("Table " + activeTable + " par order chalu hai - 'Add to Running' use karo", "warning"); return; }
     }
     lockRef.current = true;
     if (existingOrder && addMoreMode) {
@@ -2639,7 +2999,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
         const base = existingOrder;
         const baseKots = base.kots?.length ? base.kots : [{ id: uid("kot"), kotNumber: 1, items: base.items || [], createdAt: base.createdAt, status: base.status }];
         const nextNo = Math.max(1, ...baseKots.map(k => k.kotNumber || 1)) + 1;
-        const newItems = cartItems.map(([id, qty]) => { const m = menu.find(x => x.id === id); return { itemId: id, name: m.name, category: m.category || "Anya", portion: m.portion || "", price: rates[id] ?? m.price, qty, kotNumber: nextNo }; });
+        const newItems = cartItems.map(([id, qty]) => { const m = menu.find(x => x.id === id); const note = itemNotes[id] || ""; return { itemId: id, name: m.name, category: m.category || "Anya", portion: m.portion || "", price: rates[id] ?? m.price, qty, kotNumber: nextNo, ...(note ? { note } : {}) }; });
         const addedTotal = Math.round(newItems.reduce((s, it) => s + it.price * it.qty, 0));
         const runKot = { id: uid("kot"), kotNumber: nextNo, items: newItems, createdAt: Date.now(), status: "new", isRunning: true };
         await runTransaction(db, async (tx) => {
@@ -2684,13 +3044,40 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
     }
     setPlacing(true);
     try {
-      const items = cartItems.map(([id, qty]) => { const m = menu.find(x => x.id === id); return { itemId: id, name: m.name, category: m.category || "Anya", portion: m.portion || "", price: rates[id] ?? m.price, qty: parseFloat(qty) || 0, kotNumber: 1 }; });
+      const items = cartItems.map(([id, qty]) => { const m = menu.find(x => x.id === id); const note = itemNotes[id] || ""; return { itemId: id, name: m.name, category: m.category || "Anya", portion: m.portion || "", price: rates[id] ?? m.price, qty: parseFloat(qty) || 0, kotNumber: 1, ...(note ? { note } : {}) }; });
       const orderId = uid("o");
       const sub = cartSubtotal;
       const d = Math.round((sub * discount) / 100);
       const g = Math.round(((sub - d) * gstRate) / 100);
       const finalTotal = Math.max(0, sub - d + g - Number(cashDiscount || 0));
-      const order = { id: orderId, table: table === "parcel" ? "" : table, orderType: table === "parcel" ? "parcel" : "dine_in", customer: { name: custName || "Walk-in", phone: custPhone || "", address: custAddress || "" }, cashDiscount: Number(cashDiscount || 0), paymentSplit: payMode === "split" ? splitAmounts : null, items, waiter: waiterName || "Staff", kots: [{ id: uid("kot"), kotNumber: 1, items, createdAt: Date.now(), status: "new", isRunning: false }], status: "new", paid: false, subtotal: sub, billDiscountPct: discount, billDiscount: d, gstRate, gstAmount: g, finalTotal, payment: payMode, createdAt: Date.now(), createdBy: auth.currentUser?.uid };
+      const isDineIn = orderMode === "dine_in";
+      const order = {
+        id: orderId,
+        table: isDineIn ? activeTable : "",
+        orderType: isDineIn ? "dine_in" : "parcel",
+        ...(isDineIn ? {} : { fulfillmentMode: orderMode }),
+        customer: {
+          name: custName || "Walk-in",
+          phone: custPhone || "",
+          address: orderMode === "takeaway" ? "TAKEAWAY (At Table)" : orderMode === "delivery" ? custAddress : "",
+        },
+        cashDiscount: Number(cashDiscount || 0),
+        paymentSplit: payMode === "split" ? splitAmounts : null,
+        items,
+        waiter: selectedWaiter || waiterName || "Staff",
+        kots: [{ id: uid("kot"), kotNumber: 1, items, createdAt: Date.now(), status: "new", isRunning: false }],
+        status: "new",
+        paid: false,
+        subtotal: sub,
+        billDiscountPct: discount,
+        billDiscount: d,
+        gstRate,
+        gstAmount: g,
+        finalTotal,
+        payment: payMode,
+        createdAt: Date.now(),
+        createdBy: auth.currentUser?.uid,
+      };
       await runTransaction(db, async (tx) => {
         const ref = doc(db, "orders", orderId);
         const snap = await tx.get(ref);
@@ -2790,7 +3177,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
       if (!baseOrder) return;
       const baseKots = baseOrder.kots?.length ? baseOrder.kots : [{ id: uid("kot"), kotNumber: 1, items: baseOrder.items || [], createdAt: baseOrder.createdAt, status: baseOrder.status }];
       const nextNo = Math.max(1, ...baseKots.map(k => k.kotNumber || 1)) + 1;
-      const newItems = cartItems.map(([id, qty]) => { const m = menu.find(x => x.id === id); return { itemId: id, name: m.name, category: m.category || "Anya", portion: m.portion || "", price: rates[id] ?? m.price, qty, kotNumber: nextNo }; });
+      const newItems = cartItems.map(([id, qty]) => { const m = menu.find(x => x.id === id); const note = itemNotes[id] || ""; return { itemId: id, name: m.name, category: m.category || "Anya", portion: m.portion || "", price: rates[id] ?? m.price, qty, kotNumber: nextNo, ...(note ? { note } : {}) }; });
       const addedTotal = Math.round(newItems.reduce((s, it) => s + it.price * it.qty, 0));
       const runKot = { id: uid("kot"), kotNumber: nextNo, items: newItems, createdAt: Date.now(), status: "new", isRunning: true };
       await runTransaction(db, async (tx) => { // live-total txn (running)
@@ -2825,18 +3212,19 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
   };
 
   return (
-    <div className="ep-billing-root" style={{ position: "fixed", inset: 0, background: C.bg, zIndex: 100, display: "flex", flexDirection: "column", animation: "fadeIn 0.2s" }}>
-      <div style={{ background: `linear-gradient(135deg, ${C.gold} 0%, ${C.goldDark} 100%)`, color: "#fff", padding: isMobile ? "10px 12px" : "4px 12px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-            <button onClick={onBack} style={{ background: "rgba(255,255,255,0.18)", border: "none", color: "#fff", padding: isMobile ? "8px 12px" : "5px 10px", borderRadius: 7, fontWeight: 700, cursor: "pointer", fontSize: isMobile ? 12 : 12, flexShrink: 0 }}>← Back</button>
-            <div style={{ fontWeight: 800, fontSize: isMobile ? 13 : 14, textAlign: "center", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {existingOrder ? (addMoreMode ? `Add - ${table === "parcel" ? "Parcel" : "T" + table}` : `Bill - ${table === "parcel" ? "Parcel" : "T" + table} - ${existingItems.length} items`) : (table === "parcel" ? "New - Parcel" : `New - Table ${table}`)}
+    <div className="ep-billing-root ep-pos-root" style={{ position: "fixed", inset: 0, background: C.bg, zIndex: 100, display: "flex", flexDirection: "column", animation: "fadeIn 0.2s" }}>
+      <div className="ep-pos-topbar">
+        <button type="button" className="ep-pos-back" onClick={onBack} aria-label="Back">←</button>
+        <div className="ep-pos-topbar__title">
+          <strong>{existingOrder ? `Order #${existingOrder.id.slice(1, 9).toUpperCase()}` : "New Order"}</strong>
+          <span>{new Date(toMillis(existingOrder?.createdAt) || Date.now()).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
         </div>
-        <div style={{ background: "rgba(255,255,255,0.18)", borderRadius: 18, padding: isMobile ? "6px 10px" : "4px 8px", fontWeight: 900, fontSize: isMobile ? 12 : 12, fontFamily: "monospace", flexShrink: 0, minWidth: isMobile ? 40 : 60, textAlign: "center" }}>{cartItems.length > 0 ? inr(addMoreMode ? grossSub : totalAmount) : "—"}</div>
+        <div className="ep-pos-topbar__total">{cartItems.length > 0 ? inr(addMoreMode ? grossSub : totalAmount) : "—"}</div>
       </div>
 
-      {runningOrders.length > 0 && !existingOrder && (
-        <div style={{ background: C.amberLight, padding: "4px 8px", borderBottom: `1px solid ${C.line}`, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-          <div style={{ fontSize: isMobile ? 11 : 11, color: C.ink, fontWeight: 700, flex: 1, minWidth: 120 }}>Table {table} has {runningOrders.length} running order(s)</div>
+      {orderMode === "dine_in" && runningOrders.length > 0 && !existingOrder && (
+        <div className="ep-pos-running">
+          <div>Table {activeTable} has {runningOrders.length} running order(s)</div>
           <button onClick={() => addRunningItems(runningOrders[0].id)} disabled={cartItems.length === 0} style={{ background: cartItems.length === 0 ? C.line : C.blue, color: "#fff", border: "none", padding: "4px 8px", borderRadius: 6, fontWeight: 800, fontSize: 10, cursor: cartItems.length === 0 ? "not-allowed" : "pointer", fontFamily: "inherit", flexShrink: 0 }}>Add to Running</button>
         </div>
       )}
@@ -2850,49 +3238,96 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
       )}
 
       {/* Menu and order columns fill the space below the orange header; each column owns its own scroll area. */}
-      <div className="ep-billing-layout" style={{ flexDirection: isMobile ? "column" : "row", overflow: isMobile ? "hidden" : "hidden", padding: isMobile ? 8 : 6, paddingBottom: isMobile ? 72 : 6 }}>
-        <div className="ep-billing-menu-column" style={{ display: isMobile && mobileBillingTab === "order" ? "none" : "flex", height: isMobile ? "100%" : "100%", flex: isMobile ? "1 1 auto" : "1 1 auto" }}>
+      <div className="ep-billing-layout ep-pos-layout" style={{ flexDirection: isMobile ? "column" : "row", overflow: isMobile ? "hidden" : "hidden", padding: isMobile ? 8 : 6, paddingBottom: isMobile ? 72 : 6 }}>
+        <div className="ep-billing-menu-column ep-pos-menu-column" style={{ display: isMobile && mobileBillingTab === "order" ? "none" : "flex", height: isMobile ? "100%" : "100%", flex: isMobile ? "1 1 auto" : "1 1 auto" }}>
           {isMobile && mobileBillingTab === "payment" && (
             <div style={{ flex: "0 0 auto", display: "grid", gap: 10 }}>
               <div style={{ fontSize: 16, fontWeight: 900, color: C.ink }}>Payment</div>
               <div style={{ fontSize: 13, color: C.gray }}>Total <strong style={{ color: C.goldText, fontFamily: "monospace", marginLeft: 5 }}>{inr(totalAmount)}</strong></div>
             </div>
           )}
-          {isMobile && mobileBillingTab === "payment" ? null : favItems.length > 0 && !search.trim() && (
-            <button onClick={() => { haptic(); setShowFav((v) => { const n = !v; try { localStorage.setItem("staff_fav_open", n ? "1" : "0"); } catch (e) {} return n; }); }} style={{ alignSelf: "flex-start", display: "flex", alignItems: "center", gap: 5, padding: "6px 10px", borderRadius: 999, border: "1px solid " + C.gold, background: showFav ? C.gold : C.card, color: showFav ? "#fff" : C.goldText, fontWeight: 800, fontSize: 11, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>⭐ Favourites ({favItems.length}) {showFav ? "▲" : "▼"}</button>
+          {!(isMobile && mobileBillingTab === "payment") && (
+            <div className="ep-pos-mode-row">
+              <div className="ep-pos-mode-chips" aria-label="Order type">
+                <Chip active={orderMode === "dine_in"} disabled={orderModeDisabled} onClick={() => setOrderMode("dine_in")}>🍽️ Dine In</Chip>
+                <Chip active={orderMode === "takeaway"} disabled={orderModeDisabled} onClick={() => setOrderMode("takeaway")}>🛍️ Take Away</Chip>
+                <Chip active={orderMode === "delivery"} disabled={orderModeDisabled} onClick={() => setOrderMode("delivery")}>🛵 Delivery</Chip>
+              </div>
+              {orderMode === "dine_in" && (
+                <label className="ep-pos-table-picker">
+                  <span>Table</span>
+                  <select value={tableNumber} disabled={orderModeDisabled} onChange={event => setTableNumber(Number(event.target.value))} aria-label="Table number">
+                    {Array.from({ length: TABLE_COUNT }, (_, index) => index + 1).map(number => <option key={number} value={number}>T{number}</option>)}
+                  </select>
+                </label>
+              )}
+            </div>
+          )}
+          {!(isMobile && mobileBillingTab === "payment") && (
+            <div className="ep-pos-menu-tools">
+              <SecondaryButton className="ep-pos-estimate-button" onClick={onShowEstimate}>📋 Estimate</SecondaryButton>
+              {favItems.length > 0 && !search.trim() && (
+                <button className={`ep-pos-fav-button${showFav ? " is-active" : ""}`} onClick={() => { haptic(); setShowFav((v) => { const n = !v; try { localStorage.setItem("staff_fav_open", n ? "1" : "0"); } catch (e) {} return n; }); }}>⭐ Favourites ({favItems.length}) {showFav ? "▲" : "▼"}</button>
+              )}
+            </div>
           )}
           {!(isMobile && mobileBillingTab === "payment") && showFav && favItems.length > 0 && !search.trim() && (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, padding: 6, background: C.goldLight, border: "1px solid " + C.line, borderRadius: 10, flexShrink: 0 }}>
-              {favItems.map((m) => (
-                <button key={"fav" + m.id} onClick={() => setQty(m.id, (cart[m.id] || 0) + 1)} style={{ padding: "5px 8px", borderRadius: 20, border: "1px solid " + (C.gold || C.red), background: cart[m.id] ? (C.gold || C.red) : C.card, color: cart[m.id] ? "#fff" : C.ink, fontWeight: 800, fontSize: 10, cursor: "pointer", whiteSpace: "nowrap", fontFamily: "inherit", flexShrink: 0 }}>{pinnedIds.includes(m.id) ? "📌" : "⭐"} {m.name}{cart[m.id] ? " ×" + cart[m.id] : ""}</button>
+            <div className="ep-pos-favourites">
+              {favItems.map(m => (
+                <button key={"fav" + m.id} onClick={() => setQty(m.id, (cart[m.id] || 0) + 1)}>{pinnedIds.includes(m.id) ? "📌" : "⭐"} {m.name}{cart[m.id] ? " ×" + cart[m.id] : ""}</button>
               ))}
             </div>
           )}
           {isMobile && mobileBillingTab === "payment" ? null : (
-            <div style={{ position: "relative", flexShrink: 0 }}><input placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)} style={{ width: "100%", boxSizing: "border-box", height: 34, padding: "6px 36px 6px 10px", border: `1px solid ${C.line}`, borderRadius: 7, fontSize: 13, outline: "none", background: C.card, color: C.ink }} />{search && <button aria-label="Search clear" onClick={() => setSearch("")} style={{ position: "absolute", top: 3, right: 4, width: 28, height: 28, border: "none", borderRadius: 14, background: C.cardAlt, color: C.gray, fontSize: 13, fontWeight: 800, cursor: "pointer", padding: 0 }}>✕</button>}</div>
-          )}
-          {isMobile && mobileBillingTab === "payment" ? null : (
-            <div className="ep-category-chips" style={{ paddingBottom: 1 }}>
-            {categories.map(c => (
-              <button key={c} className="ep-pill" onClick={() => { haptic(); setCategory(c); }} style={{ padding: "5px 10px", borderRadius: 999, boxShadow: category === c ? "0 3px 10px rgba(184,134,11,0.30)" : "none", border: `1px solid ${category === c ? C.gold : C.line}`, background: category === c ? C.gold : C.card, color: category === c ? "#fff" : C.gray, fontWeight: 700, fontSize: 11, cursor: "pointer", whiteSpace: "nowrap", fontFamily: "inherit", flexShrink: 0 }}>{c}</button>
-            ))}
-            </div>
-          )}
-          {isMobile && mobileBillingTab === "payment" ? null : (
-            <div className="ep-menu-grid" style={{ gridTemplateColumns: isMobile ? "repeat(2, minmax(0, 1fr))" : undefined }}>
-            {filtered.map(m => {
-              const q = cart[m.id] || 0;
-              return (
-                <button key={m.id} onClick={() => setQty(m.id, q + 1)} className="ep-card" style={{ textAlign: "left", padding: 8, borderRadius: 10, border: `1.5px solid ${q > 0 ? C.green : C.line}`, background: q > 0 ? C.greenLight : C.card, boxShadow: q > 0 ? "0 2px 10px rgba(22,163,74,0.15)" : "0 1px 3px rgba(0,0,0,0.05)", cursor: "pointer", position: "relative", fontFamily: "inherit", minHeight: 64, color: C.ink, display: "flex", flexDirection: "column", justifyContent: "space-between", gap: 3 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: C.ink, marginBottom: 2, lineHeight: 1.2, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", paddingRight: 20 }}>{m.name}</div>
-                  {isOwner && <span role="button" title="Favourite pin" onClick={(e) => { e.stopPropagation(); togglePin(m.id); }} style={{ position: "absolute", top: 6, right: 6, fontSize: 16, lineHeight: 1, padding: 4, cursor: "pointer", zIndex: 2, opacity: pinnedIds.includes(m.id) ? 1 : 0.35 }}>{pinnedIds.includes(m.id) ? "⭐" : "☆"}</span>}
-                  <div style={{ fontSize: 13, fontWeight: 900, color: C.goldText, fontFamily: "monospace" }}>{inr(m.price)}</div>
-                  {q > 0 && <span style={{ position: "absolute", bottom: 6, right: 6, background: C.green, color: "#fff", borderRadius: 12, padding: "2px 9px", fontSize: 11, fontWeight: 800, boxShadow: "0 2px 6px rgba(22,163,74,0.35)", animation: "successBounce 0.3s" }}>{q}</span>}
-                </button>
-              );
-            })}
-            {filtered.length === 0 && <div style={{ gridColumn: "1 / -1", textAlign: "center", padding: 40, color: C.gray }}><div style={{ fontSize: 36, marginBottom: 8 }}>🍽️</div><div style={{ fontSize: 13, fontWeight: 700 }}>{menu.length === 0 ? "Menu load ho raha hai..." : "Koi matching item nahi"}</div></div>}
-            </div>
+            <>
+              <div className="ep-category-chips ep-pos-category-row">
+                {categories.map(c => (
+                  <Chip key={c} active={category === c} className="ep-pos-category-card" onClick={() => { haptic(); setCategory(c); }}>
+                    <span className="ep-pos-category-icon">{getMenuCategoryIcon(c)}</span>
+                    <span>{c}</span>
+                    <small>{categoryCounts[c] || 0}</small>
+                  </Chip>
+                ))}
+              </div>
+              <div className="ep-pos-filter-row">
+                <div className="ep-pos-diet-chips" aria-label="Dietary filter">
+                  {[["all", "All"], ["veg", "Veg"], ["non-veg", "Non Veg"], ["egg", "Egg"]].map(([value, label]) => (
+                    <Chip key={value} active={dietFilter === value} onClick={() => setDietFilter(value)}>{label}</Chip>
+                  ))}
+                </div>
+                <label className="ep-pos-search">
+                  <span aria-hidden="true">⌕</span>
+                  <input placeholder="Search dishes..." value={search} onChange={event => setSearch(event.target.value)} aria-label="Search dishes" />
+                  {search && <button type="button" aria-label="Clear search" onClick={() => setSearch("")}>×</button>}
+                </label>
+              </div>
+              <div className="ep-menu-grid ep-pos-menu-grid" style={{ gridTemplateColumns: isMobile ? "repeat(2, minmax(0, 1fr))" : undefined }}>
+                {filtered.map(m => {
+                  const q = cart[m.id] || 0;
+                  const dietType = getMenuDietType(m);
+                  return (
+                    <article key={m.id} className={`ep-pos-menu-card${q > 0 ? " is-selected" : ""}`}>
+                      <div className="ep-pos-menu-card__image">
+                        <span aria-hidden="true">🍽️</span>
+                        {m.image && <img src={m.image} alt={m.name} loading="lazy" onError={event => { event.currentTarget.style.display = "none"; }} />}
+                        <i className={`ep-pos-diet-dot ep-pos-diet-dot--${dietType}`} aria-label={dietType} title={dietType} />
+                        {isOwner && <button type="button" className={`ep-pos-favourite${pinnedIds.includes(m.id) ? " is-pinned" : ""}`} title="Favourite pin" aria-label={`Pin ${m.name}`} onClick={() => togglePin(m.id)}>{pinnedIds.includes(m.id) ? "★" : "☆"}</button>}
+                      </div>
+                      <div className="ep-pos-menu-card__content">
+                        <button type="button" className="ep-pos-menu-card__name" onClick={() => setQty(m.id, q + 1)}>{m.name}</button>
+                        <strong className="ep-pos-menu-card__price">{inr(m.price)}</strong>
+                        <div className="ep-pos-stepper" aria-label={`Quantity for ${m.name}`}>
+                          <button type="button" onClick={() => setQty(m.id, q - 1)} aria-label={`Decrease ${m.name}`}>−</button>
+                          <span>{q}</span>
+                          <button type="button" onClick={() => setQty(m.id, q + 1)} aria-label={`Increase ${m.name}`}>+</button>
+                        </div>
+                      </div>
+                    </article>
+                  );
+                })}
+                {filtered.length === 0 && <div className="ep-pos-empty-menu"><span>🍽️</span><strong>{menu.length === 0 ? "Menu load ho raha hai..." : "Koi matching item nahi"}</strong></div>}
+              </div>
+            </>
           )}
           {/* Payment controls stay fixed below the independently scrolling menu grid. */}
           {!addMoreMode && (!isMobile || mobileBillingTab === "payment") && (
@@ -2932,25 +3367,31 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
         </div>
 
         {/* Right panel: stable header/customer/extras/footer; only its cart list scrolls. */}
-        <div className="ep-order-panel ep-card" style={{ display: isMobile && mobileBillingTab !== "order" ? "none" : "flex", background: C.card, border: `1px solid ${C.line}`, borderRadius: 16, boxShadow: "0 12px 32px rgba(0,0,0,0.16)", width: isMobile ? "100%" : 432, minHeight: isMobile ? 0 : 0, height: isMobile ? "100%" : "100%" }}>
-          <div style={{ padding: "6px 10px", borderBottom: `1px solid ${C.line}`, background: C.cardAlt, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, minHeight: 40, boxSizing: "border-box" }}>
+        <div className="ep-order-panel ep-card ep-pos-order-panel" style={{ display: isMobile && mobileBillingTab !== "order" ? "none" : "flex", background: C.card, border: `1px solid ${C.line}`, borderRadius: 16, boxShadow: "0 12px 32px rgba(0,0,0,0.16)", width: isMobile ? "100%" : 432, minHeight: isMobile ? 0 : 0, height: isMobile ? "100%" : "100%" }}>
+          <div className="ep-pos-order-header">
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontWeight: 900, fontSize: 13, color: C.ink, letterSpacing: 0.1 }}>{addMoreMode ? "Add items" : existingOrder ? "Checkout" : "New order"}</div>
-              <div style={{ marginTop: 1, fontSize: 10, color: C.gray, fontWeight: 700 }}>{table === "parcel" ? "Parcel" : "Table " + table} · {cartItems.length} {cartItems.length === 1 ? "item" : "items"}</div>
+              <strong>{addMoreMode ? "Add items" : existingOrder ? `Order #${existingOrder.id.slice(1, 9).toUpperCase()}` : "New Order"}</strong>
+              <span>{orderModeLabel} · {cartItems.length} {cartItems.length === 1 ? "item" : "items"}</span>
             </div>
-            <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-              {!existingOrder && cartItems.length > 0 && <button onClick={() => { if (window.confirm("Poora cart khaali karein?")) { setCart({}); try { localStorage.removeItem("staff_draft_" + table); } catch (e) {} } }} style={{ padding: "5px 8px", border: `1px solid ${C.red}55`, borderRadius: 7, background: C.redLight, color: C.red, fontWeight: 800, fontSize: 10, cursor: "pointer", fontFamily: "inherit" }}>Clear</button>}
-              {isOwner && <button onClick={() => setAddMenuOpen(true)} style={{ padding: "5px 8px", border: "none", borderRadius: 7, background: C.green, color: "#fff", fontWeight: 800, fontSize: 10, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>+ Menu</button>}
+            <div className="ep-pos-order-header__actions">
+              {!existingOrder && cartItems.length > 0 && <button type="button" onClick={() => { if (window.confirm("Poora cart khaali karein?")) { setCart({}); try { localStorage.removeItem("staff_draft_" + table); } catch (e) {} } }}>Clear</button>}
+              {isOwner && <button type="button" onClick={() => setAddMenuOpen(true)}>+ Menu</button>}
             </div>
           </div>
-          {/* Customer fields sit directly below the fixed panel header. */}
-          <div className="ep-order-customer">
+          <div className="ep-order-customer ep-pos-customer">
             <input aria-label="Customer name" placeholder="Customer name" value={custName} onChange={e => setCustName(e.target.value)} />
             <input aria-label="Customer phone number" placeholder="Phone number" value={custPhone} onChange={e => setCustPhone(e.target.value)} type="tel" />
+            <label>
+              <span>Waiter</span>
+              <select aria-label="Waiter" value={selectedWaiter} onChange={event => setSelectedWaiter(event.target.value)}>
+                {!waiterOptions.includes(selectedWaiter) && selectedWaiter && <option value={selectedWaiter}>{selectedWaiter}</option>}
+                {waiterOptions.map(name => <option key={name} value={name}>{name}</option>)}
+              </select>
+            </label>
           </div>
-          {table === "parcel" && <div style={{ flex: "0 0 38px", padding: "2px 8px 4px", boxSizing: "border-box" }}><input aria-label="Delivery address" placeholder="Delivery address" value={custAddress} onChange={e => setCustAddress(e.target.value)} style={{ width: "100%", height: 32, boxSizing: "border-box", padding: "5px 9px", border: `1px solid ${C.line}`, borderRadius: 7, fontSize: 13, background: C.card, color: C.ink, outline: "none" }} /></div>}
-          <div className="ep-order-items">
-            {cartItems.length === 0 && <div style={{ textAlign: "center", padding: "40px 20px", color: C.gray, fontSize: 13, fontWeight: 700 }}><div style={{ fontSize: 40, marginBottom: 8, opacity: 0.5 }}>🧾</div>Menu se item tap karo</div>}
+          {orderMode === "delivery" && <div className="ep-pos-address"><input aria-label="Delivery address" placeholder="Delivery address" value={custAddress} onChange={e => setCustAddress(e.target.value)} /></div>}
+          <div className="ep-order-items ep-pos-order-items">
+            {cartItems.length === 0 && <div className="ep-pos-empty-cart"><span>🧾</span><strong>Menu se item tap karo</strong><small>Selected dishes yahan dikhenge</small></div>}
             {cartItems.length > 0 && (
               <div className="ep-order-items-header" style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 8px", background: C.cardAlt, borderBottom: "1px solid " + C.line, fontSize: 10, fontWeight: 800, color: C.gray, letterSpacing: 0.5, textTransform: "uppercase" }}>
                 <div style={{ flex: 1 }}>Item</div>
@@ -2965,21 +3406,29 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
               const existingQty = existingItems.filter(e => e.itemId === id).reduce((s, e) => s + e.qty, 0);
               const isNew = !!existingOrder && !addMoreMode && existingQty === 0;
               return (
-                <div key={id} style={{ display: "flex", alignItems: "center", gap: 6, minHeight: 40, boxSizing: "border-box", padding: "3px 8px", borderBottom: "1px dashed " + C.line, background: isNew ? C.greenLight : "transparent" }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 14, fontWeight: 800, color: C.ink, lineHeight: 1.2 }}>
+                <div key={id} className={`ep-pos-cart-row${isNew ? " is-new" : ""}`}>
+                  <div className="ep-pos-cart-image">
+                    <span aria-hidden="true">🍽️</span>
+                    {m.image && <img src={m.image} alt="" loading="lazy" onError={event => { event.currentTarget.style.display = "none"; }} />}
+                  </div>
+                  <div className="ep-pos-cart-info">
+                    <div className="ep-pos-cart-name">
                       {m.name}{m.portion ? " (" + m.portion + ")" : ""}
-                      {isNew && <span style={{ marginLeft: 6, background: C.green, color: "#fff", fontSize: 8, padding: "1px 5px", borderRadius: 3, fontWeight: 800, verticalAlign: "middle" }}>NEW</span>}
+                      {isNew && <span className="ep-pos-new-item">NEW</span>}
                     </div>
-                    <div style={{ fontSize: 11, color: C.gray, marginTop: 1, fontFamily: "monospace", cursor: "pointer", textDecoration: "underline dotted", lineHeight: 1.1 }} onClick={() => editRate(id, rates[id] ?? m.price, m.name)}>✎ {inr(rates[id] ?? m.price)} x {q}</div>
+                    <button type="button" className="ep-pos-rate" onClick={() => editRate(id, rates[id] ?? m.price, m.name)}>✎ {inr(rates[id] ?? m.price)} each</button>
+                    <button type="button" className="ep-pos-note-toggle" onClick={() => setNoteOpenId(noteOpenId === id ? null : id)}>{itemNotes[id] ? "Edit Note" : "Add Note"}{itemNotes[id] ? " · " + itemNotes[id] : ""}</button>
                   </div>
-                  <div style={{ display: "flex", alignItems: "center", width: 82, justifyContent: "center", border: "1px solid " + C.line, borderRadius: 6, overflow: "hidden", flexShrink: 0 }}>
-                    <button onClick={() => setQty(id, q - 1)} style={{ width: 28, height: 28, flexShrink: 0, border: "none", background: C.cardAlt, color: C.ink, fontSize: 15, fontWeight: 900, cursor: "pointer", padding: 0 }}>-</button>
-                    <QtyInput value={q} onCommit={(v) => setQty(id, v)} style={{ flex: 1, width: "100%", minWidth: 24, textAlign: "center", fontWeight: 900, fontSize: 13, color: C.ink, border: "none", background: "transparent", outline: "none", fontFamily: "monospace" }} />
-                    <button onClick={() => setQty(id, q + 1)} style={{ width: 28, height: 28, flexShrink: 0, border: "none", background: C.goldLight, color: C.goldText, fontSize: 15, fontWeight: 900, cursor: "pointer", padding: 0 }}>+</button>
+                  <div className="ep-pos-cart-controls">
+                    <div className="ep-pos-stepper">
+                      <button type="button" onClick={() => setQty(id, q - 1)} aria-label={`Decrease ${m.name}`}>−</button>
+                      <QtyInput value={q} onCommit={value => setQty(id, value)} style={{ flex: 1, width: "100%", minWidth: 24, textAlign: "center", fontWeight: 900, fontSize: 13, color: C.ink, border: "none", background: "transparent", outline: "none", fontFamily: "monospace" }} />
+                      <button type="button" onClick={() => setQty(id, q + 1)} aria-label={`Increase ${m.name}`}>+</button>
+                    </div>
+                    <strong>{inr((rates[id] ?? m.price) * (Number(q) || 0))}</strong>
                   </div>
-                  <div style={{ width: 62, textAlign: "right", fontWeight: 800, fontSize: 13, color: C.ink, fontFamily: "monospace", flexShrink: 0 }}>{inr((rates[id] ?? m.price) * (Number(q) || 0))}</div>
-                  <button aria-label={`Remove ${m.name}`} onClick={() => setQty(id, 0)} style={{ width: 18, background: "transparent", border: "none", color: C.gray, fontSize: 13, cursor: "pointer", padding: 0, flexShrink: 0 }}>x</button>
+                  <button type="button" className="ep-pos-remove-item" aria-label={`Remove ${m.name}`} onClick={() => setQty(id, 0)}>×</button>
+                  {noteOpenId === id && <input className="ep-pos-note-input" aria-label={`Note for ${m.name}`} placeholder="Add preparation note..." value={itemNotes[id] || ""} onChange={event => setItemNotes(previous => ({ ...previous, [id]: event.target.value }))} />}
                 </div>
               );
             })}
@@ -3004,35 +3453,37 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
           )}
 
           {/* Footer stays fixed; actions for existing bills remain available. */}
-          <div className="ep-order-footer" style={{ flex: existingOrder && !addMoreMode ? "0 0 auto" : "0 0 44px", flexDirection: existingOrder && !addMoreMode ? "column" : "row", alignItems: existingOrder && !addMoreMode ? "stretch" : "center", padding: "2px 8px", background: C.light, borderTop: `1px solid ${C.line}`, boxShadow: "0 -6px 14px rgba(0,0,0,0.16)" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: existingOrder && !addMoreMode ? 6 : 0 }}>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
-                  {!addMoreMode && <span style={{ fontSize: 10, color: C.gray, fontWeight: 700 }}>Subtotal {inr(grossSub)}</span>}
-                  {addMoreMode && <span style={{ fontSize: 10, color: C.gray, fontWeight: 700 }}>Running {inr(existingSubtotal)} · New +{inr(cartSubtotal)}</span>}
-                  <strong style={{ color: C.ink, fontSize: 14 }}>Total {inr(addMoreMode ? grossSub : totalAmount)}</strong>
-                </div>
+          <div className="ep-order-footer ep-pos-order-footer" style={{ flex: existingOrder && !addMoreMode ? "0 0 auto" : "0 0 44px", flexDirection: existingOrder && !addMoreMode ? "column" : "row", alignItems: existingOrder && !addMoreMode ? "stretch" : "center", padding: "2px 8px", background: C.light, borderTop: `1px solid ${C.line}`, boxShadow: "0 -6px 14px rgba(0,0,0,0.16)" }}>
+            <div className="ep-pos-payment-summary">
+              <div className="ep-pos-payment-summary__lines">
+                <span>Subtotal <strong>{inr(grossSub)}</strong></span>
+                <span>Tax <strong>{inr(gstAmt)}</strong></span>
+                {addMoreMode && <span>Running {inr(existingSubtotal)} · New +{inr(cartSubtotal)}</span>}
               </div>
-              {(!existingOrder || addMoreMode) && (
-                <button onClick={handlePlaceOrder} disabled={cartItems.length === 0 || placing} style={{ minWidth: 132, height: 40, padding: "6px 12px", border: "none", borderRadius: 9, background: cartItems.length === 0 ? C.line : `linear-gradient(135deg, ${addMoreMode ? C.green : C.gold} 0%, ${addMoreMode ? "#15803D" : C.goldDark} 100%)`, color: cartItems.length === 0 ? C.gray : "#fff", fontWeight: 900, fontSize: 14, cursor: cartItems.length === 0 ? "not-allowed" : "pointer", fontFamily: "inherit", boxShadow: cartItems.length === 0 ? "none" : `0 5px 14px ${C.gold}35`, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, flexShrink: 0 }}>{placing ? <><Spinner /> {addMoreMode ? "Adding..." : "Placing..."}</> : addMoreMode ? "Add to Running KOT" : "Send KOT"}</button>
-              )}
+              <div className="ep-pos-amount-bar"><span>Amount to be Paid</span><strong>{inr(addMoreMode ? grossSub : totalAmount)}</strong></div>
             </div>
+            {(!existingOrder || addMoreMode) && (
+              <PrimaryButton className="ep-pos-place-order" onClick={handlePlaceOrder} disabled={cartItems.length === 0 || placing}>
+                {placing ? <><Spinner /> {addMoreMode ? "Adding..." : "Placing..."}</> : addMoreMode ? "Add to Running KOT" : "Place an Order"}
+              </PrimaryButton>
+            )}
             {existingOrder && !addMoreMode && (
               <div style={{ marginTop: 0 }}>
                 {existingOrder.paid && <div style={{ padding: 8, borderRadius: 6, background: C.greenLight, color: C.green, fontWeight: 900, fontSize: 12, textAlign: "center", border: "1px solid " + C.green, marginBottom: 6 }}>PAID</div>}
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 7, marginTop: 9 }}>
-                  <button onClick={handleSaveBill} disabled={placing || !!existingOrder.paid} style={{ padding: "10px 8px", border: `1px solid ${C.line}`, borderRadius: 8, background: C.cardAlt, color: C.ink, fontWeight: 800, fontSize: 12, cursor: placing ? "not-allowed" : "pointer", fontFamily: "inherit" }}>Save changes</button>
-                  <button onClick={handlePrintBill} disabled={placing} style={{ padding: "10px 8px", border: `1px solid ${C.line}`, borderRadius: 8, background: C.card, color: C.ink, fontWeight: 800, fontSize: 12, cursor: placing ? "not-allowed" : "pointer", fontFamily: "inherit" }}>Print bill</button>
+                <div className="ep-pos-order-actions">
+                  <button onClick={handleSaveBill} disabled={placing || !!existingOrder.paid}>Save changes</button>
+                  <button onClick={() => printKOT(existingOrder)} disabled={placing}>Print KOT</button>
+                  <button onClick={handlePrintBill} disabled={placing}>Print invoice</button>
                   {onSplit && !existingOrder.paid && (existingOrder.items || []).length > 1 && (
-                    <button onClick={() => onSplit(existingOrder)} disabled={placing} style={{ padding: "9px 8px", border: `1px solid ${C.line}`, borderRadius: 8, background: C.card, color: C.ink, fontWeight: 700, fontSize: 11, cursor: placing ? "not-allowed" : "pointer", fontFamily: "inherit" }}>✂ Split bill</button>
+                    <button onClick={() => onSplit(existingOrder)} disabled={placing}>✂ Split bill</button>
                   )}
                   {!existingOrder.paid && onSwitchAdd && (
-                    <button onClick={onSwitchAdd} disabled={placing} style={{ padding: "9px 8px", border: `1px solid ${C.line}`, borderRadius: 8, background: C.card, color: C.ink, fontWeight: 700, fontSize: 11, cursor: placing ? "not-allowed" : "pointer", fontFamily: "inherit" }}>+ Add items</button>
+                    <button onClick={onSwitchAdd} disabled={placing}>+ Add items</button>
                   )}
                 </div>
                 {!existingOrder.paid && <button onClick={handlePaidPrint} disabled={placing || (payMode === "cash" && cashReceived !== "" && (!Number.isFinite(Number(cashReceived)) || Number(cashReceived) < totalAmount))} style={{ width: "100%", marginTop: 8, padding: "12px 10px", border: "none", borderRadius: 9, background: `linear-gradient(135deg, ${C.green} 0%, #15803D 100%)`, color: "#fff", fontWeight: 900, fontSize: 14, cursor: placing || (payMode === "cash" && cashReceived !== "" && Number(cashReceived) < totalAmount) ? "not-allowed" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, boxShadow: `0 5px 14px ${C.green}35` }}>{placing ? <Spinner /> : (payMode === "due" ? "Record as due" : `Collect ${inr(totalAmount)} & print`)}</button>}
                 {isOwner && !existingOrder.paid && (
-                  <button onClick={() => setCancelOpen(true)} style={{ width: "100%", marginTop: 6, padding: 4, border: "none", background: "transparent", color: C.gray, fontWeight: 700, fontSize: 11, textDecoration: "underline", cursor: "pointer", fontFamily: "inherit" }}>Order cancel karein</button>
+                  <button className="ep-pos-cancel-order" onClick={() => setCancelOpen(true)}>Cancel order</button>
                 )}
               </div>
             )}
@@ -3118,16 +3569,7 @@ function ReportsExtra({ C, isMobile, orders, rangeLabel }) {
   const collected = paidOrders.reduce((s, o) => s + (Number(o.finalTotal) || 0), 0);
   const cancelled = orders.length - valid.length;
 
-  const exportCsv = () => {
-    const rows = [["Bill","Date","Type","Table","Waiter","Items","Subtotal","Discount","GST","Total","Payment","Paid"]];
-    orders.forEach(o => rows.push([(o.id || "").slice(1,9).toUpperCase(), new Date(o.createdAt).toLocaleString("en-IN"), o.orderType || "", o.table || "", o.waiter || "", (o.items || []).map(it => `${it.qty}x ${it.name}`).join("; "), o.subtotal || 0, o.billDiscount || 0, o.gstAmount || 0, o.finalTotal || 0, o.payment || "", o.paid ? "Yes" : "No"]));
-const csv = rows.map(r => r.map(c => `"${String(csvCellSafe(c)).replace(/"/g, '""')}"`).join(",")).join("\n");
-    const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `orders-${rangeLabel.replace(/\W+/g, "_")}.csv`;
-    a.click();
-  };
+  const exportCsv = () => exportOrdersCsv(orders, rangeLabel);
 
   const closeDay = () => {
     const row = (k, v) => `<tr><td>${k}</td><td style="text-align:right">${v}</td></tr>`;

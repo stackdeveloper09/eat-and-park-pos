@@ -6,6 +6,14 @@ export const PAID_STATUSES = ["paid"];
 
 export const isCancelled = (o) => o.status === "cancelled";
 
+const orderCreatedAt = (order) => {
+  const value = order?.createdAt;
+  if (typeof value === "number") return value;
+  if (typeof value?.toMillis === "function") return value.toMillis();
+  if (typeof value?.seconds === "number") return value.seconds * 1000;
+  return Number(value) || 0;
+};
+
 export const isDeliveryOrder = (order) => {
   if (order.fulfillmentMode === "delivery") return true;
   if (order.orderType !== "parcel" || order.fulfillmentMode) return false;
@@ -34,12 +42,32 @@ export const isOpenParcel = (o) => o.orderType === "parcel" && isOpenBase(o);
 export const isOpenDineIn = (o) => o.orderType === "dine_in" && isOpenBase(o);
 
 // "Active" = unpaid, due nahi, cancelled nahi (Tables, Dashboard, Orders tab teeno yahi)
-export const isActiveOrder = (o) => !isCancelled(o) && !o.paid && o.paymentStatus !== "due" && Date.now() - (o.createdAt || 0) < OPEN_WINDOW_MS;
+const isActiveOrderAt = (order, now) =>
+  !isCancelled(order) && !order.paid && order.paymentStatus !== "due" &&
+  now - (order.createdAt || 0) < OPEN_WINDOW_MS;
+export const isActiveOrder = (order) => isActiveOrderAt(order, Date.now());
 
 // Paid orders aur unka revenue (cancelled kabhi nahi ginte)
 export const paidOrders = (orders) => orders.filter((o) => o.paid && !isCancelled(o));
 export const paidRevenue = (orders) =>
   paidOrders(orders).reduce((s, o) => s + (Number(o.finalTotal) || 0), 0);
+
+export const getOrderMetrics = (orders, now = Date.now()) => {
+  const list = Array.isArray(orders) ? orders : [];
+  const paid = paidOrders(list);
+  const activeOrders = list.filter((order) => isActiveOrderAt(order, now));
+
+  return {
+    revenue: paid.reduce((sum, order) => sum + (Number(order.finalTotal) || 0), 0),
+    paidCount: paid.length,
+    activeOrders,
+    activeCount: activeOrders.length,
+    durationMinutes: (order) => {
+      const createdAt = orderCreatedAt(order);
+      return createdAt ? Math.max(0, Math.floor((now - createdAt) / 60000)) : 0;
+    },
+  };
+};
 
 // "Paid" karte waqt Firestore me jo fields likhni hain.
 export const buildPaidPatch = (order, mode, by) => {
