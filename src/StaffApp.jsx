@@ -503,19 +503,36 @@ const STATUS = {
   new: { label: "New", color: "red", emoji: "🆕" },
   preparing: { label: "Cooking", color: "amber", emoji: "👨‍🍳" },
   ready: { label: "Ready", color: "green", emoji: "✅" },
-served: { label: "Served", color: "gray", emoji: "🍽️" },
+  served: { label: "Served", color: "gray", emoji: "🍽️" },
   out_for_delivery: { label: "Out for Delivery", color: "blue", emoji: "🛵" },
-
+  cancelled: { label: "Cancelled", color: "red", emoji: "❌" },
 };
 const STATUS_FLOW = ["new", "preparing", "ready", "out_for_delivery", "served"];
-const orderStatusLabel = (status) => ({
-  new: "Pending",
-  preparing: "Preparing",
-  ready: "Ready",
-  out_for_delivery: "Ready",
-  served: "Completed",
-  cancelled: "Cancelled",
-}[status] || String(status || ""));
+const orderStatusLabel = (status) => STATUS[status]?.label || String(status || "");
+const orderPaymentLabel = (order) => order.paid || PAID_STATUSES.includes(order.paymentStatus)
+  ? "Paid"
+  : order.paymentStatus === "due" ? "Due" : "Unpaid";
+const getOrderMetricsForUI = (orders) => {
+  const list = Array.isArray(orders) ? orders : [];
+  return {
+    ...getOrderMetrics(list),
+    unpaidOrders: list.filter(order =>
+      !order.paid &&
+      !PAID_STATUSES.includes(order.paymentStatus) &&
+      order.status !== "cancelled"
+    ),
+  };
+};
+function OrderStatusBadge({ C, status }) {
+  const statusInfo = STATUS[status];
+  const color = statusInfo ? C[statusInfo.color] || C.gray : C.gray;
+  const background = statusInfo ? C[statusInfo.color + "Light"] || C.light : C.light;
+  return (
+    <span className="ep-ds-status-badge" style={{ color, backgroundColor: background }}>
+      {statusInfo?.label || String(status || "")}
+    </span>
+  );
+}
 
 const RESTAURANT = {
   name: "Eat & Park",
@@ -1441,8 +1458,8 @@ function StaffAppInner() {
     );
   }
 
-  const allOrderMetrics = getOrderMetrics(orders);
-  const activeOrders = allOrderMetrics.activeOrders;
+  const allOrderMetrics = getOrderMetricsForUI(orders);
+  const unpaidOrderCount = allOrderMetrics.unpaidOrders.length;
   const startOfToday = new Date(); startOfToday.setHours(0,0,0,0);
   const todayRevenue = getOrderMetrics(orders.filter(o => o.createdAt >= startOfToday.getTime())).revenue;
 
@@ -1554,7 +1571,7 @@ function StaffAppInner() {
             onMove={(order) => setTableMove(order)}
             onFeedback={(order) => setFeedbackOrder(order)}
             search={searchTable} setSearch={setSearchTable}
-            todayRevenue={todayRevenue} activeOrders={activeOrders.length} />
+            todayRevenue={todayRevenue} unpaidCount={unpaidOrderCount} />
         )}
         
 {activeTab === "bookings" && (
@@ -1585,8 +1602,8 @@ function StaffAppInner() {
             visible={activeTab === "orders"} detailOrderId={detailOrderId} statusMenuOrderId={statusMenuOrderId}
             onOpenOrder={(order, openStatusMenu = false) => { setDetailOrderId(order.id); setStatusMenuOrderId(openStatusMenu ? order.id : null); }}
             onCloseOrder={() => { setDetailOrderId(null); setStatusMenuOrderId(null); }}
-            onAddMore={(order) => { setBillOrder(order); setSelectedTable(order.table || "parcel"); setCart({}); setAddMoreMode(true); }}
-            onEditBill={(order) => { setBillOrder(order); setSelectedTable(order.table || "parcel"); setCart({}); setAddMoreMode(false); }}
+            onAddMore={(order) => { setBillOrder(order); setSelectedTable(order.orderType === "parcel" ? "parcel" : order.table || "parcel"); setCart({}); setAddMoreMode(true); }}
+            onEditBill={(order) => { setBillOrder(order); setSelectedTable(order.orderType === "parcel" ? "parcel" : order.table || "parcel"); setCart({}); setAddMoreMode(false); }}
             filter={ordersFilter} setFilter={setOrdersFilter} rangeStart={ordersRange?.start} rangeEnd={ordersRange?.end} setOrdersRange={setOrdersRange} setOrders={setOrders} onPaidSuccess={() => { setConfetti(true); setTimeout(() => setConfetti(false), 1800); }} />
         )}
         {activeTab === "parcel" && (
@@ -1796,7 +1813,7 @@ function ParcelView({ C, isMobile, orders, onNew, onBill, onAdd, onOpenOrder }) 
   );
 }
 
-function TablesView({ C, isMobile, orders, onTableClick, onEditBill, onAddMore, onMerge, onSplit, onMove, onFeedback, search, setSearch, todayRevenue, activeOrders }) {
+function TablesView({ C, isMobile, orders, onTableClick, onEditBill, onAddMore, onMerge, onSplit, onMove, onFeedback, search, setSearch, todayRevenue, unpaidCount }) {
   const [tick, setTick] = useState(0);
   const [selectedTable, setSelectedTable] = useState(null);
   const [selectedFloor, setSelectedFloor] = useState("all");
@@ -1909,7 +1926,7 @@ function TablesView({ C, isMobile, orders, onTableClick, onEditBill, onAddMore, 
 
       <div className="ep-floor__metrics">
         <KpiCard label="Revenue today" value={<AnimatedNumber value={todayRevenue} />} icon="₹" />
-        <KpiCard label="Active orders" value={<AnimatedNumber value={activeOrders} format={false} />} icon="⌁" />
+        <KpiCard label="Unpaid orders" value={<AnimatedNumber value={unpaidCount} format={false} />} icon="⌁" />
         <KpiCard label="Occupied tables" value={`${statusCounts.occupied}/${tableData.length}`} icon="▦" />
       </div>
 
@@ -2039,9 +2056,6 @@ function OrderDetailDrawer({ isMobile, order, isOwner, openStatusOnOpen, onClose
   const type = order.orderType === "parcel"
     ? isDeliveryOrder(order) ? "delivery" : "take-away"
     : "dine-in";
-  const badgeStatus = order.status === "new" ? "pending"
-    : order.status === "served" ? "completed"
-    : order.status === "out_for_delivery" ? "ready" : order.status;
   const nextStatus = nextKitchenStatus(order);
   const statusOptions = [{ value: order.status, label: orderStatusLabel(order.status) }];
   if (nextStatus) statusOptions.push({ value: nextStatus, label: orderStatusLabel(nextStatus) });
@@ -2108,7 +2122,7 @@ function OrderDetailDrawer({ isMobile, order, isOwner, openStatusOnOpen, onClose
             <div className="ep-order-drawer__status-control">
               <button type="button" className="ep-order-drawer__status-trigger" disabled={!editable}
                 aria-expanded={statusMenuOpen} onClick={() => setStatusMenuOpen(open => !open)}>
-                <StatusBadge status={badgeStatus} /> <span aria-hidden="true">⌄</span>
+                <OrderStatusBadge C={C} status={order.status} /> <span aria-hidden="true">⌄</span>
               </button>
               {statusMenuOpen && (
                 <div className="ep-order-drawer__status-menu">
@@ -2205,9 +2219,10 @@ function OrdersView({ C, isMobile, orders, menu, waiterName, isOwner, filter, se
     if (filter === "cancelled") return o.status === "cancelled";
     return o.status !== "cancelled";
   });
-  const rangeMetrics = getOrderMetrics(rangeAll);
+  const rangeMetrics = getOrderMetricsForUI(rangeAll);
   const statusFiltered =
     filter === "all" ? rangeAll
+    : filter === "unpaid" ? rangeMetrics.unpaidOrders
     : filter === "active" ? rangeMetrics.activeOrders
     : filter === "paid" ? rangeAll.filter(o => o.paid)
     : filter === "served" ? rangeAll.filter(o => o.status === "served")
@@ -2237,9 +2252,9 @@ function OrdersView({ C, isMobile, orders, menu, waiterName, isOwner, filter, se
     const createdAt = toMillis(order.createdAt);
     return createdAt >= start && createdAt < end;
   });
-  const metrics = getOrderMetrics(metricOrders);
+  const metrics = getOrderMetricsForUI(metricOrders);
   const totalOrders = metricOrders.filter(order => order.status !== "cancelled").length;
-  const completedOrders = metricOrders.filter(order => order.status === "served").length;
+  const completedOrders = metrics.paidCount;
   const dateValue = (() => {
     const date = new Date(start);
     const pad = value => String(value).padStart(2, "0");
@@ -2257,6 +2272,14 @@ function OrdersView({ C, isMobile, orders, menu, waiterName, isOwner, filter, se
   const pageNumbers = Array.from({ length: Math.min(5, pageCount) }, (_, index) => firstPageNumber + index);
   const detailOrder = orders.find(order => order.id === detailOrderId) || null;
   useEffect(() => { setPage(1); }, [filter, typeFilter, searchText, start, end]);
+  const openOrderScreen = (order) => {
+    haptic();
+    if (order.status === "cancelled" || (!order.paid && PAID_STATUSES.includes(order.paymentStatus)) || !onEditBill) {
+      onOpenOrder(order);
+      return;
+    }
+    onEditBill(order);
+  };
 
   const advanceOrder = async (order) => {
     const next = nextKitchenStatus(order);
@@ -2405,15 +2428,15 @@ function OrdersView({ C, isMobile, orders, menu, waiterName, isOwner, filter, se
       </nav>
       <nav className="ep-orders__status-filters" aria-label="Order status">
         <span>Status</span>
-        {["all", "active", ...STATUS_FLOW, "paid", "cancelled"].map(value => {
-          const label = value === "all" ? "All" : value === "active" ? "Active" : value === "paid" ? "Paid" : value === "cancelled" ? "Cancelled" : STATUS[value]?.label || value;
+        {["all", "unpaid", "active", ...STATUS_FLOW, "paid", "cancelled"].map(value => {
+          const label = value === "all" ? "All" : value === "unpaid" ? "Unpaid" : value === "active" ? "Active" : value === "paid" ? "Paid" : value === "cancelled" ? "Cancelled" : STATUS[value]?.label || value;
           return <Chip key={value} active={filter === value} onClick={() => { haptic(); setFilter(value); }}>{label}</Chip>;
         })}
       </nav>
       <div className="ep-orders__metrics">
         <KpiCard className="ep-orders__metric" label="Total Orders" value={<AnimatedNumber value={totalOrders} format={false} />} icon="📋" />
-        <KpiCard className="ep-orders__metric" label="Pending" value={<AnimatedNumber value={metrics.activeCount} format={false} />} icon="⏳" />
-        <KpiCard className="ep-orders__metric" label="Completed" value={<AnimatedNumber value={completedOrders} format={false} />} icon="✅" />
+        <KpiCard className="ep-orders__metric" label="Unpaid" value={<AnimatedNumber value={metrics.unpaidOrders.length} format={false} />} icon="⏳" />
+        <KpiCard className="ep-orders__metric" label="Paid" value={<AnimatedNumber value={completedOrders} format={false} />} icon="✅" />
         <KpiCard className="ep-orders__metric" label="Revenue" value={<AnimatedNumber value={metrics.revenue} />} icon="₹" />
       </div>
       <div className="ep-orders__table-wrap">
@@ -2427,17 +2450,20 @@ function OrdersView({ C, isMobile, orders, menu, waiterName, isOwner, filter, se
             {pageOrders.map(order => {
               const isParcel = order.orderType === "parcel";
               const orderType = !isParcel ? "dine-in" : isDeliveryOrder(order) ? "delivery" : "take-away";
-              const badgeStatus = order.status === "new" ? "pending"
-                : order.status === "served" ? "completed"
-                : order.status === "out_for_delivery" ? "ready" : order.status;
+              const paymentLabel = orderPaymentLabel(order);
+              const paymentTone = paymentLabel === "Paid"
+                ? { background: "#effaf1", color: "#16803a", borderColor: "#b8e3c2" }
+                : paymentLabel === "Due"
+                  ? { background: C.amberLight, color: C.amber, borderColor: C.amber }
+                  : {};
               const rowCustomerName = order.customer?.name && !isWalkInStr(order.customer.name) ? String(order.customer.name).trim() : "";
               const rowPhone = String(order.customer?.phone || order.phone || order.duePhone || "").trim();
               const name = rowCustomerName || (isWalkInStr(rowPhone) ? "" : rowPhone) || "Walk-in";
               const createdAt = toMillis(order.createdAt);
               return (
                 <React.Fragment key={order.id}>
-                  <tr className="ep-orders__row" tabIndex={0} onClick={() => { haptic(); onOpenOrder(order); }}
-                    onKeyDown={event => { if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); onOpenOrder(order); } }}>
+                  <tr className="ep-orders__row" tabIndex={0} onClick={() => openOrderScreen(order)}
+                    onKeyDown={event => { if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); openOrderScreen(order); } }}>
                     <td><strong className="ep-orders__id">#{order.id?.slice(1, 9).toUpperCase()}</strong></td>
                     <td>
                       <div className="ep-orders__customer">
@@ -2448,13 +2474,16 @@ function OrdersView({ C, isMobile, orders, menu, waiterName, isOwner, filter, se
                     <td><TypeBadge type={orderType} /></td>
                     <td>{(order.items || []).length}</td>
                     <td>{createdAt ? new Date(createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "—"}</td>
-                    <td><span className={`ep-orders__payment${order.paid ? " is-paid" : ""}`}>{order.payment ? order.payment.toUpperCase() : order.paid ? "PAID" : "PENDING"}</span></td>
+                    <td>
+                      <span className={`ep-orders__payment${paymentLabel === "Paid" ? " is-paid" : ""}`} style={paymentTone}>{paymentLabel}</span>
+                      {order.payment && <small style={{ marginLeft: 5, color: C.gray, fontSize: 9, fontWeight: 700 }}>{order.payment.toUpperCase()}</small>}
+                    </td>
                     <td><strong className="ep-orders__amount">{inr(order.finalTotal || 0)}</strong></td>
-                    <td><button type="button" className="ep-orders__status-button" onClick={event => { event.stopPropagation(); onOpenOrder(order, true); }} aria-label={`Change status for order ${order.id}`}><StatusBadge status={badgeStatus} /></button></td>
+                    <td><button type="button" className="ep-orders__status-button" onClick={event => { event.stopPropagation(); onOpenOrder(order, true); }} aria-label={`Change status for order ${order.id}`}><OrderStatusBadge C={C} status={order.status} /></button></td>
                     <td>
                       <div className="ep-orders__row-actions" onClick={event => event.stopPropagation()}>
-                        <IconButton title="View order" aria-label={`View order ${order.id}`} onClick={() => { haptic(); onOpenOrder(order); }}>👁</IconButton>
-                        <IconButton title="Print KOT" aria-label={`Print KOT for ${order.id}`} disabled={order.status === "cancelled"} onClick={() => printKOT(order)}>🖨</IconButton>
+                        <IconButton title="View order" aria-label={`View order ${order.id}`} onClick={event => { event.stopPropagation(); openOrderScreen(order); }}>👁</IconButton>
+                        <IconButton title="Print KOT" aria-label={`Print KOT for ${order.id}`} disabled={order.status === "cancelled"} onClick={event => { event.stopPropagation(); printKOT(order); }}>🖨</IconButton>
                       </div>
                     </td>
                   </tr>
@@ -2714,11 +2743,11 @@ function DashboardView({ C, isMobile, orders, dueOrders, menu, lowItems = [], on
     return orders;
   }, [orders, range, customDate]);
 
-  const metrics = getOrderMetrics(filtered);
+  const metrics = getOrderMetricsForUI(filtered);
   const todayRevenue = metrics.revenue;
   const todayTotal = filtered.filter(o => o.status !== "cancelled").length;
   const paidCount = metrics.paidCount;
-  const activeOrders = metrics.activeCount;
+  const unpaidCount = metrics.unpaidOrders.length;
   const avgOrder = paidCount ? Math.round(todayRevenue / paidCount) : 0;
   const statusCounts = { new: 0, preparing: 0, ready: 0, served: 0 };
   filtered.forEach(o => { if (statusCounts[o.status] !== undefined) statusCounts[o.status]++; });
@@ -2746,7 +2775,7 @@ function DashboardView({ C, isMobile, orders, dueOrders, menu, lowItems = [], on
           { label: "Revenue", val: todayRevenue, color: C.green, icon: "💰", click: null, fmt: true },
           { label: "Orders", val: todayTotal, color: C.red, icon: "📋", click: () => onStatusClick("all", getRangeBounds(range, customDate)), fmt: false },
           { label: "Paid", val: paidCount, color: C.green, icon: "✅", click: () => onStatusClick("paid", getRangeBounds(range, customDate)), fmt: false },
-          { label: "Active", val: activeOrders, color: C.amber, icon: "🔥", click: () => onStatusClick("active", getRangeBounds(range, customDate)), fmt: false },
+          { label: "Unpaid", val: unpaidCount, color: C.amber, icon: "⏳", click: () => onStatusClick("unpaid", getRangeBounds(range, customDate)), fmt: false },
           { label: "Avg", val: avgOrder, color: C.blue, icon: "📈", click: null, fmt: true },
         ].map((s, i) => (
           <div key={i} onClick={s.click || undefined} className="ep-stat-card" style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: isMobile ? 12 : 20, boxShadow: "0 2px 8px rgba(0,0,0,0.04)", cursor: s.click ? "pointer" : "default", transition: "all 0.2s" }}>
