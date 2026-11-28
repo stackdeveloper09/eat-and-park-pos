@@ -171,7 +171,7 @@ button:focus-visible, select:focus-visible { outline: 2px solid #B8860B; outline
   font-size: 15px;
 }
 .ep-pos-root .ep-billing-layout { gap: 12px; background: #fff8ec; }
-.ep-pos-root .ep-pos-menu-column { padding: 8px; border-radius: 14px; background: #fff8ec; }
+.ep-pos-root .ep-pos-menu-column { gap: 6px; padding: 8px; border-radius: 14px; background: #fff8ec; }
 .ep-pos-root .ep-pos-topbar { min-height: 60px; }
 .ep-pos-root .ep-pos-topbar__title strong { font-size: 19px; }
 .ep-pos-root .ep-pos-topbar__total { font-variant-numeric: tabular-nums; font-weight: 800; }
@@ -180,22 +180,32 @@ button:focus-visible, select:focus-visible { outline: 2px solid #B8860B; outline
   top: 0;
   z-index: 6;
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 5px;
-  padding: 4px 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  padding: 2px 0;
   background: #fff8ec;
 }
-.ep-pos-root .ep-pos-menu-tools { gap: 6px; }
+.ep-pos-root .ep-pos-mode-row { align-items: center; gap: 6px; }
+.ep-pos-root .ep-pos-mode-chips .ep-ds-chip { min-height: 35px; padding: 5px 8px; font-size: 13px; }
+.ep-pos-root .ep-pos-table-picker { min-height: 35px; height: 35px; }
+.ep-pos-root .ep-pos-table-picker select { min-height: 35px; height: 35px; }
+.ep-pos-root .ep-pos-menu-tools { flex: 0 0 auto; gap: 5px; }
+.ep-pos-root .ep-pos-menu-tools .ep-pos-estimate-button,
+.ep-pos-root .ep-pos-menu-tools .ep-pos-fav-button { min-height: 34px; padding: 4px 8px; font-size: 12px; }
 .ep-pos-root .ep-pos-menu-grid {
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)) !important;
+  flex: 1 1 0;
+  min-height: 0;
+  grid-template-columns: repeat(auto-fill, minmax(136px, 1fr)) !important;
   gap: 8px;
+  overflow-y: auto;
 }
 .ep-pos-root .ep-pos-menu-card {
   position: relative;
   display: flex;
   min-width: 0;
-  height: 72px;
-  min-height: 68px;
+  height: 80px;
+  min-height: 74px;
   overflow: hidden;
   border: 1.5px solid #d9c9b0;
   border-radius: 11px;
@@ -215,22 +225,22 @@ button:focus-visible, select:focus-visible { outline: 2px solid #B8860B; outline
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
   align-content: stretch;
-  gap: 2px;
+  gap: 1px;
   width: 100%;
   min-width: 0;
   min-height: 0;
-  padding: 5px 6px;
+  padding: 17px 6px 3px;
 }
 .ep-pos-root .ep-pos-menu-card__name {
   display: -webkit-box;
   overflow: hidden;
-  padding: 0;
-  padding-left: 12px;
+  padding: 2px 0 0;
+  padding-left: 0;
   padding-right: 24px;
   color: #1f1f1f;
   font-size: 14px;
   font-weight: 700;
-  line-height: 1.15;
+  line-height: 1.05;
   text-align: left;
   text-overflow: ellipsis;
   white-space: normal;
@@ -247,11 +257,11 @@ button:focus-visible, select:focus-visible { outline: 2px solid #B8860B; outline
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.ep-pos-root .ep-pos-diet-dot { top: 7px; left: 7px; width: 9px; height: 9px; border-width: 1px; }
+.ep-pos-root .ep-pos-diet-dot { top: 6px; left: 6px; width: 9px; height: 9px; border-width: 1px; }
 .ep-pos-root .ep-pos-menu-card__qty-badge {
   position: absolute;
-  top: 4px;
-  right: 34px;
+  top: 3px;
+  right: 4px;
   z-index: 3;
   min-width: 20px;
   height: 20px;
@@ -267,28 +277,38 @@ button:focus-visible, select:focus-visible { outline: 2px solid #B8860B; outline
 }
 .ep-pos-root .ep-pos-favourite {
   top: 1px;
-  right: 1px;
+  left: 19px;
+  right: auto;
   z-index: 4;
-  width: 26px;
-  height: 26px;
-  min-height: 26px !important;
-  font-size: 14px;
+  width: 20px;
+  height: 20px;
+  min-height: 20px !important;
+  font-size: 12px;
 }
-.ep-pos-root .ep-pos-menu-card__stepper { width: 78px; height: 26px; flex: 0 0 78px; }
+.ep-pos-root .ep-pos-menu-card__stepper { width: 68px; height: 24px; flex: 0 0 68px; }
+.ep-pos-root .ep-pos-menu-card__stepper button { width: 22px; min-width: 22px; min-height: 22px !important; height: 22px; }
+.ep-pos-root .ep-pos-menu-card__stepper span { width: 24px; min-height: 22px; height: 22px; font-size: 11px !important; }
 .ep-pos-root .ep-pos-stepper { width: 78px; height: 28px; flex: 0 0 78px; }
 .ep-pos-root .ep-pos-stepper button { width: 24px; min-width: 24px; min-height: 26px !important; height: 26px; font-size: 15px; }
 .ep-pos-root .ep-pos-stepper span,
 .ep-pos-root .ep-pos-stepper input { width: 28px; min-height: 26px; height: 26px; font-size: 12px !important; font-weight: 800; font-variant-numeric: tabular-nums; }
-.ep-pos-root .ep-pos-mode-row,
-.ep-pos-root .ep-pos-filter-row { flex-wrap: wrap; gap: 8px; }
-.ep-pos-root .ep-pos-mode-chips .ep-ds-chip,
-.ep-pos-root .ep-pos-diet-chips .ep-ds-chip,
+.ep-pos-root .ep-pos-mode-row { flex-wrap: wrap; gap: 6px; }
 .ep-pos-root .ep-pos-category-card,
 .ep-pos-root .ep-pos-estimate-button,
 .ep-pos-root .ep-pos-fav-button { min-height: 38px; font-size: 13px; }
+.ep-pos-root .ep-pos-diet-chips { flex-wrap: nowrap; gap: 4px; }
+.ep-pos-root .ep-pos-diet-chips .ep-ds-chip { min-height: 34px; padding: 4px 7px; font-size: 12px; }
 .ep-pos-root .ep-pos-category-card { color: #332f2a; }
-.ep-pos-root .ep-pos-search { min-height: 44px; width: 100%; }
-.ep-pos-root .ep-pos-search input { font-size: 16px; }
+.ep-pos-root .ep-pos-category-card { min-height: 38px; height: 38px; padding: 3px 8px; gap: 5px; font-size: 12px; }
+.ep-pos-root .ep-pos-category-card small { min-width: 17px; height: 17px; font-size: 9px; }
+.ep-pos-root .ep-pos-category-icon { font-size: 14px; }
+.ep-pos-root .ep-category-chips.ep-pos-category-row { height: 38px; flex: 0 0 38px; gap: 5px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.ep-pos-root .ep-category-chips.ep-pos-category-row::-webkit-scrollbar,
+.ep-pos-root .ep-pos-favourites::-webkit-scrollbar { display: none; }
+.ep-pos-root .ep-pos-search { min-height: 40px; width: 100%; }
+.ep-pos-root .ep-pos-search input { min-height: 38px; font-size: 15px; }
+.ep-pos-root .ep-pos-favourites { min-height: 40px; height: 40px; flex: 0 0 40px; align-items: center; gap: 5px; padding: 3px 5px; overflow-x: auto; scrollbar-width: none; }
+.ep-pos-root .ep-pos-favourites button { min-height: 32px; height: 32px; padding: 3px 8px; font-size: 11px; }
 .ep-pos-root .ep-pos-order-panel { height: 100%; min-height: 0; flex-basis: 432px; display: flex; flex-direction: column; overflow: hidden; }
 .ep-pos-root .ep-pos-order-header strong { font-size: 17px; }
 .ep-pos-root .ep-pos-order-header span { font-size: 12px; }
@@ -313,6 +333,17 @@ button:focus-visible, select:focus-visible { outline: 2px solid #B8860B; outline
 .ep-pos-root .ep-pos-cart-controls .ep-pos-stepper { width: 78px; height: 28px; }
 .ep-pos-root .ep-pos-cart-controls .ep-pos-stepper button { width: 24px; min-height: 26px !important; height: 26px; }
 .ep-pos-root .ep-pos-cart-controls .ep-pos-stepper input { height: 26px !important; }
+.ep-pos-root .ep-pos-cart-controls .ep-pos-stepper {
+  justify-content: space-between;
+  border-color: #e5d6c3;
+  background: #fff;
+}
+.ep-pos-root .ep-pos-cart-controls .ep-pos-stepper input {
+  color: #1f1f1f !important;
+  background: #fff !important;
+  font-size: 15px !important;
+  font-weight: 800 !important;
+}
 .ep-pos-root .ep-pos-cart-price { grid-area: price; display: flex; align-items: center; justify-content: flex-end; gap: 2px; min-width: 0; }
 .ep-pos-root .ep-pos-cart-price > strong { overflow: hidden; color: #332f2a; font-size: 12px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .ep-pos-root .ep-pos-rate { flex: 0 0 20px; width: 20px; min-height: 24px; padding: 0; border: 0; background: transparent; color: #a64b0b; font-size: 12px; }
@@ -417,15 +448,17 @@ button:focus-visible, select:focus-visible { outline: 2px solid #B8860B; outline
 @media (max-width: 768px) {
   .ep-pos-root .ep-pos-menu-grid { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; }
   .ep-pos-root .ep-pos-order-panel { flex-basis: auto; }
-  .ep-pos-root .ep-pos-filter-row { align-items: stretch; grid-template-columns: minmax(0, 1fr); }
+  .ep-pos-root .ep-pos-filter-row { align-items: center; grid-template-columns: minmax(0, 1fr) auto; }
   .ep-pos-root .ep-pos-search { width: 100%; }
-  .ep-pos-root .ep-pos-diet-chips { width: 100%; flex-wrap: wrap; }
-  .ep-pos-root .ep-pos-diet-chips .ep-ds-chip { min-height: 44px; font-size: 13px; }
+  .ep-pos-root .ep-pos-diet-chips { flex-wrap: wrap; }
+  .ep-pos-root .ep-pos-diet-chips .ep-ds-chip { min-height: 34px; font-size: 12px; }
   .ep-pos-root .ep-pos-cart-row { grid-template-columns: minmax(0, 1fr) 78px 84px 30px; }
   .ep-pos-root .ep-payment-bar > div { flex-wrap: wrap; }
 }
 @media (max-width: 600px) {
   .ep-pos-root .ep-pos-menu-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px; }
+  .ep-pos-root .ep-pos-filter-row { grid-template-columns: minmax(0, 1fr); }
+  .ep-pos-root .ep-pos-diet-chips { width: 100%; flex-wrap: wrap; }
   .ep-pos-root .ep-pos-menu-card__content { padding-right: 7px; padding-left: 7px; }
   .ep-pos-root .ep-pos-menu-card__price { font-size: 15px; }
   .ep-pos-root .ep-pos-stepper { width: 78px; flex-basis: 78px; }
@@ -3196,7 +3229,7 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
     setItemNotes(nextNotes);
     setNoteOpenId(null);
   }, [existingOrder?.id]);
-  const [showFav, setShowFav] = useState(() => { try { return localStorage.getItem("staff_fav_open") === "1"; } catch (e) { return false; } });
+  const [showFav, setShowFav] = useState(false);
   const [pinnedIds, setPinnedIds] = useState([]);
   useEffect(() => {
     const unsub = onSnapshot(doc(db, "settings", "favourites"), (s) => setPinnedIds(s.exists() && Array.isArray(s.data().ids) ? s.data().ids : []), () => {});
@@ -3771,6 +3804,19 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
                   </select>
                 </label>
               )}
+              <div className="ep-pos-menu-tools">
+                <SecondaryButton className="ep-pos-estimate-button" onClick={onShowEstimate}>📋 Estimate</SecondaryButton>
+                {favItems.length > 0 && !search.trim() && (
+                  <button className={`ep-pos-fav-button${showFav ? " is-active" : ""}`} onClick={() => { haptic(); setShowFav((v) => { const n = !v; try { localStorage.setItem("staff_fav_open", n ? "1" : "0"); } catch (e) {} return n; }); }}>⭐ Favourites ({favItems.length}) {showFav ? "▲" : "▼"}</button>
+                )}
+              </div>
+            </div>
+          )}
+          {!(isMobile && mobileBillingTab === "payment") && showFav && favItems.length > 0 && !search.trim() && (
+            <div className="ep-pos-favourites">
+              {favItems.map(m => (
+                <button key={"fav" + m.id} onClick={() => setQty(m.id, (cart[m.id] || 0) + 1)}>{pinnedIds.includes(m.id) ? "📌" : "⭐"} {m.name}{cart[m.id] ? " ×" + cart[m.id] : ""}</button>
+              ))}
             </div>
           )}
           {isMobile && mobileBillingTab === "payment" ? null : (
@@ -3787,19 +3833,6 @@ function BillingView({ C, isMobile, table, menu, orders, setOrders, cart, setCar
                   ))}
                 </div>
               </div>
-              <div className="ep-pos-menu-tools">
-                <SecondaryButton className="ep-pos-estimate-button" onClick={onShowEstimate}>📋 Estimate</SecondaryButton>
-                {favItems.length > 0 && !search.trim() && (
-                  <button className={`ep-pos-fav-button${showFav ? " is-active" : ""}`} onClick={() => { haptic(); setShowFav((v) => { const n = !v; try { localStorage.setItem("staff_fav_open", n ? "1" : "0"); } catch (e) {} return n; }); }}>⭐ Favourites ({favItems.length}) {showFav ? "▲" : "▼"}</button>
-                )}
-              </div>
-              {showFav && favItems.length > 0 && !search.trim() && (
-                <div className="ep-pos-favourites">
-                  {favItems.map(m => (
-                    <button key={"fav" + m.id} onClick={() => setQty(m.id, (cart[m.id] || 0) + 1)}>{pinnedIds.includes(m.id) ? "📌" : "⭐"} {m.name}{cart[m.id] ? " ×" + cart[m.id] : ""}</button>
-                  ))}
-                </div>
-              )}
               <div className="ep-category-chips ep-pos-category-row">
                 {categories.map(c => (
                   <Chip key={c} active={category === c} className="ep-pos-category-card" onClick={() => { haptic(); setCategory(c); }}>
