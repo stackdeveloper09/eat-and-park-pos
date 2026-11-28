@@ -2614,7 +2614,7 @@ function OrdersView({ C, isMobile, orders, menu, waiterName, isOwner, filter, se
       </ModalShell>
     )}
     {detailOrder && <OrderDetailDrawer
-      isMobile={isMobile} order={detailOrder} isOwner={isOwner} openStatusOnOpen={statusMenuOrderId === detailOrder.id}
+      C={C} isMobile={isMobile} order={detailOrder} isOwner={isOwner} openStatusOnOpen={statusMenuOrderId === detailOrder.id}
       onClose={onCloseOrder} onAdvance={advanceOrder} onCancel={voidOrder}
       onPay={order => setPayFor(order)}
       onAddMore={order => onAddMore && onAddMore(order)}
