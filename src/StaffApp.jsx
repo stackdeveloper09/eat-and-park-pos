@@ -2046,7 +2046,7 @@ function TablesView({ C, isMobile, orders, onTableClick, onEditBill, onAddMore, 
   );
 }
 
-function OrderDetailDrawer({ isMobile, order, isOwner, openStatusOnOpen, onClose, onAdvance, onCancel, onPay, onAddMore, onEditBill, onSaveDetails }) {
+function OrderDetailDrawer({ C, isMobile, order, isOwner, openStatusOnOpen, onClose, onAdvance, onCancel, onPay, onAddMore, onEditBill, onSaveDetails }) {
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState({ name: "", phone: "", payment: "cash" });
