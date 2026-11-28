@@ -9,7 +9,7 @@ import { ADMIN_ROLES, normalizeRole } from "./lib/roles";
 import { assertEditable, resolveVendorId } from "./lib/guards";
 import { PAID_STATUSES, OPEN_WINDOW_MS, isOpenParcel, isOpenDineIn, isActiveOrder, paidOrders, paidRevenue, getOrderMetrics, buildPaidPatch, isDeliveryOrder, nextKitchenStatus } from "./lib/orderRules";
 import { Chip, StatusBadge, TypeBadge, PrimaryButton, SecondaryButton, IconButton, KpiCard } from "./DesignSystem";
-import { paymentBreakdown, partialPayment, splitPayment } from "./lib/billing";
+import { paymentBreakdown, partialPayment, splitPayment, outstandingDue } from "./lib/billing";
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged, setPersistence, browserLocalPersistence } from "firebase/auth";
 import {
   collection, doc, setDoc, onSnapshot, getDoc, updateDoc, addDoc,
@@ -4473,7 +4473,7 @@ function ReportsExtra({ C, isMobile, orders, rangeLabel }) {
     const breakdown = paymentBreakdown(o);
     Object.keys(pay).forEach((mode) => { pay[mode] += breakdown[mode]; });
   });
-  const dueTotal = valid.filter(o => o.paymentStatus === "due").reduce((s, o) => s + (Number(o.finalTotal) || 0), 0);
+  const dueTotal = valid.filter(o => o.paymentStatus === "due" && !o.paid).reduce((s, o) => s + outstandingDue(o), 0);
   const collected = paidOrders.reduce((s, o) => s + (Number(o.finalTotal) || 0), 0);
   const cancelled = orders.length - valid.length;
 
@@ -4526,7 +4526,7 @@ function ReportsExtra({ C, isMobile, orders, rangeLabel }) {
 function DueLedger({ C, isMobile, orders }) {
   const toast = useToast();
   const dues = orders.filter(o => o.paymentStatus === "due" && o.status !== "cancelled" && !o.paid);
-  const total = dues.reduce((s, o) => s + (Number(o.finalTotal) || 0), 0);
+  const total = dues.reduce((s, o) => s + outstandingDue(o), 0);
   const editDue = async (o) => {
     const n = window.prompt("Customer ka naam?", o.dueName && o.dueName !== "Unknown" ? o.dueName : "");
     if (n === null) return;
@@ -4535,14 +4535,14 @@ function DueLedger({ C, isMobile, orders }) {
     if (p.length < 10) { toast("Sahi 10 digit phone zaroori hai", "warning"); return; }
     try {
       await updateDoc(doc(db, "orders", o.id), { dueName: n.trim(), duePhone: p });
-      logAudit("due_edited", { orderId: o.id, total: o.finalTotal || 0 });
+      logAudit("due_edited", { orderId: o.id, total: outstandingDue(o) });
       toast("Due update ho gaya", "success");
     } catch (e) { toast(e.message, "error"); }
   };
   const settle = async (o, mode) => {
     try {
       await updateDoc(doc(db, "orders", o.id), { paid: true, paymentStatus: "paid", payment: mode, paidAt: Date.now(), settledFromDue: true });
-      logAudit("due_settled", { orderId: o.id, total: o.finalTotal || 0, mode });
+      logAudit("due_settled", { orderId: o.id, total: outstandingDue(o), mode });
       toast(`Due settled (${mode})`, "success");
     } catch (e) { toast(e.message, "error"); }
   };
@@ -4560,7 +4560,10 @@ function DueLedger({ C, isMobile, orders }) {
               <div style={{ fontWeight: 800, fontSize: isMobile ? 13 : 14, color: C.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.dueName || "Unknown"} {o.duePhone ? `- ${o.duePhone}` : ""}</div>
               <div style={{ fontSize: 11, color: C.gray, marginTop: 2 }}>{o.orderType === "parcel" ? "Parcel" : "Table " + o.table} - {new Date(o.dueAt || o.createdAt).toLocaleDateString("en-IN")}</div>
             </div>
-            <div style={{ fontWeight: 900, color: C.goldText, fontFamily: "monospace", fontSize: isMobile ? 14 : 15, flexShrink: 0 }}>{inr(o.finalTotal || 0)}</div>
+            <div style={{ textAlign: "right", flexShrink: 0 }}>
+              <div style={{ fontWeight: 900, color: C.goldText, fontFamily: "monospace", fontSize: isMobile ? 14 : 15 }}>{inr(outstandingDue(o))}</div>
+              {Number(o.amountPaid) > 0 && <small style={{ display: "block", marginTop: 2, color: C.gray, fontSize: 10 }}>Received {inr(o.amountPaid)} of {inr(o.finalTotal || 0)}</small>}
+            </div>
           </div>
           <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
             <button onClick={() => settle(o, "cash")} style={{ flex: 1, padding: 8, border: "none", borderRadius: 6, background: C.green, color: "#fff", fontWeight: 800, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>Cash</button>
@@ -5331,7 +5334,7 @@ function calcStats(orders, expenses, menu = []) {
   const sum = (arr, f) => arr.reduce((s, x) => s + (Number(f(x)) || 0), 0);
   const valid = orders.filter((o) => o.status !== "cancelled");
   const paid = valid.filter((o) => o.paid);
-  const duePending = sum(valid.filter((o) => o.paymentStatus === "due" && !o.paid), (o) => o.finalTotal);
+  const duePending = sum(valid.filter((o) => o.paymentStatus === "due" && !o.paid), outstandingDue);
   const revenue = sum(paid, (o) => o.finalTotal);
   const pay = { cash: 0, upi: 0, card: 0, split: 0 };
   paid.forEach((o) => {

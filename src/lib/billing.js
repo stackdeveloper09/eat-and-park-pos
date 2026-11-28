@@ -25,6 +25,15 @@ export function partialPayment(total, cash, online) {
   };
 }
 
+export function outstandingDue(order) {
+  const recordedDue = Number(order?.amountDue);
+  if (order?.amountDue != null && Number.isFinite(recordedDue)) {
+    return Math.max(0, recordedDue);
+  }
+  const total = Number(order?.finalTotal);
+  return Number.isFinite(total) ? Math.max(0, total) : 0;
+}
+
 export function paymentBreakdown(order) {
   const parsedTotal = Number(order.paymentStatus === "due" && order.amountPaid != null ? order.amountPaid : order.finalTotal);
   const total = Number.isFinite(parsedTotal) ? Math.max(0, parsedTotal) : 0;
