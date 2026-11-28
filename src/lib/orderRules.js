@@ -79,10 +79,10 @@ export const buildPaidPatch = (order, mode, by) => {
     payment: mode,
   };
   
-  // Delivery parcel (jiska address ho) ka status rider hi badlega.
-  const isReadyDineIn = order.orderType === "dine_in" && order.status === "ready";
+  // Paid dine-in and pickup orders are served; delivery status stays with the rider.
+  const isDineIn = order.orderType === "dine_in";
   const isPaidParcelPickup = order.orderType === "parcel" && !isDeliveryOrder(order);
-  if ((isReadyDineIn || isPaidParcelPickup) && order.status !== "cancelled") {
+  if ((isDineIn || isPaidParcelPickup) && order.status !== "cancelled") {
     patch.status = "served";
     patch.servedAt = Date.now();
   }

@@ -147,11 +147,12 @@ describe("order rules", () => {
       status: "new",
     }), "cash")).not.toHaveProperty("status");
   });
-  test("buildPaidPatch: ready dine-in served ho jata hai", () => {
-    expect(buildPaidPatch(mk({ status: "ready" }), "cash").status).toBe("served");
+  test("buildPaidPatch: paid dine-in har kitchen stage se served ho jata hai", () => {
+    ["new", "preparing", "ready"].forEach(status => {
+      expect(buildPaidPatch(mk({ status }), "cash").status).toBe("served");
+    });
   });
-  test("buildPaidPatch: preparing/new ka status nahi chhedta (kitchen se gayab na ho)", () => {
-    expect(buildPaidPatch(mk({ status: "preparing" }), "cash")).not.toHaveProperty("status");
-    expect(buildPaidPatch(mk({ status: "new" }), "cash")).not.toHaveProperty("status");
+  test("buildPaidPatch: cancelled order ka status nahi badalta", () => {
+    expect(buildPaidPatch(mk({ status: "cancelled" }), "cash")).not.toHaveProperty("status");
   });
 });
