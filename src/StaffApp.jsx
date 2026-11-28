@@ -199,6 +199,14 @@ served: { label: "Served", color: "gray", emoji: "🍽️" },
 
 };
 const STATUS_FLOW = ["new", "preparing", "ready", "out_for_delivery", "served"];
+const orderStatusLabel = (status) => ({
+  new: "Pending",
+  preparing: "Preparing",
+  ready: "Ready",
+  out_for_delivery: "Ready",
+  served: "Completed",
+  cancelled: "Cancelled",
+}[status] || String(status || ""));
 
 const RESTAURANT = {
   name: "Eat & Park",
@@ -789,6 +797,8 @@ function StaffAppInner() {
   const [addMoreMode, setAddMoreMode] = useState(false);
   const [ordersFilter, setOrdersFilter] = useState("all");
   const [ordersRange, setOrdersRange] = useState(null);
+  const [detailOrderId, setDetailOrderId] = useState(null);
+  const [statusMenuOrderId, setStatusMenuOrderId] = useState(null);
   const [confetti, setConfetti] = useState(false);
   const [showEstimate, setShowEstimate] = useState(false);
   const [estItems, setEstItems] = useState(() => { try { return JSON.parse(localStorage.getItem("staff_estimate_items") || "[]"); } catch (e) { return []; } });
@@ -798,6 +808,12 @@ function StaffAppInner() {
   }, [estItems, estPersons]);
   const [estimatePending, setEstimatePending] = useState(false);
   const [muted, setMuted] = useState(() => safeStorageGet("staff_mute", "0") === "1");
+  useEffect(() => {
+    if (activeTab !== "orders" && activeTab !== "parcel") {
+      setDetailOrderId(null);
+      setStatusMenuOrderId(null);
+    }
+  }, [activeTab]);
   const prevNewIdsRef = useRef(null);
   const [lowCount, setLowCount] = useState(0);
   const [lowItems, setLowItems] = useState([]);
@@ -1255,11 +1271,18 @@ function StaffAppInner() {
   </div>
 )}
 
-{activeTab === "orders" && (
-          <OrdersView C={C} isMobile={isMobile} orders={orders} menu={menu} waiterName={waiterName} isOwner={isOwner} onAddMore={(order) => { setBillOrder(order); setSelectedTable(order.table || "parcel"); setCart({}); setAddMoreMode(true); }} onEditBill={(order) => { setBillOrder(order); setSelectedTable(order.table || "parcel"); setCart({}); setAddMoreMode(false); }} filter={ordersFilter} setFilter={setOrdersFilter} rangeStart={ordersRange?.start} rangeEnd={ordersRange?.end} setOrdersRange={setOrdersRange} setOrders={setOrders} onPaidSuccess={() => { setConfetti(true); setTimeout(() => setConfetti(false), 1800); }} />
+{(activeTab === "orders" || activeTab === "parcel") && (
+          <OrdersView C={C} isMobile={isMobile} orders={orders} menu={menu} waiterName={waiterName} isOwner={isOwner}
+            visible={activeTab === "orders"} detailOrderId={detailOrderId} statusMenuOrderId={statusMenuOrderId}
+            onOpenOrder={(order, openStatusMenu = false) => { setDetailOrderId(order.id); setStatusMenuOrderId(openStatusMenu ? order.id : null); }}
+            onCloseOrder={() => { setDetailOrderId(null); setStatusMenuOrderId(null); }}
+            onAddMore={(order) => { setBillOrder(order); setSelectedTable(order.table || "parcel"); setCart({}); setAddMoreMode(true); }}
+            onEditBill={(order) => { setBillOrder(order); setSelectedTable(order.table || "parcel"); setCart({}); setAddMoreMode(false); }}
+            filter={ordersFilter} setFilter={setOrdersFilter} rangeStart={ordersRange?.start} rangeEnd={ordersRange?.end} setOrdersRange={setOrdersRange} setOrders={setOrders} onPaidSuccess={() => { setConfetti(true); setTimeout(() => setConfetti(false), 1800); }} />
         )}
         {activeTab === "parcel" && (
           <ParcelView C={C} isMobile={isMobile} orders={orders}
+            onOpenOrder={(order, openStatusMenu = false) => { setDetailOrderId(order.id); setStatusMenuOrderId(openStatusMenu ? order.id : null); }}
             onNew={() => { haptic(); setSelectedTable("parcel"); setCart((p) => (estimatePending ? p : {})); setEstimatePending(false); setBillOrder(null); setAddMoreMode(false); }}
             onBill={(order) => { haptic(); setBillOrder(order); setSelectedTable("parcel"); setCart({}); setAddMoreMode(false); }}
             onAdd={(order) => { haptic(); setBillOrder(order); setSelectedTable("parcel"); setCart({}); setAddMoreMode(true); }} />
@@ -1372,91 +1395,95 @@ function StaffAppInner() {
 // ===========================================================================
 // PARCEL VIEW (chalu parcel orders ek jagah)
 // ===========================================================================
-function ParcelView({ C, isMobile, orders, onNew, onBill, onAdd }) {
+function ParcelView({ C, isMobile, orders, onNew, onBill, onAdd, onOpenOrder }) {
   const [, setTick] = useState(0);
+  const [expandedIds, setExpandedIds] = useState(() => new Set());
   useEffect(() => { const iv = setInterval(() => setTick(x => x + 1), 30000); return () => clearInterval(iv); }, []);
   const list = orders.filter(isOpenParcel).sort((a, b) => b.createdAt - a.createdAt);
   const total = list.reduce((s, o) => s + (Number(o.finalTotal) || 0), 0);
   return (
-    <div>
+    <section className="ep-parcel">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 10 }}>
         <div>
-          <h2 style={{ margin: 0, fontSize: isMobile ? 18 : 22, fontWeight: 800, color: C.ink }}>Parcel ({list.length})</h2>
-          <div style={{ fontSize: 12, color: C.gray, fontWeight: 700, marginTop: 2 }}>Baaki payment: {inr(total)}</div>
+          <h2 className="ep-parcel__title">Parcel ({list.length})</h2>
         </div>
-        <button onClick={onNew} style={{ padding: "11px 18px", border: "none", borderRadius: 10, background: `linear-gradient(135deg, ${C.gold} 0%, ${C.goldDark} 100%)`, color: "#fff", fontWeight: 800, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>+ New Parcel</button>
+        <div className="ep-parcel__header-actions">
+          <KpiCard className="ep-parcel__due" label="Baaki payment" value={inr(total)} />
+          <PrimaryButton onClick={onNew}>+ New Parcel</PrimaryButton>
+        </div>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(300px, 1fr))", gap: 12 }}>
+      <div className="ep-parcel__grid">
         {list.map(o => {
-          const st = STATUS[o.status] || STATUS.new;
-          const stColor = C[st.color] || C.gray;
-          const stBg = C[st.color + "Light"] || C.light;
-          const cname = o.customer?.name && o.customer.name !== "Walk-in" ? o.customer.name : "";
-          const cphone = o.customer?.phone || "";
+          const expanded = expandedIds.has(o.id);
+          const items = o.items || [];
+          const displayItems = expanded ? items : items.slice(0, 4);
+          const status = o.status === "served" ? "completed" : o.status;
+          const type = isDeliveryOrder(o) ? "delivery" : "take-away";
+          const parcelCustomerName = o.customer?.name && !isWalkInStr(o.customer.name) ? String(o.customer.name).trim() : "";
+          const parcelCustomerPhone = o.customer?.phone && !isWalkInStr(o.customer.phone) ? String(o.customer.phone).trim() : "";
           return (
-            <div key={o.id} style={{ background: C.card, border: `2px solid ${stColor}`, borderRadius: 12, padding: isMobile ? 12 : 14 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, gap: 8 }}>
-                <div style={{ fontWeight: 900, fontSize: 15, color: C.ink }}>🛍️ #{o.id?.slice(1, 5).toUpperCase()}</div>
-                <span style={{ background: stBg, color: stColor, padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 800 }}>{st.label}</span>
+            <article key={o.id} className="ep-parcel__card" role="group" tabIndex={0}
+              onClick={() => onOpenOrder(o)}
+              onKeyDown={event => { if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); onOpenOrder(o); } }}>
+              <div className="ep-parcel__top">
+                <div>
+                  <strong className="ep-parcel__id">#{o.id?.slice(1, 9).toUpperCase()}</strong>
+                  <div className="ep-parcel__created">{timeAgo(o.createdAt)} ago · {o.waiter || "Staff"}</div>
+                </div>
+                <button type="button" className="ep-parcel__status-button" onClick={event => {
+                  event.stopPropagation();
+                  onOpenOrder(o, true);
+                }} aria-label={`Change status for order ${o.id}`}><StatusBadge status={status} /></button>
               </div>
-              <div style={{ fontSize: 11, color: C.gray, marginBottom: 8, fontWeight: 700 }}>
-                {timeAgo(o.createdAt)} ago {cname ? " · 👤 " + cname : ""}{cphone ? " · 📞 " + cphone : ""}{o.waiter ? " · 🧑‍🍳 " + o.waiter : ""}
+              <div className="ep-parcel__customer">
+                <div className="ep-parcel__customer-name">{parcelCustomerName || parcelCustomerPhone || "Walk-in"}</div>
+                {parcelCustomerName && parcelCustomerPhone && <div className="ep-parcel__muted">{parcelCustomerPhone}</div>}
+                <div className="ep-parcel__address">{o.customer?.exactAddress || o.customer?.address || "Address nahi diya"}</div>
+                <TypeBadge type={type} />
+                {o.customer?.address?.includes("Lat:") && (
+                  <button type="button" className="ep-parcel__map-link" onClick={event => {
+                    event.stopPropagation();
+                    const match = o.customer.address.match(/Lat:\s*([\d.-]+),\s*Lng:\s*([\d.-]+)/);
+                    if (match) window.open(`https://www.google.com/maps/search/?api=1&query=${match[1]},${match[2]}`, "_blank", "noopener,noreferrer");
+                  }}>Open location in Maps</button>
+                )}
               </div>
-              <div style={{ fontSize: 12, color: C.ink, lineHeight: 1.6, marginBottom: 8 }}>
-                {(o.items || []).map((it, i) => (
-                  <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+              <div className={`ep-parcel__items${expanded ? " is-expanded" : ""}`}>
+                {displayItems.map((it, i) => (
+                  <div key={i} className="ep-parcel__item">
                     <span>{it.qty}x {it.name}{it.portion ? ` (${it.portion})` : ""}</span>
-                    <span style={{ color: C.gray, fontFamily: "monospace", flexShrink: 0 }}>{inr(it.price * it.qty)}</span>
+                    <span>{inr(it.price * it.qty)}</span>
                   </div>
                 ))}
+                {items.length > 4 && (
+                  <button type="button" className="ep-parcel__more" onClick={event => {
+                    event.stopPropagation();
+                    setExpandedIds(previous => {
+                      const next = new Set(previous);
+                      if (next.has(o.id)) next.delete(o.id); else next.add(o.id);
+                      return next;
+                    });
+                  }}>{expanded ? "Show fewer items" : `+${items.length - 4} more items`}</button>
+                )}
               </div>
-              
-  {/* Naya Zomato Style Address Block */}
-  {o.orderType === "parcel" && (
-    <div style={{ background: C.cardAlt, border: "1px solid " + C.line, borderRadius: 8, padding: 10, marginBottom: 10 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-        <span style={{ fontSize: 16 }}>👤</span>
-        <span style={{ fontWeight: 800, fontSize: 13, color: C.ink }}>{o.customer?.name || "Guest"}</span>
-        {o.customer?.phone && <span style={{ fontSize: 11, color: C.gray }}>· {o.customer.phone}</span>}
-      </div>
-      
-      <div style={{ fontSize: 12, color: C.ink, fontWeight: 600, marginBottom: 4, lineHeight: 1.4 }}>
-        <span style={{ color: C.red, marginRight: 4 }}>📍</span>
-        {o.customer?.exactAddress || "Address nahi diya"} 
-        {o.customer?.pincode && <span style={{ color: C.gray }}> (PIN: {o.customer.pincode})</span>}
-      </div>
-
-      {o.customer?.address && o.customer.address.includes("Lat:") && (
-        <button
-          onClick={() => {
-  const addr = o.customer?.address || "";
-  const match = addr.match(/Lat:\s*([\d.-]+),\s*Lng:\s*([\d.-]+)/);
-  if (match) window.open(`https://www.google.com/maps/search/?api=1&query=${match[1]},${match[2]}`, "_blank");
-}}
-          style={{ marginTop: 6, padding: "6px 12px", background: C.blue, color: "#fff", border: "none", borderRadius: 6, fontWeight: 800, fontSize: 11, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4, width: "100%", justifyContent: "center" }}
-        >
-          🗺️ Open Location in Google Maps
-        </button>
-      )}
-    </div>
-  )}
-
-  <div style={{ borderTop: `1px solid ${C.line}`, paddingTop: 8, marginBottom: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span style={{ fontSize: 12, color: C.gray, fontWeight: 600 }}>Total</span>
-                <span style={{ fontSize: 18, fontWeight: 900, color: C.goldText, fontFamily: "monospace" }}>{inr(o.finalTotal || 0)}</span>
+              <div className="ep-parcel__total">
+                <span>Total</span>
+                <strong>{inr(o.finalTotal || 0)}</strong>
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-                <button onClick={() => onBill(o)} style={{ padding: 9, border: "none", borderRadius: 8, background: C.red, color: "#fff", fontWeight: 800, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>Bill / Paid</button>
-                <button onClick={() => onAdd(o)} style={{ padding: 9, border: "none", borderRadius: 8, background: C.green, color: "#fff", fontWeight: 800, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>+ Add Items</button>
-                <button onClick={() => printKOT(o)} style={{ padding: 9, border: `1.5px solid ${C.blue}`, borderRadius: 8, background: "transparent", color: C.blue, fontWeight: 800, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>KOT</button>
-                <button onClick={() => whatsappBill(o)} style={{ padding: 9, border: `1.5px solid ${C.green}`, borderRadius: 8, background: "transparent", color: C.green, fontWeight: 800, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>WhatsApp</button>
+              <div className="ep-parcel__actions" onClick={event => event.stopPropagation()}>
+                <PrimaryButton onClick={() => onBill(o)}>Bill / Paid</PrimaryButton>
+                <SecondaryButton onClick={() => onAdd(o)}>+ Add Items</SecondaryButton>
+                <div className="ep-parcel__quick-actions">
+                  <SecondaryButton aria-label="Print KOT" title="Print KOT" onClick={() => printKOT(o)}>KOT</SecondaryButton>
+                  <SecondaryButton aria-label="Send bill on WhatsApp" title="WhatsApp" onClick={() => whatsappBill(o)}>WA</SecondaryButton>
+                </div>
               </div>
-            </div>
+            </article>
           );
         })}
-        {list.length === 0 && <div style={{ gridColumn: "1 / -1", textAlign: "center", padding: 60, color: C.gray }}><div style={{ fontSize: 48, marginBottom: 8 }}>🛍️</div><div style={{ fontSize: 14, fontWeight: 700 }}>Koi chalu parcel nahi</div></div>}
+        {list.length === 0 && <div className="ep-parcel__empty">Koi chalu parcel nahi</div>}
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -1693,10 +1720,163 @@ function TablesView({ C, isMobile, orders, onTableClick, onEditBill, onAddMore, 
   );
 }
 
+function OrderDetailDrawer({ isMobile, order, isOwner, openStatusOnOpen, onClose, onAdvance, onCancel, onPay, onAddMore, onEditBill, onSaveDetails }) {
+  const [statusMenuOpen, setStatusMenuOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [draft, setDraft] = useState({ name: "", phone: "", payment: "cash" });
+  const cancelled = order.status === "cancelled";
+  const paid = order.paid || PAID_STATUSES.includes(order.paymentStatus);
+  const editable = !paid && !cancelled;
+  const type = order.orderType === "parcel"
+    ? isDeliveryOrder(order) ? "delivery" : "take-away"
+    : "dine-in";
+  const badgeStatus = order.status === "new" ? "pending"
+    : order.status === "served" ? "completed"
+    : order.status === "out_for_delivery" ? "ready" : order.status;
+  const nextStatus = nextKitchenStatus(order);
+  const statusOptions = [{ value: order.status, label: orderStatusLabel(order.status) }];
+  if (nextStatus) statusOptions.push({ value: nextStatus, label: orderStatusLabel(nextStatus) });
+  if (isOwner && editable) statusOptions.push({ value: "cancelled", label: "Cancelled" });
+  const createdAt = toMillis(order.createdAt);
+  const customerName = order.customer?.name && !isWalkInStr(order.customer.name) ? String(order.customer.name).trim() : "";
+  const rawCustomerPhone = String(order.customer?.phone || order.phone || order.duePhone || "").trim();
+  const customerPhone = isWalkInStr(rawCustomerPhone) ? "" : rawCustomerPhone;
+
+  useEffect(() => {
+    setDraft({
+      name: order.customer?.name && !isWalkInStr(order.customer.name) ? String(order.customer.name) : "",
+      phone: String(order.customer?.phone || order.phone || order.duePhone || ""),
+      payment: String(order.payment || (order.paymentStatus === "due" ? "due" : "cash")),
+    });
+    setStatusMenuOpen(Boolean(openStatusOnOpen));
+  }, [order.id, order.customer?.name, order.customer?.phone, order.payment, openStatusOnOpen]);
+
+  const save = async () => {
+    if (!editable || saving) return;
+    setSaving(true);
+    try {
+      await onSaveDetails(order, draft);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const itemSubtotal = (order.items || []).reduce((sum, item) => sum + (Number(item.price) || 0) * (Number(item.qty) || 0), 0);
+  const subtotal = Number(order.subtotal) || itemSubtotal;
+  const tax = Number(order.gstAmount) || 0;
+  const billDiscount = Number(order.billDiscount) || 0;
+  const cashDiscount = Number(order.cashDiscount) || 0;
+  const discount = billDiscount + cashDiscount;
+  const discountLabel = order.billDiscount != null || order.cashDiscount != null
+    ? inr(discount)
+    : order.discount != null ? `${Number(order.discount) || 0}%` : inr(0);
+  const statusName = orderStatusLabel(order.status);
+
+  return (
+    <div className={`ep-order-drawer-overlay${isMobile ? " is-mobile" : ""}`} onClick={onClose}>
+      <section className="ep-order-drawer" role="dialog" aria-modal="true" aria-label="Order details" onClick={event => event.stopPropagation()}>
+        <header className="ep-order-drawer__header">
+          <div>
+            <div className="ep-order-drawer__eyebrow">ORDER DETAILS</div>
+            <h2>#{order.id?.slice(1, 9).toUpperCase()}</h2>
+            <div className="ep-order-drawer__badges">
+              <TypeBadge type={type} />
+              <span>{order.orderType === "parcel" ? "Take away / delivery" : `Table ${order.table || "—"}`}</span>
+            </div>
+          </div>
+          <button type="button" className="ep-order-drawer__close" aria-label="Close order details" onClick={onClose}>×</button>
+        </header>
+        <div className="ep-order-drawer__body">
+          <div className="ep-order-drawer__meta">
+            <div><span>Time</span><strong>{createdAt ? new Date(createdAt).toLocaleString("en-IN") : "—"}</strong></div>
+            <div><span>Customer</span><strong>{customerName || customerPhone || "Walk-in"}</strong></div>
+            <div><span>Phone</span><strong>{customerPhone || "—"}</strong></div>
+            <div><span>Created by</span><strong>{order.waiter || "—"}</strong></div>
+          </div>
+
+          <div className="ep-order-drawer__status-row">
+            <strong>Status</strong>
+            <div className="ep-order-drawer__status-control">
+              <button type="button" className="ep-order-drawer__status-trigger" disabled={!editable}
+                aria-expanded={statusMenuOpen} onClick={() => setStatusMenuOpen(open => !open)}>
+                <StatusBadge status={badgeStatus} /> <span aria-hidden="true">⌄</span>
+              </button>
+              {statusMenuOpen && (
+                <div className="ep-order-drawer__status-menu">
+                  {statusOptions.map(option => (
+                    <button type="button" key={option.value} disabled={option.value === order.status}
+                      onClick={() => {
+                        setStatusMenuOpen(false);
+                        if (option.value === "cancelled") onCancel(order);
+                        else if (option.value !== order.status) onAdvance(order);
+                      }}>{option.label}</button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <span className="ep-order-drawer__status-label">{statusName}</span>
+          </div>
+
+          <div className="ep-order-drawer__section">
+            <h3>Items ({(order.items || []).length})</h3>
+            {(order.items || []).map((item, index) => (
+              <div className="ep-order-drawer__item" key={`${item.name}-${index}`}>
+                <span>{item.qty} × {item.name}</span>
+                <span>{inr((Number(item.price) || 0) * (Number(item.qty) || 0))}</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="ep-order-drawer__totals">
+            <div><span>Subtotal</span><strong>{inr(subtotal)}</strong></div>
+            <div><span>Tax</span><strong>{inr(tax)}</strong></div>
+            <div><span>Discount</span><strong>−{discountLabel}</strong></div>
+            <div className="is-total"><span>Final total</span><strong>{inr(order.finalTotal || 0)}</strong></div>
+          </div>
+          <div className="ep-order-drawer__payment">
+            <span>Payment mode</span>
+            <strong>{String(order.payment || (order.paymentStatus === "due" ? "due" : paid ? "paid" : "pending")).toUpperCase()}</strong>
+            <span className={`ep-order-drawer__payment-state${paid ? " is-paid" : cancelled ? " is-cancelled" : ""}`}>{paid ? "PAID" : cancelled ? "CANCELLED" : order.paymentStatus === "due" ? "DUE" : "PENDING"}</span>
+          </div>
+
+          <div className="ep-order-drawer__section">
+            <h3>Customer & payment</h3>
+            {editable ? (
+              <div className="ep-order-drawer__edit-grid">
+                <label>Name<input value={draft.name} maxLength={80} onChange={event => setDraft(value => ({ ...value, name: event.target.value }))} placeholder="Customer name" /></label>
+                <label>Phone<input value={draft.phone} maxLength={20} onChange={event => setDraft(value => ({ ...value, phone: event.target.value }))} placeholder="Phone number" /></label>
+                <label>Payment mode
+                  <select value={draft.payment} onChange={event => setDraft(value => ({ ...value, payment: event.target.value }))}>
+                    {draft.payment === "due" && <option value="due">Due</option>}
+                    <option value="cash">Cash</option><option value="upi">UPI</option><option value="card">Card</option>
+                  </select>
+                </label>
+                <SecondaryButton className="ep-order-drawer__save" disabled={saving} onClick={save}>{saving ? "Saving…" : "Save details"}</SecondaryButton>
+              </div>
+            ) : (
+              <p className="ep-order-drawer__readonly">{customerName || customerPhone || "Walk-in"}{customerName && customerPhone ? ` · ${customerPhone}` : ""} · {String(order.payment || (order.paymentStatus === "due" ? "due" : paid ? "paid" : "pending")).toUpperCase()}</p>
+            )}
+          </div>
+        </div>
+        <footer className="ep-order-drawer__actions">
+          {!cancelled && (
+            <PrimaryButton onClick={() => { onClose(); if (paid) printBill(order); else onEditBill(order); }}>Bill / Paid</PrimaryButton>
+          )}
+          {!cancelled && !paid && <SecondaryButton onClick={() => onPay(order)}>Paid</SecondaryButton>}
+          {!cancelled && isActiveOrder(order) && <SecondaryButton onClick={() => { onClose(); onAddMore(order); }}>+ Add Items</SecondaryButton>}
+          {!cancelled && <SecondaryButton onClick={() => printKOT(order)}>KOT</SecondaryButton>}
+          {!cancelled && <SecondaryButton onClick={() => whatsappBill(order)}>WhatsApp</SecondaryButton>}
+          {!cancelled && <SecondaryButton className="ep-order-drawer__cancel" onClick={() => onCancel(order)}>Cancel</SecondaryButton>}
+        </footer>
+      </section>
+    </div>
+  );
+}
+
 // ===========================================================================
 // ORDERS VIEW (with optimistic update + toast)
 // ===========================================================================
-function OrdersView({ C, isMobile, orders, menu, waiterName, isOwner, filter, setFilter, rangeStart, rangeEnd, setOrdersRange, setOrders, onPaidSuccess, onAddMore, onEditBill }) {
+function OrdersView({ C, isMobile, orders, menu, waiterName, isOwner, filter, setFilter, rangeStart, rangeEnd, setOrdersRange, setOrders, onPaidSuccess, onAddMore, onEditBill, visible = true, detailOrderId, statusMenuOrderId, onOpenOrder, onCloseOrder }) {
   const toast = useToast();
   const haptic = useHaptic();
   const defaultStart = useMemo(() => { const d = new Date(); d.setHours(0,0,0,0); return d.getTime(); }, []);
@@ -1711,10 +1891,8 @@ function OrdersView({ C, isMobile, orders, menu, waiterName, isOwner, filter, se
   const start = rangeStart ?? defaultStart;
   const end = rangeEnd ?? Date.now();
   const rangeAll = orders.filter(o => {
-    // FIX: 12 ghante se purane orders staff ko mat dikhao (Dashboard/Orders tab me)
-    const age = Date.now() - (o.createdAt || 0);
-    if (age > 12 * 60 * 60 * 1000) return false; 
-    if (o.createdAt < start || o.createdAt >= end) return false;
+    const createdAt = toMillis(o.createdAt);
+    if (createdAt < start || createdAt >= end) return false;
     if (filter === "cancelled") return o.status === "cancelled";
     return o.status !== "cancelled";
   });
@@ -1739,14 +1917,17 @@ function OrdersView({ C, isMobile, orders, menu, waiterName, isOwner, filter, se
     const searchData = [
       order.id,
       custLabel(order),
-      order.customer?.phone,
+      order.customer?.phone || order.phone || order.duePhone,
       order.waiter,
       order.table,
       ...(order.items || []).map(item => item.name),
     ].join(" ").toLowerCase();
     return searchData.includes(searchNeedle);
   });
-  const metricOrders = orders.filter(order => order.createdAt >= start && order.createdAt < end);
+  const metricOrders = orders.filter(order => {
+    const createdAt = toMillis(order.createdAt);
+    return createdAt >= start && createdAt < end;
+  });
   const metrics = getOrderMetrics(metricOrders);
   const totalOrders = metricOrders.filter(order => order.status !== "cancelled").length;
   const completedOrders = metricOrders.filter(order => order.status === "served").length;
@@ -1765,6 +1946,7 @@ function OrdersView({ C, isMobile, orders, menu, waiterName, isOwner, filter, se
   const pageOrders = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
   const firstPageNumber = Math.max(1, Math.min(currentPage - 2, pageCount - 4));
   const pageNumbers = Array.from({ length: Math.min(5, pageCount) }, (_, index) => firstPageNumber + index);
+  const detailOrder = orders.find(order => order.id === detailOrderId) || null;
   useEffect(() => { setPage(1); }, [filter, typeFilter, searchText, start, end]);
 
   const advanceOrder = async (order) => {
@@ -1853,11 +2035,34 @@ function OrdersView({ C, isMobile, orders, menu, waiterName, isOwner, filter, se
     }
   };
 
+  const saveOrderDetails = async (order, draft) => {
+    if (order.paid || PAID_STATUSES.includes(order.paymentStatus) || order.status === "cancelled") {
+      toast("Paid/cancelled order details edit nahi ho sakte", "warning");
+      return;
+    }
+    if (!["cash", "upi", "card", "due"].includes(draft.payment)) {
+      toast("Payment mode valid nahi hai", "warning");
+      return;
+    }
+    const patch = {
+      "customer.name": String(draft.name || "").trim(),
+      "customer.phone": String(draft.phone || "").trim(),
+    };
+    if (draft.payment !== String(order.payment || (order.paymentStatus === "due" ? "due" : "cash"))) patch.payment = draft.payment;
+    try {
+      await updateDoc(doc(db, "orders", order.id), patch);
+      toast("Order details updated", "success");
+    } catch (e) {
+      toast(e.message, "error");
+    }
+  };
+
   const filterLabel = filter === "cancelled" ? "Cancelled" : filter.charAt(0).toUpperCase() + filter.slice(1);
   const exportCsv = () => exportOrdersCsv(filtered, rangeLabel);
 
   return (
-    <section className="ep-orders">
+    <>
+    <section className="ep-orders" style={{ display: visible ? undefined : "none" }}>
       <header className="ep-orders__header">
         <div className="ep-orders__title">
           <p>ORDER MANAGEMENT</p>
@@ -1883,40 +2088,9 @@ function OrdersView({ C, isMobile, orders, menu, waiterName, isOwner, filter, se
           </div>
           <SecondaryButton className="ep-orders__export" onClick={exportCsv}>↓ Export</SecondaryButton>
         </div>
-        {payFor && (
-          <ModalShell C={C} open onClose={() => { setPayFor(null); setSplitCash(""); }} isMobile={isMobile} title="Payment mode" icon="💰" maxWidth={340}>
-            <div style={{ fontSize: 13, color: C.gray, marginBottom: 14 }}>{payFor.orderType === "parcel" ? "Parcel" : "Table " + payFor.table} - {inr(payFor.finalTotal || 0)}</div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-              {[["cash", "Cash", C.green], ["upi", "UPI", C.blue], ["card", "Card", C.amber]].map(([m, l, c]) => (
-                <button key={m} onClick={() => { const o = payFor; setPayFor(null); markPaidWith(o, m); }} style={{ padding: "14px 4px", border: "none", borderRadius: 10, background: c, color: "#fff", fontWeight: 800, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}>{l}</button>
-              ))}
-            </div>
-            <div style={{ marginTop: 10, padding: 10, border: `1px solid ${C.line}`, borderRadius: 10, background: C.cardAlt }}>
-              <div style={{ fontSize: 11, color: C.gray, fontWeight: 800, marginBottom: 8 }}>CASH + ONLINE SPLIT</div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <label style={{ flex: 1, fontSize: 10, color: C.gray, fontWeight: 800 }}>Cash
-                  <input aria-label="Split cash amount" type="number" min={0} max={Number(payFor.finalTotal) || 0} value={splitCash} onChange={(e) => setSplitCash(e.target.value)} placeholder="₹" style={{ display: "block", width: "100%", boxSizing: "border-box", marginTop: 4, padding: "9px 8px", border: `1px solid ${C.line}`, borderRadius: 7, background: C.card, color: C.ink, fontWeight: 800 }} />
-                </label>
-                <div style={{ flex: 1, fontSize: 10, color: C.gray, fontWeight: 800 }}>Online / UPI
-                  <div style={{ marginTop: 4, padding: "10px 8px", border: `1px solid ${C.line}`, borderRadius: 7, background: C.card, color: C.ink, fontWeight: 900, fontFamily: "monospace" }}>
-                    {inr(splitPayment(payFor.finalTotal, splitCash).online)}
-                  </div>
-                </div>
-              </div>
-              <button onClick={() => {
-                const o = payFor;
-                const breakdown = splitPayment(o.finalTotal, splitCash);
-                if (breakdown.cash <= 0 || breakdown.online <= 0) { toast("Cash aur online dono amount bharo", "warning"); return; }
-                setPayFor(null); setSplitCash(""); markPaidWith(o, "split", breakdown);
-              }} disabled={!Number.isFinite(Number(splitCash)) || Number(splitCash) <= 0 || Number(splitCash) >= Number(payFor.finalTotal)} style={{ width: "100%", marginTop: 8, padding: 11, border: "none", borderRadius: 8, background: C.gold, color: "#fff", fontWeight: 900, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
-                Confirm Split Payment
-              </button>
-            </div>
-          </ModalShell>
-        )}
         </header>
       <nav className="ep-orders__type-filters" aria-label="Order type">
-        {[["all", "All Orders"], ["dine_in", "Dine In"], ["takeaway", "Take Away"], ["delivery", "Delivery"], ["table", "Table"]].map(([value, label]) => (
+        {[["all", "All"], ["dine_in", "Dine In"], ["takeaway", "Take Away"], ["delivery", "Delivery"], ["table", "Table"]].map(([value, label]) => (
           <Chip key={value} active={typeFilter === value} onClick={() => { haptic(); setTypeFilter(value); }}>{label}</Chip>
         ))}
       </nav>
@@ -1947,11 +2121,14 @@ function OrdersView({ C, isMobile, orders, menu, waiterName, isOwner, filter, se
               const badgeStatus = order.status === "new" ? "pending"
                 : order.status === "served" ? "completed"
                 : order.status === "out_for_delivery" ? "ready" : order.status;
-              const name = custLabel(order) || "Walk-in";
+              const rowCustomerName = order.customer?.name && !isWalkInStr(order.customer.name) ? String(order.customer.name).trim() : "";
+              const rowPhone = String(order.customer?.phone || order.phone || order.duePhone || "").trim();
+              const name = rowCustomerName || (isWalkInStr(rowPhone) ? "" : rowPhone) || "Walk-in";
               const createdAt = toMillis(order.createdAt);
               return (
                 <React.Fragment key={order.id}>
-                  <tr>
+                  <tr className="ep-orders__row" tabIndex={0} onClick={() => { haptic(); onOpenOrder(order); }}
+                    onKeyDown={event => { if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); onOpenOrder(order); } }}>
                     <td><strong className="ep-orders__id">#{order.id?.slice(1, 9).toUpperCase()}</strong></td>
                     <td>
                       <div className="ep-orders__customer">
@@ -1964,10 +2141,10 @@ function OrdersView({ C, isMobile, orders, menu, waiterName, isOwner, filter, se
                     <td>{createdAt ? new Date(createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "—"}</td>
                     <td><span className={`ep-orders__payment${order.paid ? " is-paid" : ""}`}>{order.payment ? order.payment.toUpperCase() : order.paid ? "PAID" : "PENDING"}</span></td>
                     <td><strong className="ep-orders__amount">{inr(order.finalTotal || 0)}</strong></td>
-                    <td><StatusBadge status={badgeStatus} /></td>
+                    <td><button type="button" className="ep-orders__status-button" onClick={event => { event.stopPropagation(); onOpenOrder(order, true); }} aria-label={`Change status for order ${order.id}`}><StatusBadge status={badgeStatus} /></button></td>
                     <td>
-                      <div className="ep-orders__row-actions">
-                        <IconButton title="View order" aria-label={`View order ${order.id}`} onClick={() => { haptic(); setOpenId(openId === order.id ? null : order.id); }}>👁</IconButton>
+                      <div className="ep-orders__row-actions" onClick={event => event.stopPropagation()}>
+                        <IconButton title="View order" aria-label={`View order ${order.id}`} onClick={() => { haptic(); onOpenOrder(order); }}>👁</IconButton>
                         <IconButton title="Print KOT" aria-label={`Print KOT for ${order.id}`} disabled={order.status === "cancelled"} onClick={() => printKOT(order)}>🖨</IconButton>
                       </div>
                     </td>
@@ -2067,6 +2244,46 @@ function OrdersView({ C, isMobile, orders, menu, waiterName, isOwner, filter, se
         })}
       </div>
     </section>
+    {payFor && (
+      <ModalShell C={C} open onClose={() => { setPayFor(null); setSplitCash(""); }} isMobile={isMobile} title="Payment mode" icon="💰" maxWidth={340}>
+        <div style={{ fontSize: 13, color: C.gray, marginBottom: 14 }}>{payFor.orderType === "parcel" ? "Parcel" : "Table " + payFor.table} - {inr(payFor.finalTotal || 0)}</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+          {[["cash", "Cash", C.green], ["upi", "UPI", C.blue], ["card", "Card", C.amber]].map(([m, l, c]) => (
+            <button key={m} onClick={() => { const o = payFor; setPayFor(null); markPaidWith(o, m); }} style={{ padding: "14px 4px", border: "none", borderRadius: 10, background: c, color: "#fff", fontWeight: 800, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}>{l}</button>
+          ))}
+        </div>
+        <div style={{ marginTop: 10, padding: 10, border: `1px solid ${C.line}`, borderRadius: 10, background: C.cardAlt }}>
+          <div style={{ fontSize: 11, color: C.gray, fontWeight: 800, marginBottom: 8 }}>CASH + ONLINE SPLIT</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <label style={{ flex: 1, fontSize: 10, color: C.gray, fontWeight: 800 }}>Cash
+              <input aria-label="Split cash amount" type="number" min={0} max={Number(payFor.finalTotal) || 0} value={splitCash} onChange={(e) => setSplitCash(e.target.value)} placeholder="₹" style={{ display: "block", width: "100%", boxSizing: "border-box", marginTop: 4, padding: "9px 8px", border: `1px solid ${C.line}`, borderRadius: 7, background: C.card, color: C.ink, fontWeight: 800 }} />
+            </label>
+            <div style={{ flex: 1, fontSize: 10, color: C.gray, fontWeight: 800 }}>Online / UPI
+              <div style={{ marginTop: 4, padding: "10px 8px", border: `1px solid ${C.line}`, borderRadius: 7, background: C.card, color: C.ink, fontWeight: 900, fontFamily: "monospace" }}>
+                {inr(splitPayment(payFor.finalTotal, splitCash).online)}
+              </div>
+            </div>
+          </div>
+          <button onClick={() => {
+            const o = payFor;
+            const breakdown = splitPayment(o.finalTotal, splitCash);
+            if (breakdown.cash <= 0 || breakdown.online <= 0) { toast("Cash aur online dono amount bharo", "warning"); return; }
+            setPayFor(null); setSplitCash(""); markPaidWith(o, "split", breakdown);
+          }} disabled={!Number.isFinite(Number(splitCash)) || Number(splitCash) <= 0 || Number(splitCash) >= Number(payFor.finalTotal)} style={{ width: "100%", marginTop: 8, padding: 11, border: "none", borderRadius: 8, background: C.gold, color: "#fff", fontWeight: 900, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
+            Confirm Split Payment
+          </button>
+        </div>
+      </ModalShell>
+    )}
+    {detailOrder && <OrderDetailDrawer
+      isMobile={isMobile} order={detailOrder} isOwner={isOwner} openStatusOnOpen={statusMenuOrderId === detailOrder.id}
+      onClose={onCloseOrder} onAdvance={advanceOrder} onCancel={voidOrder}
+      onPay={order => setPayFor(order)}
+      onAddMore={order => onAddMore && onAddMore(order)}
+      onEditBill={order => onEditBill && onEditBill(order)}
+      onSaveDetails={saveOrderDetails}
+    />}
+    </>
   );
 }
 

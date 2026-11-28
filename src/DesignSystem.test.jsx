@@ -14,12 +14,14 @@ describe("shared design system components", () => {
     const markup = renderToStaticMarkup(
       <>
         <StatusBadge status="Reserved" kind="table" />
+        <StatusBadge status="new" />
         <StatusBadge status="Preparing" />
         <TypeBadge type="Take Away" />
       </>,
     );
 
     expect(markup).toContain("ep-ds-status--reserved");
+    expect(markup).toContain(">New</span>");
     expect(markup).toContain("ep-ds-status--preparing");
     expect(markup).toContain("ep-ds-type--take-away");
   });

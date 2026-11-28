@@ -6,6 +6,7 @@ const statusStyles = {
     cleaning: ["cleaning", "Cleaning"],
   },
   order: {
+    new: ["pending", "New"],
     preparing: ["preparing", "Preparing"],
     pending: ["pending", "Pending"],
     ready: ["ready", "Ready"],
