@@ -2701,6 +2701,9 @@ function OrdersView({ C, isMobile, orders, menu, waiterName, isOwner, filter, se
               const rowPhone = String(order.customer?.phone || order.phone || order.duePhone || "").trim();
               const name = rowCustomerName || (isWalkInStr(rowPhone) ? "" : rowPhone) || "Walk-in";
               const createdAt = toMillis(order.createdAt);
+              const displayAmount = order.paymentStatus === "due" && !order.paid
+                ? outstandingDue(order)
+                : Number(order.finalTotal) || 0;
               return (
                 <React.Fragment key={order.id}>
                   <tr className="ep-orders__row" tabIndex={0} onClick={() => openOrderScreen(order)}
@@ -2719,7 +2722,10 @@ function OrdersView({ C, isMobile, orders, menu, waiterName, isOwner, filter, se
                       <span className={`ep-orders__payment${paymentLabel === "Paid" ? " is-paid" : ""}`} style={paymentTone}>{paymentLabel}</span>
                       {order.payment && <small style={{ marginLeft: 5, color: C.gray, fontSize: 9, fontWeight: 700 }}>{order.payment.toUpperCase()}</small>}
                     </td>
-                    <td><strong className="ep-orders__amount">{inr(order.finalTotal || 0)}</strong></td>
+                    <td>
+                      <strong className="ep-orders__amount">{inr(displayAmount)}</strong>
+                      {order.paymentStatus === "due" && !order.paid && <small style={{ display: "block", color: C.gray, fontSize: 9 }}>due balance</small>}
+                    </td>
                     <td><button type="button" className="ep-orders__status-button" onClick={event => { event.stopPropagation(); onOpenOrder(order, true); }} aria-label={`Change status for order ${order.id}`}><OrderStatusBadge C={C} status={order.status} /></button></td>
                     <td>
                       <div className="ep-orders__row-actions" onClick={event => event.stopPropagation()}>
