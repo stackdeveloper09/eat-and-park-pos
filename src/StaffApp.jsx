@@ -9,7 +9,7 @@ import { ADMIN_ROLES, normalizeRole } from "./lib/roles";
 import { assertEditable, resolveVendorId } from "./lib/guards";
 import { PAID_STATUSES, OPEN_WINDOW_MS, isOpenParcel, isOpenDineIn, isActiveOrder, paidOrders, paidRevenue, getOrderMetrics, buildPaidPatch, isDeliveryOrder, nextKitchenStatus } from "./lib/orderRules";
 import { Chip, StatusBadge, TypeBadge, PrimaryButton, SecondaryButton, IconButton, KpiCard } from "./DesignSystem";
-import { paymentBreakdown, partialPayment, splitPayment, outstandingDue } from "./lib/billing";
+import { paymentBreakdown, partialPayment, splitPayment, outstandingDue, collectedAmount } from "./lib/billing";
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged, setPersistence, browserLocalPersistence } from "firebase/auth";
 import {
   collection, doc, setDoc, onSnapshot, getDoc, updateDoc, addDoc,
@@ -534,6 +534,7 @@ const getOrderMetricsForUI = (orders) => {
   const list = Array.isArray(orders) ? orders : [];
   return {
     ...getOrderMetrics(list),
+    revenue: list.reduce((total, order) => total + collectedAmount(order), 0),
     unpaidOrders: list.filter(order =>
       !order.paid &&
       !PAID_STATUSES.includes(order.paymentStatus) &&
@@ -1486,7 +1487,7 @@ function StaffAppInner() {
   const allOrderMetrics = getOrderMetricsForUI(orders);
   const unpaidOrderCount = allOrderMetrics.unpaidOrders.length;
   const startOfToday = new Date(); startOfToday.setHours(0,0,0,0);
-  const todayRevenue = getOrderMetrics(orders.filter(o => o.createdAt >= startOfToday.getTime())).revenue;
+  const todayRevenue = getOrderMetricsForUI(orders.filter(o => o.createdAt >= startOfToday.getTime())).revenue;
 
   return (
     <div className="ep-shell" style={{ minHeight: "100dvh", background: C.bg, fontFamily: "system-ui, sans-serif", display: "flex", flexDirection: "row", color: C.ink }}>
@@ -1656,7 +1657,7 @@ function StaffAppInner() {
         {activeTab === "history" && <HistoryView C={C} isMobile={isMobile} isOwner={isOwner} />}
         {activeTab === "audit" && <AuditLogView C={C} isMobile={isMobile} />}
         {activeTab === "expenses" && <ExpensesView C={C} isMobile={isMobile} isOwner={isOwner} waiterName={waiterName} />}
-        {activeTab === "reports" && <ReportsView C={C} isMobile={isMobile} isOwner={isOwner} waiterName={waiterName} menu={menu} />}
+        {activeTab === "reports" && <ReportsView C={C} isMobile={isMobile} isOwner={isOwner} waiterName={waiterName} menu={menu} dueOrders={dueOrders} />}
         {activeTab === "attendance" && <AttendanceView C={C} isMobile={isMobile} isOwner={isOwner} />}
         {activeTab === "import" && <ImportView C={C} isMobile={isMobile} isOwner={isOwner} waiterName={waiterName} onDone={() => {}} />}
         {activeTab === "customers" && <CustomersView C={C} isMobile={isMobile} isOwner={isOwner} waiterName={waiterName} orders={orders} loyaltyUsers={loyaltyUsers} />}
@@ -2995,7 +2996,7 @@ function DashboardView({ C, isMobile, orders, dueOrders, menu, lowItems = [], on
   const todayTotal = filtered.filter(o => o.status !== "cancelled").length;
   const paidCount = metrics.paidCount;
   const unpaidCount = metrics.unpaidOrders.length;
-  const avgOrder = paidCount ? Math.round(todayRevenue / paidCount) : 0;
+  const avgOrder = paidCount ? Math.round(getOrderMetrics(filtered).revenue / paidCount) : 0;
   const statusCounts = { new: 0, preparing: 0, ready: 0, served: 0 };
   filtered.forEach(o => { if (statusCounts[o.status] !== undefined) statusCounts[o.status]++; });
   const recentOrders = [...filtered].filter(o => o.status !== "cancelled").sort((a, b) => b.createdAt - a.createdAt).slice(0, 20);
@@ -4465,6 +4466,7 @@ const logAudit = async (action, details = {}) => {
 function ReportsExtra({ C, isMobile, orders, rangeLabel }) {
   const valid = orders.filter(o => o.status !== "cancelled");
   const paidOrders = valid.filter(o => o.paid);
+  const collectedOrders = valid.filter(o => collectedAmount(o) > 0);
   const itemMap = {};
   paidOrders.forEach(o => (o.items || []).forEach(it => {
     const k = it.name + (it.portion ? ` (${it.portion})` : "");
@@ -4475,12 +4477,12 @@ function ReportsExtra({ C, isMobile, orders, rangeLabel }) {
   const topItems = Object.entries(itemMap).sort((a, b) => b[1].qty - a[1].qty).slice(0, 10);
   const maxQty = topItems.length ? topItems[0][1].qty : 1;
   const pay = { cash: 0, upi: 0, card: 0, split: 0 };
-  paidOrders.forEach(o => {
+  collectedOrders.forEach(o => {
     const breakdown = paymentBreakdown(o);
     Object.keys(pay).forEach((mode) => { pay[mode] += breakdown[mode]; });
   });
   const dueTotal = valid.filter(o => o.paymentStatus === "due" && !o.paid).reduce((s, o) => s + outstandingDue(o), 0);
-  const collected = paidOrders.reduce((s, o) => s + (Number(o.finalTotal) || 0), 0);
+  const collected = collectedOrders.reduce((s, o) => s + collectedAmount(o), 0);
   const cancelled = orders.length - valid.length;
 
   const exportCsv = () => exportOrdersCsv(orders, rangeLabel);
@@ -5341,9 +5343,10 @@ function calcStats(orders, expenses, menu = []) {
   const valid = orders.filter((o) => o.status !== "cancelled");
   const paid = valid.filter((o) => o.paid);
   const duePending = sum(valid.filter((o) => o.paymentStatus === "due" && !o.paid), outstandingDue);
-  const revenue = sum(paid, (o) => o.finalTotal);
+  const collectedOrders = valid.filter((order) => collectedAmount(order) > 0);
+  const revenue = sum(valid, collectedAmount);
   const pay = { cash: 0, upi: 0, card: 0, split: 0 };
-  paid.forEach((o) => {
+  collectedOrders.forEach((o) => {
     const breakdown = paymentBreakdown(o);
     Object.keys(pay).forEach((mode) => { pay[mode] += breakdown[mode]; });
   });
@@ -5356,7 +5359,7 @@ function calcStats(orders, expenses, menu = []) {
   const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
   const dayMap = {};
   const dayOf = (k) => { if (!dayMap[k]) dayMap[k] = { date: k, orders: 0, revenue: 0, expense: 0 }; return dayMap[k]; };
-  valid.forEach((o) => { const d = dayOf(invDateKey(new Date(o.createdAt || 0))); d.orders++; if (o.paid) d.revenue += Number(o.finalTotal) || 0; });
+  valid.forEach((o) => { const d = dayOf(invDateKey(new Date(o.createdAt || 0))); d.orders++; d.revenue += collectedAmount(o); });
   expenses.forEach((e) => { if (e.date) dayOf(e.date).expense += Number(e.amount) || 0; });
   const daily = Object.values(dayMap).sort((a, b) => (a.date < b.date ? -1 : 1)).map((d) => ({ ...d, profit: d.revenue - d.expense }));
   const itemMap = {};
@@ -5381,9 +5384,9 @@ function calcStats(orders, expenses, menu = []) {
   paid.forEach((o) => { const w = o.waiter || "Staff"; if (!wMap[w]) wMap[w] = { name: w, orders: 0, amt: 0 }; wMap[w].orders++; wMap[w].amt += Number(o.finalTotal) || 0; });
   const waiters = Object.values(wMap).sort((a, b) => b.amt - a.amt);
   return {
-    valid, paid, revenue, pay, duePending, expTotal, catRows, categorySales, saman, profit, margin, daily, items, waiters,
+    valid, paid, collectedOrders, revenue, pay, duePending, expTotal, catRows, categorySales, saman, profit, margin, daily, items, waiters,
     cancelled: orders.length - valid.length,
-    avg: paid.length ? Math.round(revenue / paid.length) : 0,
+    avg: paid.length ? Math.round(sum(paid, (o) => o.finalTotal) / paid.length) : 0,
     discount: sum(paid, (o) => o.billDiscount),
     gst: sum(paid, (o) => o.gstAmount),
   };
@@ -6057,7 +6060,7 @@ function AttendanceView({ C, isMobile, isOwner }) {
 // ---------------------------------------------------------------------------
 // REPORTS: PROFIT / LOSS + DOWNLOAD + DAY CLOSE
 // ---------------------------------------------------------------------------
-function ReportsView({ C, isMobile, isOwner, waiterName, menu = [] }) {
+function ReportsView({ C, isMobile, isOwner, waiterName, menu = [], dueOrders = [] }) {
   const toast = useToast();
   const haptic = useHaptic();
   const G = goldOf(C);
@@ -6119,7 +6122,7 @@ function ReportsView({ C, isMobile, isOwner, waiterName, menu = [] }) {
     downloadXls("EatPark-PnL-" + from + "_" + to + ".xls", [
       { name: "Summary", rows: [
         [RESTAURANT.name + " - Profit & Loss"], ["Period", rangeLabel], [],
-        ["Revenue (paid)", s.revenue], ["Kharcha", s.expTotal], ["Net Profit", s.profit], ["Margin %", Math.round(s.margin * 10) / 10], [],
+        ["Revenue collected", s.revenue], ["Kharcha", s.expTotal], ["Net Profit", s.profit], ["Margin %", Math.round(s.margin * 10) / 10], [],
         ["Orders (cancelled nahi)", s.valid.length], ["Paid orders", s.paid.length], ["Avg bill", s.avg], ["Discount diya", s.discount], ["GST", s.gst],
         ["Due baaki", s.duePending], ["Cancelled orders", s.cancelled], [],
         ["Cash", s.pay.cash], ["UPI", s.pay.upi], ["Card", s.pay.card], ["Split (unallocated)", s.pay.split],
@@ -6139,7 +6142,7 @@ function ReportsView({ C, isMobile, isOwner, waiterName, menu = [] }) {
     const s = stats;
     const row = (k, v, b) => "<tr><td>" + (b ? "<b>" + k + "</b>" : k) + "</td><td style='text-align:right'>" + (b ? "<b>" + v + "</b>" : v) + "</td></tr>";
     const body = "<h1>" + esc(RESTAURANT.name) + "</h1><div class='sub'>Profit &amp; Loss - " + esc(rangeLabel) + "</div>" +
-      "<table>" + row("Revenue (paid)", rs(s.revenue)) + row("Kharcha", rs(s.expTotal)) + row(s.profit >= 0 ? "NET PROFIT" : "NET LOSS", rs(Math.abs(s.profit)), true) + row("Margin", (Math.round(s.margin * 10) / 10) + "%") + "</table>" +
+      "<table>" + row("Revenue collected", rs(s.revenue)) + row("Kharcha", rs(s.expTotal)) + row(s.profit >= 0 ? "NET PROFIT" : "NET LOSS", rs(Math.abs(s.profit)), true) + row("Margin", (Math.round(s.margin * 10) / 10) + "%") + "</table>" +
       "<h3>Payment</h3><table>" + row("Cash", rs(s.pay.cash)) + row("UPI", rs(s.pay.upi)) + row("Card", rs(s.pay.card)) + row("Split (unallocated)", rs(s.pay.split)) + row("Due baaki", rs(s.duePending)) + row("Discount diya", rs(s.discount)) + row("GST", rs(s.gst)) + "</table>" +
       "<h3>Kharcha (category)</h3><table>" + (s.catRows.map(([c, v]) => row(esc(c), rs(v))).join("") || row("-", "-")) + "</table>" +
       "<h3>Bikri (category)</h3><table>" + (s.categorySales.map((c) => row(esc(c.category), c.qty + " pcs / " + rs(c.amt))).join("") || row("-", "-")) + "</table>" +
@@ -6182,6 +6185,13 @@ function ReportsView({ C, isMobile, isOwner, waiterName, menu = [] }) {
       const paidSnap = await getDocs(query(collection(db, "orders"), where("paidAt", ">=", t0), where("paidAt", "<", t0 + 86400000)));
       paymentsToday = paidSnap.docs.map((d) => d.data()).filter((x) => x.paid && x.status !== "cancelled");
     } catch (e) { toast("Aaj ka cash load nahi hua, Day Close roka gaya: " + e.message, "error"); return; }
+    const duePaymentsToday = dueOrders.filter(order => {
+      const receivedAt = toMillis(order.dueAt);
+      return !order.paid && order.status !== "cancelled" &&
+        order.paymentStatus === "due" && collectedAmount(order) > 0 &&
+        receivedAt >= t0 && receivedAt < t0 + 86400000;
+    });
+    paymentsToday = [...paymentsToday, ...duePaymentsToday];
     const paidTodayTotals = paymentsToday.reduce((totals, order) => {
       const breakdown = paymentBreakdown(order);
       Object.keys(totals).forEach((mode) => { totals[mode] += breakdown[mode]; });
@@ -6250,7 +6260,7 @@ function ReportsView({ C, isMobile, isOwner, waiterName, menu = [] }) {
       {!loading && (
         <>
           <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, 1fr)", gap: isMobile ? 10 : 14, marginBottom: 16 }}>
-            <StatCard C={C} isMobile={isMobile} label="Revenue" value={inr(s.revenue)} color={C.green} sub={s.paid.length + " paid orders"} />
+            <StatCard C={C} isMobile={isMobile} label="Revenue" value={inr(s.revenue)} color={C.green} sub={s.collectedOrders.length + " orders with payments"} />
             <StatCard C={C} isMobile={isMobile} label="Kharcha" value={inr(s.expTotal)} color={C.red} sub={expenses.length + " entries"} />
             <StatCard C={C} isMobile={isMobile} label={s.profit >= 0 ? "Net Profit" : "Net Loss"} value={(s.profit < 0 ? "-" : "") + inr(Math.abs(s.profit))} color={s.profit >= 0 ? C.green : C.red} sub={"Margin " + (Math.round(s.margin * 10) / 10) + "%"} />
             <StatCard C={C} isMobile={isMobile} label="Due baaki" value={inr(s.duePending)} color={C.amber} sub={"Avg bill " + inr(s.avg)} />

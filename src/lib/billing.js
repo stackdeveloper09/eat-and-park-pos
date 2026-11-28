@@ -34,6 +34,12 @@ export function outstandingDue(order) {
   return Number.isFinite(total) ? Math.max(0, total) : 0;
 }
 
+export function collectedAmount(order) {
+  if (!order || order.status === "cancelled") return 0;
+  const amount = Number(order.paid ? order.finalTotal : order.paymentStatus === "due" ? order.amountPaid : 0);
+  return Number.isFinite(amount) ? Math.max(0, amount) : 0;
+}
+
 export function paymentBreakdown(order) {
   const parsedTotal = Number(order.paymentStatus === "due" && order.amountPaid != null ? order.amountPaid : order.finalTotal);
   const total = Number.isFinite(parsedTotal) ? Math.max(0, parsedTotal) : 0;

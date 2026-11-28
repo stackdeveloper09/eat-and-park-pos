@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { outstandingDue, partialPayment, paymentBreakdown, splitPayment } from "./billing.js";
+import { collectedAmount, outstandingDue, partialPayment, paymentBreakdown, splitPayment } from "./billing.js";
 
 describe("outstandingDue", () => {
   test("uses the remaining balance when a partial payment was recorded", () => {
@@ -12,6 +12,18 @@ describe("outstandingDue", () => {
 
   test("does not return a negative due balance", () => {
     expect(outstandingDue({ finalTotal: 7509, amountDue: -1 })).toBe(0);
+  });
+});
+
+describe("collectedAmount", () => {
+  test("counts money collected against a remaining due balance", () => {
+    expect(collectedAmount({ finalTotal: 7509, amountPaid: 6000, amountDue: 1509, paymentStatus: "due" })).toBe(6000);
+  });
+
+  test("counts fully paid bills and ignores unpaid or cancelled bills", () => {
+    expect(collectedAmount({ finalTotal: 7509, paid: true })).toBe(7509);
+    expect(collectedAmount({ finalTotal: 7509, paid: false, paymentStatus: "pending" })).toBe(0);
+    expect(collectedAmount({ finalTotal: 7509, amountPaid: 6000, paymentStatus: "due", status: "cancelled" })).toBe(0);
   });
 });
 
